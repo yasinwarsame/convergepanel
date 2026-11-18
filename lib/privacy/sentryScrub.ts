@@ -88,11 +88,15 @@ export function scrubSentryBreadcrumb<B>(breadcrumb: B): B {
 }
 
 /**
- * Replay `beforeAddRecordingEvent` body. Recording events (rrweb meta
- * `href`, full/incremental DOM snapshot `href` attributes, performance-span
- * and breadcrumb custom events) never pass through `beforeSend` or event
- * processors, so URLs in them must be scrubbed here. DOM snapshots are deep,
- * hence the larger depth bound.
+ * Replay `beforeAddRecordingEvent` body. Recording events never pass through
+ * `beforeSend` or event processors. The SDK calls this hook for CUSTOM events
+ * only (breadcrumb and performance-span payloads, e.g. `navigation.push`
+ * `data.from` / `data.to` / `data.previous`), so URLs in those are scrubbed
+ * here. R5 correction: the rrweb meta event `href` and full/incremental DOM
+ * snapshots are NOT passed to this hook — they are protected only by the
+ * address bar already being clean when Sentry.init starts Replay
+ * (lib/privacy/preTelemetryUrlScrub.ts). The larger depth bound is kept for
+ * deep custom payloads.
  */
 export function scrubReplayRecordingEvent<R>(recordingEvent: R): R {
   if (!recordingEvent || typeof recordingEvent !== "object") return recordingEvent;

@@ -189,7 +189,7 @@ describe("browser Sentry — Replay and the shared event processor", () => {
     expect(initConfig.replaysOnErrorSampleRate).toBe(1.0);
   });
 
-  it("beforeAddRecordingEvent scrubs rrweb meta href, DOM href attributes, and performance-span / breadcrumb URLs", () => {
+  it("scrubReplayRecordingEvent scrubs every URL shape it is given (NB R5: the SDK passes it CUSTOM events only — rrweb meta href / DOM snapshots never reach it and rely on the pre-init URL scrub)", () => {
     load();
     const meta = { type: 4, timestamp: 1, data: { href: `https://convergepanel.com/verify?text=${enc}`, width: 1, height: 1 } };
     const snapshot = {

@@ -199,10 +199,18 @@ describe("C2 §G T7 — the /verify producer still encodes its claim exactly onc
   it("does not decode its own already-decoded search params", () => {
     // It reads `text` via searchParams.get() and uses it as-is: the same contract
     // this phase restores on the receiving side.
-    // PR #329 R3: `text` is read by the hand-off capture (URLSearchParams on the query and the fragment) and used as-is.
-    expect(HANDOFF_SOURCE).toContain("params.get(VERIFY_TEXT_PARAM)");
+    // PR #329 R5: the capture now goes through the shared pre-telemetry scrub (lib/privacy/urlContentScrub.ts), which
+    // decodes each content value exactly ONCE, as URLSearchParams would. Pinned by behaviour: an already-encoded
+    // literal ("%20" typed by the user, sent as %2520) is handed off as "%20", never decoded a second time.
     expect(VERIFY_SOURCE).not.toContain("decodeURIComponent");
     expect(HANDOFF_SOURCE).not.toContain("decodeURIComponent");
+    const prefill = require("@/lib/client/verifyPrefill");
+    prefill.__resetTabHandoffMemoryForTests();
+    const loc = { pathname: "/verify", search: "?text=50%2520off%20%26%20more", hash: "" };
+    const expected = new URLSearchParams(loc.search).get("text");
+    const captured = prefill.capturePendingVerifyInput({ location: loc, history: null, storage: null, currentUid: null });
+    expect(captured).toBe("50%20off & more");
+    expect(captured).toBe(expected);
   });
 });
 

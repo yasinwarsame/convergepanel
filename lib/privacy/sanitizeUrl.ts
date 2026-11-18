@@ -22,56 +22,17 @@
  * returned byte-for-byte unchanged and relative URLs need no base.
  */
 
+import { SAFE_QUERY_PARAM_SHAPES, isSafeParamValue } from "./urlParamRules";
+
 export const REDACTED = "[redacted]";
 
-// R3 (review MINOR): campaign values are human-readable ("Black Friday", "Spring Sale: 20% off"). The value is
-// checked DECODED ("+" and %-escapes already turned into characters): printable letters / digits / spaces and
-// common punctuation, at most 100 characters, no control characters. utm_* names are marketer-controlled.
-const UTM_VALUE = /^[\p{L}\p{N} _.,:;!?'&()+%\/|#@-]{1,100}$/u;
-const LOWER_IDENTIFIER = /^[a-z][a-z0-9_]{0,31}$/;
-const SMALL_INTEGER = /^\d{1,6}$/;
-const FLAG = /^(?:|0|1|true|false|yes|no)$/i;
-
-/**
- * Query parameters whose values may be transmitted to telemetry verbatim —
- * and only when the DECODED value matches the parameter's shape (round 2,
- * review MINOR-4: a bare name allowlist let `?tab=<claim text>` through).
- * A non-matching value is redacted like any other parameter. Adding an entry
- * is a privacy decision: the value must never be able to carry user-authored
- * content, identifiers of people, or credentials.
- */
-export const SAFE_QUERY_PARAM_SHAPES: ReadonlyMap<string, RegExp> = new Map([
-  ["utm_source", UTM_VALUE],
-  ["utm_medium", UTM_VALUE],
-  ["utm_campaign", UTM_VALUE],
-  ["utm_term", UTM_VALUE],
-  ["utm_content", UTM_VALUE],
-  // Every tab value the app routes on (main app + admin + governance). Enumerated, not a pattern.
-  ["tab", /^(?:verify|research|video|users|runs|policies|queue|audit)$/],
-  ["source", LOWER_IDENTIFIER],
-  ["view", LOWER_IDENTIFIER],
-  ["scope", LOWER_IDENTIFIER],
-  ["plan", LOWER_IDENTIFIER],
-  ["interval", LOWER_IDENTIFIER],
-  ["cycle", LOWER_IDENTIFIER],
-  ["page", SMALL_INTEGER],
-  ["limit", SMALL_INTEGER],
-  ["offset", SMALL_INTEGER],
-  ["signedOut", FLAG],
-  ["sessionClearFailed", FLAG],
-  ["success", FLAG],
-  ["canceled", FLAG],
-  ["upgraded", FLAG],
-]);
+// R5 (owner ruling): the parameter rules live in ONE module shared with the pre-telemetry address-bar scrub
+// (lib/privacy/urlContentScrub.ts). Only SAFE_QUERY_PARAM_SHAPES values are ever transmitted; routing, nested-target
+// and content parameters — and every unknown one — are redacted here.
+export { SAFE_QUERY_PARAM_SHAPES, isSafeParamValue };
 
 /** The allowlisted parameter NAMES (values are additionally shape-checked). */
 export const SAFE_QUERY_PARAMS: ReadonlySet<string> = new Set(SAFE_QUERY_PARAM_SHAPES.keys());
-
-/** True when `key` is allowlisted AND its decoded `value` has the allowed shape. */
-export function isSafeParamValue(key: string, value: string): boolean {
-  const shape = SAFE_QUERY_PARAM_SHAPES.get(key);
-  return shape !== undefined && shape.test(value);
-}
 
 const PLAIN_PARAM_NAME = /^[A-Za-z0-9_.\-[\]]{1,64}$/;
 
@@ -165,6 +126,7 @@ export function isUrlKey(key: string): boolean {
     key === "urls" ||
     key === "to" ||
     key === "from" ||
+    key === "previous" || // Replay `navigation.push` breadcrumb `data.previous` (R5)
     key === "$pathname_with_query"
   );
 }

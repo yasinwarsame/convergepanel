@@ -14,6 +14,10 @@
  * identity. Rules:
  *   - the first known identity of a page load does NOT remount (cold load:
  *     unknown -> A or unknown -> anonymous keeps whatever is on screen);
+ *   - R5 (R4 review MINOR-1): the AuthProvider's 3 s cold-load timeout is NOT
+ *     an identity (`identityProvisional`): it stays "unknown", so the persisted
+ *     account resolving after it is still the first identity (no remount, the
+ *     person's own draft is kept);
  *   - a token refresh for the same uid does not remount;
  *   - any other change (A -> B, A -> signed out, signed out -> B) remounts.
  * Only paths in IDENTITY_SCOPED_PATHS are scoped; on every other route the key
@@ -28,8 +32,8 @@ export const IDENTITY_SCOPED_PATHS: ReadonlySet<string> = new Set(["/"]);
 
 export function IdentityScopedRoute({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { authReady, user } = useAuth();
-  const identity = authReady ? (user?.uid ? `uid:${user.uid}` : "anon") : null;
+  const { authReady, user, identityProvisional } = useAuth();
+  const identity = authReady && !identityProvisional ? (user?.uid ? `uid:${user.uid}` : "anon") : null;
   const scoped = pathname !== null && IDENTITY_SCOPED_PATHS.has(pathname);
   const [scope, setScope] = useState<{ last: string | null; generation: number }>({ last: null, generation: 0 });
   let current = scope;

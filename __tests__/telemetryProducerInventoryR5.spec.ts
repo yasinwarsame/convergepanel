@@ -148,6 +148,24 @@ d("real posthog-js + Sentry (Replay forced): every producer-inventory URL shape"
           await run.page.waitForTimeout(6_000); // Replay's first segment flush (min delay 5 s) + PostHog batch (3 s)
           const atInit: Array<{ href: string; referrer: string }> = await run.page.evaluate(() => (window as any).__cpAtInit ?? []);
           const href = await run.page.evaluate(() => window.location.href);
+          // What the SDKs persisted (posthog-js keeps `$initial_person_info` {u: initial URL, r: referrer} in its
+          // `ph_…` cookie / localStorage, window/session ids in sessionStorage). The app's own hand-off records
+          // (`convergePanel*` keys) hold the moved claim by design and are excluded.
+          const persisted: string = await run.page.evaluate(() => {
+            let out = "";
+            for (const name of ["localStorage", "sessionStorage"] as const) {
+              try {
+                const st = window[name];
+                for (let i = 0; i < st.length; i++) {
+                  const k = st.key(i)!;
+                  if (!k.startsWith("convergePanel")) out += `${k}=${st.getItem(k) ?? ""};`;
+                }
+              } catch {
+                /* blocked */
+              }
+            }
+            return out + document.cookie;
+          });
           await run.page.evaluate((c) => {
             const p = (window as any).__cpProbe;
             p.posthog.capture("cp_harness_control", { probe: c });
@@ -164,6 +182,7 @@ d("real posthog-js + Sentry (Replay forced): every producer-inventory URL shape"
           expect(deepDecode(atInit[0].href)).not.toContain(SENTINEL);
           expect(deepDecode(atInit[0].referrer)).not.toContain(SENTINEL);
           expect(deepDecode(href)).not.toContain(SENTINEL);
+          expect(deepDecode(persisted)).not.toContain(SENTINEL);
           if (landing !== null) {
             const u = new URL(href);
             expect(safeRedirect(u.searchParams.get("redirect") || u.searchParams.get("next"), "/")).toBe(landing);

@@ -8,6 +8,7 @@ import { useEffect, Suspense } from "react";
 import { sanitizeUrl, sanitizeUrlsInText, scrubUrlFields } from "@/lib/privacy/sanitizeUrl";
 import { redactExceptionValue } from "@/lib/privacy/exceptionText";
 import { scrubUrlBeforeTelemetry } from "@/lib/privacy/preTelemetryUrlScrub";
+import { CONTENT_PARAMS, NESTED_TARGET_PARAMS } from "@/lib/privacy/urlParamRules";
 
 /**
  * Round 2 (review MINOR-1): query parameters PostHog's own personal-data
@@ -15,7 +16,8 @@ import { scrubUrlBeforeTelemetry } from "@/lib/privacy/preTelemetryUrlScrub";
  * (`$initial_person_info`, `$client_session_props`, the `/flags` request's
  * `$initial_current_url` / `$current_url` person properties).
  */
-export const POSTHOG_CONTENT_PARAMS = ["text", "claim", "q", "question", "redirect", "next", "selectedText"];
+// R5: derived from the one shared rule source (lib/privacy/urlParamRules.ts), not a separate list.
+export const POSTHOG_CONTENT_PARAMS: string[] = [...CONTENT_PARAMS, ...NESTED_TARGET_PARAMS];
 
 /** `{ u: url, r: referrer }` (PostHog's compact person-info shape) — sanitized in place. */
 function scrubCompactPersonInfo(info: unknown): void {

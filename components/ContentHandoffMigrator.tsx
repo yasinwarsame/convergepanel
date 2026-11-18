@@ -6,7 +6,9 @@
  * moves user-authored text out of the URL into the tab-scoped hand-offs
  * (lib/client/verifyPrefill.ts) and rewrites the address bar without it:
  *   - `/verify#text=…` (extension, current) and `/verify?text=…` (legacy);
- *   - `/?tab=verify&claim=…` and `/?tab=research&q=…` (legacy links).
+ *   - `/?tab=verify&claim=…` and `/?tab=research&q=…` (legacy links);
+ *   - R5: the same nested in `?redirect=` / `?next=`, and every other
+ *     content-bearing parameter (lib/privacy/urlContentScrub.ts).
  *
  * R4 correction: this component is NOT what protects telemetry on a full page
  * load. It sits in a Suspense boundary that can hydrate after PostHog's init

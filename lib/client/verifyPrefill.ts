@@ -47,6 +47,8 @@
  *     cold load's `null` callback removes neither (review B1).
  */
 
+import { scrubUrlParts, type ContentCapture } from "@/lib/privacy/urlContentScrub";
+
 export const VERIFY_PENDING_STORAGE_KEY = "convergePanelVerifyPendingV2";
 export const APP_HANDOFF_STORAGE_KEY = "convergePanelAppHandoffV1";
 /** Round-1 key (raw string, no expiry). Removed on sight; never read. */
@@ -100,21 +102,29 @@ function safeGet(storage: StorageLike | null | undefined, key: string): string |
     return null;
   }
 }
+/** R5 (R4 review NIT): one probe per storage object — the result is the /verify `useSyncExternalStore` snapshot. */
+const usableCache = new WeakMap<object, boolean>();
 /**
  * True when this tab's sessionStorage can actually hold a hand-off (a probe
  * write succeeds). False when it is unavailable, throws, or refuses writes —
- * /verify then shows the paste-manually notice. Never throws.
+ * /verify then shows the paste-manually notice. Probed once per storage object
+ * (R5: it is called on every render). Never throws.
  */
 export function isTabStorageUsable(storage: StorageLike | null | undefined = tabStorage()): boolean {
   if (!storage) return false;
+  const cached = usableCache.get(storage);
+  if (cached !== undefined) return cached;
   const probe = "convergePanelStorageProbe";
+  let usable: boolean;
   try {
     storage.setItem(probe, "1");
     storage.removeItem(probe);
-    return true;
+    usable = true;
   } catch {
-    return false;
+    usable = false;
   }
+  usableCache.set(storage, usable);
+  return usable;
 }
 
 function safeRemove(storage: StorageLike | null | undefined, key: string): void {
@@ -241,39 +251,12 @@ function stateForUrlRewrite(state: unknown): Record<string, unknown> {
   return rest;
 }
 
-/**
- * Removes the named parameters from a raw query string, keeping every other
- * parameter BYTE-FOR-BYTE and in order (R4: UTM values such as
- * `utm_campaign=Spring%20Sale` must not be re-encoded to `Spring+Sale`).
- * Returns "" or "?…".
- */
-function withoutParams(search: string, names: readonly string[]): string {
-  const raw = search.startsWith("?") ? search.slice(1) : search;
-  if (!raw) return "";
-  const kept = raw.split("&").filter((pair) => {
-    if (pair === "") return false;
-    // The pair's NAME as URLSearchParams reads it (the same parser that found the text); the pair itself is kept raw.
-    const name = Array.from(new URLSearchParams(pair).keys())[0] ?? "";
-    return !names.includes(name);
-  });
-  return kept.length ? `?${kept.join("&")}` : "";
-}
-
 /** Rewrites the address bar to `url`. Never throws. */
 function rewriteUrl(history: HistoryLike | null | undefined, url: string): void {
   try {
     history?.replaceState(stateForUrlRewrite(history.state), "", url);
   } catch {
     /* ignore */
-  }
-}
-
-function readHashText(hash: string): string | null {
-  if (!hash || hash.length < 2) return null;
-  try {
-    return new URLSearchParams(hash.slice(1)).get(VERIFY_TEXT_PARAM);
-  } catch {
-    return null;
   }
 }
 
@@ -302,38 +285,13 @@ export function pendingVerifyInputExpiresAt(storage: StorageLike | null | undefi
 
 /**
  * Captures `text` that arrived on /verify in the query (legacy extension
- * links) or the fragment (current extension). Stores it as the pending input
- * (bound to `currentUid`, or unbound when not yet known) — in sessionStorage,
- * or in this document's memory when sessionStorage is unusable — and ALWAYS
- * strips it from the address bar (R4: fail closed; the text is never left in
- * the URL "so it is not lost"). Every other parameter is kept byte-for-byte.
- * Returns the text, or null when nothing arrived. Never throws, never logs.
+ * links) or the fragment (current extension), through the shared R5 scrub
+ * contract ({@link migrateContentFromUrl}). Returns the text, or null when
+ * nothing arrived. Never throws, never logs.
  */
-export function capturePendingVerifyInput(env: {
-  location: LocationLike;
-  history: HistoryLike | null | undefined;
-  storage: StorageLike | null | undefined;
-  currentUid: string | null;
-  now?: number;
-}): string | null {
-  const now = env.now ?? Date.now();
-  const { location, history, storage, currentUid } = env;
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(location.search);
-  } catch {
-    params = new URLSearchParams();
-  }
-  const fromQuery = params.get(VERIFY_TEXT_PARAM);
-  const fromHash = readHashText(location.hash);
-  const arrived = fromQuery ?? fromHash;
-  if (arrived === null) return null;
-  // Address bar first: nothing below may leave the text in the URL.
-  rewriteUrl(history, `${location.pathname}${withoutParams(location.search, [VERIFY_TEXT_PARAM])}`);
-  if (arrived) writePending(storage, arrived, currentUid, now);
-  else removePending(storage);
-  notify();
-  return arrived.slice(0, MAX_PENDING_CHARS);
+export function capturePendingVerifyInput(env: MigrationEnv): string | null {
+  const pending = migrateUrlContent(env).find((c) => c.kind === "pending");
+  return pending ? pending.text.slice(0, MAX_PENDING_CHARS) : null;
 }
 
 /** The user edited the textarea (viewer known): keep the pending input in step; empty removes it. */
@@ -442,53 +400,64 @@ export function appHandoffHref(kind: AppHandoffKind, text: string, uid: string |
 
 /**
  * Legacy `/?tab=verify&claim=…` and `/?tab=research&q=…` links (bookmarks,
- * history, old builds): moved into the one-time hand-off and ALWAYS removed
- * from the address bar at once (tab and every other parameter kept
- * byte-for-byte). When sessionStorage is unusable the hand-off is held in this
- * document's memory (R4: never left in the URL).
+ * history, old builds), through the shared R5 scrub contract
+ * ({@link migrateContentFromUrl}). True when such a parameter was present.
  */
-export function migrateLegacyAppHandoffLink(env: {
+export function migrateLegacyAppHandoffLink(env: MigrationEnv): boolean {
+  if (env.location.pathname !== "/") return false;
+  return migrateUrlContent(env).some((c) => c.kind === "verify" || c.kind === "research");
+}
+
+type MigrationEnv = {
   location: LocationLike;
   history: HistoryLike | null | undefined;
   storage: StorageLike | null | undefined;
   currentUid: string | null;
   now?: number;
-}): boolean {
+};
+
+/**
+ * Applies the scrub contract to the CURRENT URL: rewrites the address bar
+ * first (nothing below may leave content in it), then moves the content into
+ * the tab hand-offs — the first pending input and the first hand-off of each
+ * kind — bound to `currentUid` (unbound when not yet known), in
+ * sessionStorage or this document's memory (R4). Returns the captures.
+ */
+function migrateUrlContent(env: MigrationEnv): ContentCapture[] {
   const { location, history, storage, currentUid } = env;
-  if (location.pathname !== "/") return false;
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(location.search);
-  } catch {
-    return false;
+  const result = scrubUrlParts(location);
+  if (!result.changed) return [];
+  rewriteUrl(history, `${location.pathname}${result.search}${result.hash}`);
+  const now = env.now ?? Date.now();
+  const done = new Set<string>();
+  for (const capture of result.captures) {
+    if (done.has(capture.kind)) continue;
+    done.add(capture.kind);
+    if (capture.kind === "pending") {
+      if (capture.text) writePending(storage, capture.text, currentUid, now);
+      else removePending(storage);
+    } else if (capture.text) {
+      writeAppHandoff(storage, capture.kind, capture.text, currentUid, now);
+    }
   }
-  const tab = params.get("tab");
-  const param = tab === "verify" ? "claim" : tab === "research" ? "q" : null;
-  if (!param || !params.has(param)) return false;
-  const text = params.get(param) ?? "";
-  // Address bar first: nothing below may leave the text in the URL.
-  rewriteUrl(history, `/${withoutParams(location.search, [param])}${location.hash || ""}`);
-  if (text) writeAppHandoff(storage, tab as AppHandoffKind, text, currentUid, env.now ?? Date.now());
-  return true;
+  if (result.captures.length > 0) notify();
+  return result.captures;
 }
 
 /**
- * R4: moves user-authored text out of the CURRENT URL (whatever page) into the
- * tab hand-offs and rewrites the address bar without it. Called synchronously
- * before any telemetry SDK initializes (lib/privacy/preTelemetryUrlScrub.ts)
- * and again by the layout's ContentHandoffMigrator on soft navigations.
- * Idempotent; never throws, never logs.
+ * R4/R5: makes the CURRENT URL (whatever page) satisfy the pre-telemetry scrub
+ * contract (lib/privacy/urlContentScrub.ts — rules shared with the telemetry
+ * sanitizer in lib/privacy/urlParamRules.ts): user-authored text, including
+ * text nested in `redirect=` / `next=` targets, is moved into the tab
+ * hand-offs; every other content-bearing parameter / fragment is dropped;
+ * allowlisted and routing parameters are kept byte-for-byte. Called
+ * synchronously before any telemetry SDK initializes
+ * (lib/privacy/preTelemetryUrlScrub.ts) and again by the layout's
+ * ContentHandoffMigrator on soft navigations. Idempotent; never throws, never logs.
  */
-export function migrateContentFromUrl(env: {
-  location: LocationLike;
-  history: HistoryLike | null | undefined;
-  storage: StorageLike | null | undefined;
-  currentUid: string | null;
-  now?: number;
-}): void {
+export function migrateContentFromUrl(env: MigrationEnv): void {
   try {
-    if (env.location.pathname === "/verify") capturePendingVerifyInput(env);
-    else migrateLegacyAppHandoffLink(env);
+    migrateUrlContent(env);
   } catch {
     /* never throws */
   }

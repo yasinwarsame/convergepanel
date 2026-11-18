@@ -216,8 +216,13 @@ describe("pre-init scrub: every producer in the inventory (sessionStorage workin
         const blocked = mode === "blocked";
         expect(pendingText(win, blocked)).toBe(exp.pending ?? "");
         expect(deepDecode(href(win))).not.toContain("tides");
-        expect(handoff(win, "verify", blocked)).toBe(exp.verify ?? null);
-        expect(handoff(win, "research", blocked)).toBe(exp.research ?? null);
+        // The app hand-off is one-time (consuming ANY kind removes it), so each kind is read from its own fresh load.
+        for (const kind of ["verify", "research"] as const) {
+          prefill.__resetTabHandoffMemoryForTests();
+          const fresh = makeWindow(url, { storage: mode });
+          scrubUrlBeforeTelemetry(fresh as any);
+          expect(handoff(fresh, kind, blocked)).toBe(exp[kind] ?? null);
+        }
         if (exp.landing !== undefined) {
           // The post-auth redirect (login/signup/onboarding read `redirect || next`, then safeRedirect) still lands there.
           const params = new URLSearchParams(win.location.search);
@@ -278,7 +283,6 @@ describe("pre-init scrub: explicit bounds, fail closed", () => {
 
 describe("one rule source for the telemetry sanitizer and the pre-init scrub", () => {
   it("lib/privacy/urlParamRules exports the shared registry and the sanitizer uses it", () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const rules = require("@/lib/privacy/urlParamRules");
     expect(rules.SAFE_QUERY_PARAM_SHAPES).toBeDefined();
     expect(Array.from(rules.SAFE_QUERY_PARAM_SHAPES.keys())).toEqual(Array.from(SAFE_QUERY_PARAMS));
@@ -293,13 +297,11 @@ describe("one rule source for the telemetry sanitizer and the pre-init scrub", (
     }
   });
   it("PostHog's personal-data mask list is derived from the same registry", () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const rules = require("@/lib/privacy/urlParamRules");
     jest.isolateModules(() => {
       jest.doMock("posthog-js", () => ({ __esModule: true, default: {} }));
       jest.doMock("posthog-js/react", () => ({ PostHogProvider: () => null }));
       jest.doMock("next/navigation", () => ({ usePathname: () => "/", useSearchParams: () => new URLSearchParams() }));
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { POSTHOG_CONTENT_PARAMS } = require("@/components/PostHogProvider");
       expect([...POSTHOG_CONTENT_PARAMS].sort()).toEqual([...rules.CONTENT_PARAMS, ...rules.NESTED_TARGET_PARAMS].sort());
     });
@@ -375,7 +377,6 @@ describe("property: random nesting / encoding of content inside redirect / next 
 
   for (const mode of ["normal", "blocked"] as const) {
     it(`${N} generated URLs [${mode}]: no sentinel in the address bar or referrer; only allowlisted / routing params remain; UTM byte-for-byte`, () => {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const rules = require("@/lib/privacy/urlParamRules");
       const failures: string[] = [];
       for (const c of cases) {
@@ -414,5 +415,16 @@ describe("NIT (R4 review): isTabStorageUsable is the /verify useSyncExternalStor
     for (let i = 0; i < 10; i++) expect(prefill.isTabStorageUsable(s)).toBe(false);
     expect(setItem.mock.calls.length).toBeLessThanOrEqual(1);
     expect(prefill.isTabStorageUsable(null)).toBe(false);
+  });
+});
+
+describe("R5 (orchestrator A2 finding): Replay navigation.push `data.previous` is a URL key", () => {
+  it("a navigation custom event's previous / from / to are sanitized", () => {
+    const { scrubReplayRecordingEvent } = require("@/lib/privacy/sentryScrub");
+    const dirty = `https://convergepanel.com/signup?redirect=${enc(`/verify?text=${enc(CLAIM)}`)}`;
+    const ev = { type: 5, data: { tag: "performanceSpan", payload: { op: "navigation.push", data: { previous: dirty, from: dirty, to: dirty } } } };
+    scrubReplayRecordingEvent(ev);
+    expect(deepDecode(JSON.stringify(ev))).not.toContain(SENTINEL);
+    expect(ev.data.payload.data.previous).toBe("https://convergepanel.com/signup?redirect=[redacted]");
   });
 });

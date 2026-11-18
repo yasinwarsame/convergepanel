@@ -18,9 +18,14 @@
  *      independent of whether step 1 ran first, e.g. in `next dev`, where the
  *      plugin appends instead of prepends).
  *
- * It (a) moves `#text=` / legacy `?text=` / `?claim=` / `?q=` into the tab
- * hand-offs and strips them from the address bar — fail closed when
- * sessionStorage is unusable (lib/client/verifyPrefill.ts) — and (b) replaces a
+ * It (a) applies the R5 scrub contract (lib/privacy/urlContentScrub.ts, rules
+ * shared with the telemetry sanitizer in lib/privacy/urlParamRules.ts): text in
+ * `#text=` / `?text=` / `?claim=` / `?q=` — also nested, recursively and within
+ * explicit bounds, in `redirect=` / `next=` targets — is moved into the tab
+ * hand-offs (memory hold when sessionStorage is unusable) and the nested
+ * target rewritten to its clean form; every other content-bearing parameter
+ * or fragment is dropped; allowlisted and routing parameters are kept
+ * byte-for-byte; and (b) replaces a
  * `document.referrer` that would carry content with its sanitized form
  * (fragment dropped, non-allowlisted query values redacted) so `$initial_referrer`
  * cannot carry text from a full-page navigation that left a claim URL before

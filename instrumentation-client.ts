@@ -7,10 +7,11 @@ import { resolveSentryDsn } from "./lib/telemetry/sentryDsn";
 import { scrubReplayRecordingEvent, scrubSentryBreadcrumb, scrubSentryEvent } from "./lib/privacy/sentryScrub";
 import { scrubUrlBeforeTelemetry } from "./lib/privacy/preTelemetryUrlScrub";
 
-// PR #329 R4 (review MAJOR-1): FIRST, before any SDK reads the URL. Moves claim
-// text (`#text=`, legacy `?text=` / `?claim=` / `?q=`) out of the address bar —
-// fail closed when sessionStorage is unusable — and sanitizes a content-bearing
-// referrer. Production builds prepend this file to the `main-app` entry, so it
+// PR #329 R4/R5 (review MAJOR-1): FIRST, before any SDK reads the URL. Moves claim
+// text (`#text=`, legacy `?text=` / `?claim=` / `?q=`, and the same nested in
+// `?redirect=` / `?next=`) out of the address bar and drops every other
+// content-bearing parameter — fail closed when sessionStorage is unusable — and
+// sanitizes a content-bearing referrer. Production builds prepend this file to the `main-app` entry, so it
 // runs before React hydrates and therefore before PostHog's init effect too.
 scrubUrlBeforeTelemetry();
 
@@ -34,9 +35,12 @@ if (dsn !== undefined) {
         blockAllMedia: true,
         // No network request/response bodies or headers in replays.
         networkDetailAllowUrls: [],
-        // Recording events (rrweb meta `href`, DOM `href` attributes,
-        // navigation/fetch performance spans) bypass beforeSend and event
-        // processors entirely — scrub their URLs here.
+        // Applies to Replay CUSTOM events only (breadcrumb / performance-span
+        // payloads, e.g. `navigation.push` `data.from|to|previous`). The rrweb
+        // meta event `href` and the full/incremental DOM snapshots do NOT pass
+        // through this hook (R5 correction): their only protection is that the
+        // URL is already clean when Sentry.init starts Replay — see
+        // scrubUrlBeforeTelemetry() above.
         beforeAddRecordingEvent: scrubReplayRecordingEvent,
       }),
     ],
