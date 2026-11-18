@@ -191,6 +191,29 @@ describe("POST /api/auth/session", () => {
     });
   });
 
+  it("never logs the ID token or a provider error message (code only), on every failure path", async () => {
+    const TOKEN = "eyJhbGciOiJSUzI1NiJ9.SECRET-PAYLOAD.sig";
+    const leaky = (code: string) => Object.assign(new Error(`bad token ${TOKEN} for user@example.com`), { code });
+    const paths: Array<() => void> = [
+      () => mockVerifyIdToken.mockRejectedValue(leaky("auth/id-token-revoked")),
+      () => mockVerifyIdToken.mockRejectedValue(leaky("auth/user-disabled")),
+      () => mockVerifyIdToken.mockRejectedValue(leaky("app/network-error")),
+      () => {
+        mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
+        mockCreateSessionCookie.mockRejectedValue(leaky("auth/invalid-id-token"));
+      },
+    ];
+    for (const arrange of paths) {
+      jest.clearAllMocks();
+      arrange();
+      await POST(postRequest({ idToken: TOKEN }));
+      const logged = JSON.stringify([...mockLoggerError.mock.calls, ...mockLogAuthSessionEvent.mock.calls]);
+      expect(logged).not.toContain("SECRET-PAYLOAD");
+      expect(logged).not.toContain("user@example.com");
+      expect(logged).not.toContain("bad token");
+    }
+  });
+
   it("ignores a client-supplied uid in the request body entirely", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "server-verified-uid" });
     mockCreateSessionCookie.mockResolvedValue("cookie");

@@ -126,7 +126,8 @@ export async function POST(request: NextRequest) {
   try {
     sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
   } catch (err) {
-    logger.error("[auth-session] POST failed: session cookie creation threw", { message: err instanceof Error ? err.message : String(err) });
+    // Code only: a provider error message may echo request content (the ID token); never log it.
+    logger.error("[auth-session] POST failed: session cookie creation threw", { errorCode: errorCodeOf(err) });
     logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "cookie_creation_failed" });
     return noStore(NextResponse.json({ error: "Failed to create session" }, { status: 500 }));
   }
