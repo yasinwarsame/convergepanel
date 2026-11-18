@@ -12,10 +12,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth } from "@/lib/firebase/admin";
+import { adminAuth as firebaseAdminAuth } from "@/lib/firebase/admin";
 import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
 import { logAuthSessionEvent } from "@/lib/authTelemetry";
 import { logger } from "@/lib/logger";
+import { startVerificationDeadline, type VerificationOutcome } from "@/lib/auth/authVerificationDeadline";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -79,6 +80,8 @@ export async function POST(request: NextRequest) {
     return noStore(NextResponse.json({ error: "ID token is required" }, { status: 400 }));
   }
 
+  // A local const: its null-check narrowing also holds inside the deadline closures below.
+  const adminAuth = firebaseAdminAuth;
   if (!adminAuth) {
     logger.error("[auth-session] POST failed: Firebase Admin Auth is not initialized");
     return noStore(NextResponse.json({ error: "Authentication service unavailable" }, { status: 500 }));
@@ -96,42 +99,76 @@ export async function POST(request: NextRequest) {
   // its own in the SDK — so a still-unexpired ID token of a revoked or disabled
   // identity would be exchanged for a fresh five-day cookie. Downstream cookie
   // verifiers re-check both on every request, but the mint itself must refuse.
-  let decodedUid: string;
+  //
+  // R5 (deadline): the live read and the cookie creation are each an Identity
+  // Toolkit round trip, and firebase-admin has no per-call timeout we can set
+  // (a hung upstream held this route ~132 s). Both run under ONE end-to-end
+  // deadline (AUTH_VERIFICATION_DEADLINE_MS, shared with resolveRequestIdentity,
+  // including its per-instance cap on abandoned verifications). A call still
+  // pending at the deadline — or refused at the cap — answers the same 503 as a
+  // verifier outage; a result that arrives later is never read, so a late valid
+  // verification can never reach createSessionCookie and a late cookie is never set.
+  const deadline = startVerificationDeadline("session_mint");
   try {
-    const decoded = await adminAuth.verifyIdToken(idToken, true);
-    if (typeof decoded?.uid !== "string" || decoded.uid === "") {
-      throw Object.assign(new Error("decoded token has no uid"), { code: "auth/invalid-id-token" });
+    const verified = await deadline.run(() => adminAuth.verifyIdToken(idToken, true));
+    if (verified.kind === "deadline" || verified.kind === "capped") {
+      return verificationUnavailable("identity verification unavailable", verified.kind);
     }
-    decodedUid = decoded.uid;
-  } catch (err) {
-    const code = errorCodeOf(err);
-    if (TRANSIENT_VERIFY_CODES.has(code)) {
-      // The verifier could not run (Auth backend / network) — not a verdict on
-      // the credential. Fail closed with 503 so no cookie is minted, but do not
-      // tell the client its token is bad.
-      logger.error("[auth-session] POST failed: identity verification unavailable", { errorCode: code });
-      logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
-      return noStore(NextResponse.json({ error: "Authentication service unavailable" }, { status: 503 }));
+    let decodedUid: string;
+    try {
+      if (verified.kind === "rejected") throw verified.error;
+      const decoded = verified.value;
+      if (typeof decoded?.uid !== "string" || decoded.uid === "") {
+        throw Object.assign(new Error("decoded token has no uid"), { code: "auth/invalid-id-token" });
+      }
+      decodedUid = decoded.uid;
+    } catch (err) {
+      const code = errorCodeOf(err);
+      if (TRANSIENT_VERIFY_CODES.has(code)) {
+        // The verifier could not run (Auth backend / network) — not a verdict on
+        // the credential. Fail closed with 503 so no cookie is minted, but do not
+        // tell the client its token is bad.
+        logger.error("[auth-session] POST failed: identity verification unavailable", { errorCode: code });
+        logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
+        return noStore(NextResponse.json({ error: "Authentication service unavailable" }, { status: 503 }));
+      }
+      // Disabled and revoked are deliberately indistinguishable from an invalid
+      // token in the response body (no account-state disclosure); the category
+      // is recorded server-side only.
+      const failureCategory =
+        code === "auth/user-disabled" ? "account_disabled" : code.includes("revoked") ? "revoked_token" : "invalid_token";
+      logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory });
+      return noStore(NextResponse.json({ error: "Invalid or expired token" }, { status: 401 }));
     }
-    // Disabled and revoked are deliberately indistinguishable from an invalid
-    // token in the response body (no account-state disclosure); the category
-    // is recorded server-side only.
-    const failureCategory =
-      code === "auth/user-disabled" ? "account_disabled" : code.includes("revoked") ? "revoked_token" : "invalid_token";
-    logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory });
-    return noStore(NextResponse.json({ error: "Invalid or expired token" }, { status: 401 }));
-  }
 
-  let sessionCookie: string;
-  try {
-    sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
-  } catch (err) {
-    // Code only: a provider error message may echo request content (the ID token); never log it.
-    logger.error("[auth-session] POST failed: session cookie creation threw", { errorCode: errorCodeOf(err) });
-    logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "cookie_creation_failed" });
-    return noStore(NextResponse.json({ error: "Failed to create session" }, { status: 500 }));
+    const created = await deadline.run(() => adminAuth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS }));
+    if (created.kind === "deadline" || created.kind === "capped") {
+      return verificationUnavailable("session cookie creation unavailable", created.kind);
+    }
+    if (created.kind === "rejected") {
+      // Code only: a provider error message may echo request content (the ID token); never log it.
+      logger.error("[auth-session] POST failed: session cookie creation threw", { errorCode: errorCodeOf(created.error) });
+      logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "cookie_creation_failed" });
+      return noStore(NextResponse.json({ error: "Failed to create session" }, { status: 500 }));
+    }
+    return mintedResponse(decodedUid, created.value);
+  } finally {
+    deadline.dispose();
   }
+}
 
+/**
+ * The deadline / cap answer: the route's existing verifier-outage 503 (same
+ * body and telemetry category). The cut-off itself is logged by the deadline
+ * module (`[auth-verification] deadline_exceeded` / `abandoned_cap_refused`).
+ */
+function verificationUnavailable(step: string, cause: Exclude<VerificationOutcome<unknown>["kind"], "fulfilled" | "rejected">): NextResponse {
+  logger.error(`[auth-session] POST failed: ${step}`, { cause });
+  logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
+  return noStore(NextResponse.json({ error: "Authentication service unavailable" }, { status: 503 }));
+}
+
+function mintedResponse(decodedUid: string, sessionCookie: string): NextResponse {
   const response = NextResponse.json({ authenticated: true, uid: decodedUid });
   response.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
     ...SESSION_COOKIE_BASE_ATTRS,

@@ -176,7 +176,7 @@ describe("abandoned-verification accounting", () => {
       hung.shift()!.reject(Object.assign(new Error("socket hang up"), { code: "app/network-error" }));
       hung.shift()!.reject(new Error("anything"));
       await jest.advanceTimersByTimeAsync(0);
-      await new Promise((r) => setImmediate(r));
+      await jest.advanceTimersByTimeAsync(0);
       expect(abandonedAuthVerificationsInFlight()).toBe(0);
       expect(unhandled).not.toHaveBeenCalled();
     } finally {

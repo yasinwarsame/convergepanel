@@ -37,6 +37,7 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
 import { verifyIdToken } from "@/lib/firebase/auth";
+import { startVerificationDeadline, type VerificationDeadline, type VerificationOutcome } from "./authVerificationDeadline";
 
 export type RequestIdentitySource = "session_cookie" | "bearer_token" | "matching_cookie_and_bearer";
 
@@ -54,33 +55,15 @@ export type RequestIdentityUnauthenticatedReason =
   | "auth_unavailable";
 
 /**
- * R4o C1 — END-TO-END deadline for credential verification, per request,
- * covering every presented credential (cookie and bearer are verified
- * concurrently, so one deadline bounds both).
- *
- * Why it exists: with `checkRevoked`, firebase-admin 12.7.0 makes a live
- * Identity Toolkit `getUser` read. If that service accepts the connection and
- * never answers, the SDK makes 5 attempts (defaultRetryConfig: 4 retries on
- * ETIMEDOUT/ECONNRESET/503) at its fixed 25 s request timeout — about 132 s —
- * and a 503 carrying `Retry-After` can stretch each wait to 60 s. The SDK
- * exposes no per-call AbortSignal and no Auth retry/timeout option
- * (AuthHttpClient is built with defaultRetryConfig and the hard-coded
- * FIREBASE_AUTH_TIMEOUT; `httpAgent` cannot change either), so the
- * verification is RACED against this deadline. The late SDK promise is
- * abandoned: it may keep its socket until the SDK gives up, but its result is
- * ignored — the decision is final when the deadline fires.
- *
- * Why 10 s: the production function budget is Vercel Pro + Fluid, 300 s
- * default (no vercel.json override; the research routes set maxDuration 300
- * and reserve their own retry budget), and 15 s would be the non-Fluid Pro
- * default — 10 s is inside both. A healthy check is one getUser round trip
- * (sub-second); the SDK's own retry sequence for a fast-failing 503 or reset
- * is 0 + 1 + 2 + 4 s ≈ 7 s, which still completes inside 10 s and so keeps the
- * SDK's own error classification. Anything longer is an outage, answered
- * `auth_unavailable` (503 at the wrappers that already answer it, 401
- * elsewhere) — never an allow.
+ * R4o C1 / R5 C — END-TO-END deadline for credential verification, per
+ * request, covering every presented credential (cookie and bearer are
+ * verified concurrently, so one deadline bounds both), plus the per-instance
+ * cap on verifications abandoned at that deadline. Both live in
+ * `./authVerificationDeadline` (shared with the session mint, POST
+ * /api/auth/session); the rationale for 10 s and for the cap is there.
+ * Re-exported here for existing importers.
  */
-export const AUTH_VERIFICATION_DEADLINE_MS = 10_000;
+export { AUTH_VERIFICATION_DEADLINE_MS } from "./authVerificationDeadline";
 
 export type RequestIdentityResult =
   | { status: "authenticated"; uid: string; source: RequestIdentitySource }
@@ -177,6 +160,29 @@ function classifyVerificationError(err: unknown, kind: "cookie" | "bearer"): Req
 }
 
 /**
+ * What a credential slot becomes when its verification is still pending at the
+ * deadline, or was refused at the abandoned-verification cap: the verifier
+ * could not answer in time — `auth_unavailable`, never an allow. Frozen.
+ */
+export const DEADLINE_EXCEEDED: CredentialCheck = Object.freeze({ present: true, ok: false, reason: "auth_unavailable" } as const);
+
+function credentialOutcome<T>(
+  outcome: VerificationOutcome<T>,
+  onValue: (value: T) => CredentialCheck,
+  kind: "cookie" | "bearer"
+): CredentialCheck {
+  switch (outcome.kind) {
+    case "fulfilled":
+      return onValue(outcome.value);
+    case "rejected":
+      return { present: true, ok: false, reason: classifyVerificationError(outcome.error, kind) };
+    default:
+      // "deadline" | "capped" — the log line distinguishing them is written by the deadline module.
+      return DEADLINE_EXCEEDED;
+  }
+}
+
+/**
  * `verifySessionCookie()`'s own contract already distinguishes "absent"
  * (returns `null`) from "present but invalid/expired/revoked" (throws) —
  * deliberately relied on directly here rather than duplicating a raw
@@ -184,30 +190,26 @@ function classifyVerificationError(err: unknown, kind: "cookie" | "bearer"): Req
  * redundant and (if it read the raw request instead of trusting this
  * function's own return) diverge from what every existing caller already
  * mocks `verifySessionCookie` to represent.
+ *
+ * (R5: the raw cookie is read below ONLY to decide whether this check can go
+ * upstream, i.e. whether the abandoned-verification cap applies — never to
+ * decide present/absent, which stays verifySessionCookie's own answer.)
  */
-/** What a credential slot becomes when its verification is still pending at the deadline. */
-const DEADLINE_EXCEEDED: CredentialCheck = { present: true, ok: false, reason: "auth_unavailable" };
-
-async function checkCookie(request: NextRequest): Promise<CredentialCheck> {
-  try {
-    const auth = await verifySessionCookie(request);
-    if (auth) return { present: true, ok: true, uid: auth.uid };
-    return { present: false };
-  } catch (err) {
-    return { present: true, ok: false, reason: classifyVerificationError(err, "cookie") };
-  }
+async function checkCookie(request: NextRequest, deadline: VerificationDeadline): Promise<CredentialCheck> {
+  // Only a presented cookie can make an upstream call; without one,
+  // verifySessionCookie answers `null` locally, so it is not subject to the cap
+  // (a request with no credential must still answer missing_credentials).
+  const presented = Boolean(request.cookies.get("__session")?.value);
+  const outcome = await deadline.run(() => verifySessionCookie(request), { upstream: presented });
+  return credentialOutcome(outcome, (auth) => (auth ? { present: true, ok: true, uid: auth.uid } : { present: false }), "cookie");
 }
 
-async function checkBearer(request: NextRequest): Promise<CredentialCheck> {
+async function checkBearer(request: NextRequest, deadline: VerificationDeadline): Promise<CredentialCheck> {
   const { present, token } = extractBearerToken(request);
   if (!present) return { present: false };
   if (!token) return { present: true, ok: false, reason: "invalid_bearer_token" };
-  try {
-    const decoded = await verifyIdToken(token);
-    return { present: true, ok: true, uid: decoded.uid };
-  } catch (err) {
-    return { present: true, ok: false, reason: classifyVerificationError(err, "bearer") };
-  }
+  const outcome = await deadline.run(() => verifyIdToken(token));
+  return credentialOutcome(outcome, (decoded) => ({ present: true, ok: true, uid: decoded.uid }), "bearer");
 }
 
 /**
@@ -245,24 +247,19 @@ export async function resolveRequestIdentity(request: NextRequest): Promise<Requ
   // every cookie+bearer request. Neither check can reject (each catches its
   // own verification error), so Promise.all never short-circuits a decision.
   //
-  // Each check is raced against ONE per-request deadline (see
-  // AUTH_VERIFICATION_DEADLINE_MS): a slot still pending when it fires becomes
-  // `auth_unavailable`, and the truth table below decides once — a result that
-  // arrives later is never read. The timer is per request (no shared state
+  // Each check runs against ONE per-request deadline (AUTH_VERIFICATION_DEADLINE_MS,
+  // ./authVerificationDeadline): a slot still pending when it fires — or refused
+  // because the instance is at its abandoned-verification cap — becomes
+  // `auth_unavailable`, and the truth table below decides once; a result that
+  // arrives later is never read. The deadline is per request (no shared timer
   // between concurrent requests) and is always cleared.
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<CredentialCheck>((resolve) => {
-    timer = setTimeout(() => resolve(DEADLINE_EXCEEDED), AUTH_VERIFICATION_DEADLINE_MS);
-  });
+  const deadline = startVerificationDeadline("request_identity");
   let cookie: CredentialCheck;
   let bearer: CredentialCheck;
   try {
-    [cookie, bearer] = await Promise.all([
-      Promise.race([checkCookie(request), deadline]),
-      Promise.race([checkBearer(request), deadline]),
-    ]);
+    [cookie, bearer] = await Promise.all([checkCookie(request, deadline), checkBearer(request, deadline)]);
   } finally {
-    clearTimeout(timer);
+    deadline.dispose();
   }
 
   if (!cookie.present && !bearer.present) {

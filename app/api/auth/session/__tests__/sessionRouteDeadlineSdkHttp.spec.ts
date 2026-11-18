@@ -16,7 +16,9 @@ import type { AddressInfo, Socket } from "node:net";
 
 type Mode = "ok" | "hang" | "late-valid";
 const mockState: { lookup: Mode; create: Mode; auth: unknown } = { lookup: "ok", create: "ok", auth: null };
-const hits = { lookup: 0, create: 0 };
+/** Upstream hits per (endpoint, uid) — each test uses its own uid, so abandoned retries from an earlier test never count. */
+const hitMap = new Map<string, number>();
+const hitsOf = (uid: string) => ({ lookup: hitMap.get(`lookup:${uid}`) ?? 0, create: hitMap.get(`create:${uid}`) ?? 0 });
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminAuth() {
@@ -57,18 +59,22 @@ beforeAll(async () => {
       const isLookup = url.includes("accounts:lookup");
       const isCreate = url.includes(":createSessionCookie");
       if (!isLookup && !isCreate) return void res.writeHead(404).end();
-      let uid = "u";
+      let uid = "?";
       try {
-        uid = String(JSON.parse(Buffer.concat(chunks).toString("utf8")).localId?.[0] ?? "u");
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        uid = isLookup
+          ? String(body.localId?.[0])
+          : String(JSON.parse(Buffer.from(String(body.idToken).split(".")[1], "base64url").toString("utf8")).sub);
       } catch {
-        /* default */
+        /* counted under "?" */
       }
       const ok = () =>
         res
           .writeHead(200, { "content-type": "application/json" })
           .end(isLookup ? record(uid) : JSON.stringify({ sessionCookie: "minted-session-cookie" }));
       const mode = isLookup ? mockState.lookup : mockState.create;
-      hits[isLookup ? "lookup" : "create"]++;
+      const key = `${isLookup ? "lookup" : "create"}:${uid}`;
+      hitMap.set(key, (hitMap.get(key) ?? 0) + 1);
       if (mode === "hang") return;
       if (mode === "late-valid") {
         const t = setTimeout(ok, 12_000);
@@ -102,8 +108,6 @@ beforeAll(async () => {
 beforeEach(() => {
   mockState.lookup = "ok";
   mockState.create = "ok";
-  hits.lookup = 0;
-  hits.create = 0;
 });
 afterEach(() => {
   mockState.lookup = "ok";
@@ -135,7 +139,7 @@ it("ANCHOR: through the same local edge a healthy login mints a cookie (lookup +
   const { value: res, ms } = await timed(() => post("ok-user"));
   expect(res.status).toBe(200);
   expect(res.cookies.get("__session")?.value).toBe("minted-session-cookie");
-  expect(hits).toEqual({ lookup: 1, create: 1 });
+  expect(hitsOf("ok-user")).toEqual({ lookup: 1, create: 1 });
   expect(ms).toBeLessThan(DEADLINE);
 });
 
@@ -147,8 +151,7 @@ it("accounts:lookup HANGS → 503 at ~10 s (not ~132 s), no Set-Cookie, createSe
   expect(res.headers.get("set-cookie")).toBeNull();
   expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
-  expect(hits.lookup).toBe(1); // the SDK really was waiting on the hung lookup
-  expect(hits.create).toBe(0);
+  expect(hitsOf("hang-user")).toEqual({ lookup: 1, create: 0 }); // the SDK really was waiting on the hung lookup
   process.stdout.write(`\nBENCH session-mint lookup-hang: ${ms}ms openSockets=${sockets.size}\n`);
 }, 30_000);
 
@@ -163,7 +166,7 @@ it("accounts:lookup answers VALID 12 s late → 503 at the deadline; the late va
   // the abandoned SDK verification really completed VALID …
   await expect(sdkCalls[before]).resolves.toMatchObject({ uid: "late-user" });
   // … and no session cookie was ever requested from upstream.
-  expect(hits.create).toBe(0);
+  expect(hitsOf("late-user")).toEqual({ lookup: 1, create: 0 });
   expect(sdkCalls).toHaveLength(before + 1);
 }, 40_000);
 
@@ -173,7 +176,7 @@ it(":createSessionCookie HANGS after a fast verification → 503 at ~10 s end-to
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: "Authentication service unavailable" });
   expect(res.headers.get("set-cookie")).toBeNull();
-  expect(hits).toEqual({ lookup: 1, create: 1 });
+  expect(hitsOf("create-hang-user")).toEqual({ lookup: 1, create: 1 });
   expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
 }, 30_000);
