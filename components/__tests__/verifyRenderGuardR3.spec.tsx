@@ -55,7 +55,6 @@ import VerifyPage from "@/app/verify/page";
 // The layout's hand-off migrator (R3). Absent before the fix: render nothing in its place.
 let Migrator: () => ReactNode = () => null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   Migrator = require("@/components/ContentHandoffMigrator").ContentHandoffMigrator;
 } catch {
   /* pre-fix tree */
