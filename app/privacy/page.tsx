@@ -12,8 +12,8 @@ export default function PrivacyPage() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
       <h1 className="text-3xl font-semibold text-cp-text mb-2">Privacy Policy</h1>
-      {/* OWNER/LEGAL VERIFY: date intentionally left unchanged in this draft. Set the real revision date only when the corrected policy is approved for publication (D-12). */}
-      <p className="text-sm text-cp-muted mb-10">Last updated: June 14, 2026</p>
+      {/* OWNER/LEGAL VERIFY (checklist PP-02): the previous date (June 14, 2026) belongs to the old text and must not be shown on this one. Set the real revision date only when the corrected policy is approved for publication (D-12). */}
+      <p className="text-sm text-cp-muted mb-10">Last updated: [REVISION DATE — OWNER VERIFY]</p>
 
       <div className="space-y-10">
         <section>
@@ -76,10 +76,13 @@ export default function PrivacyPage() {
           <p className="text-cp-muted mb-3">
             On paid plans, an excerpt of each claim or question (up to its first 200 characters) is also recorded
             in an audit log used for governance and administration, together with your account ID and, for some
-            records, your email address. When our staff delete a stored item, an audit-log entry containing a
-            similar excerpt is recorded on any plan. If your account belongs to a team, a copy of the content you
-            run is also kept for that team (see Section 8).
+            records, your email address. When our staff delete a stored claim or video verification, or change the
+            review status of a stored claim, research run or video verification, an audit-log entry containing a
+            similar excerpt (for a video, its file name) and your account email is recorded on any plan. If your
+            account belongs to a team, a copy of the content you run, together with your email address, is also
+            kept for that team (see Section 8).
           </p>
+          {/* Staff audit rows: app/api/admin/runs/[runId]/route.ts — DELETE writes the excerpt for verifications/videoVerifications only; research deletions are written redacted (:262). PATCH governance override writes auditQuestionFromDoc for all three collections (:177). Legacy team copy: lib/governance/teamGovernancePipeline.ts (userEmail + query up to 5,000 chars). */}
           <p className="text-cp-muted mb-3">
             <strong className="text-cp-text">How long we keep it.</strong> We keep stored content and account data
             until it is deleted (see Section 11). We do not currently delete it automatically after a fixed
@@ -137,11 +140,11 @@ export default function PrivacyPage() {
             <li>Debug technical issues, monitor errors and improve reliability</li>
             <li>Understand how the product is used (product analytics)</li>
             <li>
-              Send essential service emails, such as email verification, password reset, team workspace
-              invitations and payment receipts
+              Send essential service emails, such as email verification, password reset and team workspace
+              invitations
             </li>
           </ul>
-          {/* OWNER/LEGAL VERIFY: payment receipts are sent by Stripe if receipt emails are enabled in the Stripe account (account setting UNVERIFIED); the app itself sends no receipt email. */}
+          {/* OWNER VERIFY (checklist PP-11): the app sends no receipt email. Whether Stripe emails receipts depends on Stripe account settings that were not inspected, so receipts are described only conditionally, in the Stripe entry of Section 7. */}
           <p className="text-cp-muted">
             Essential service emails are part of providing the service. Product analytics are not required to
             provide the service. We do <strong className="text-cp-text">not</strong> sell your data to third
@@ -198,8 +201,8 @@ export default function PrivacyPage() {
           <p className="text-cp-muted mb-3">
             We store the analysis results, the model verdicts, the file name and the technical details above, and
             your account email with the verification. As with other content, an audit-log entry (which can
-            include the file name) may be recorded on paid plans, and a copy is kept for your team if you run it
-            in a team workspace.
+            include the file name) may be recorded on paid plans. If you run it in a team workspace, it is stored in
+            that workspace (see Section 8).
           </p>
           {/* OWNER/LEGAL VERIFY: video path from independent review (VideoUploaderSurface.tsx:217-225; app/api/verify-video/route.ts:242,327-349,501,509,596; lib/video/videoVerificationPrompt.ts:20-30; lib/video/visionCalls.ts) — not traced end to end in audit 01. Confirm stored fields in videoVerifications and audit-log contents. */}
           <p className="text-cp-muted">
@@ -232,7 +235,8 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong className="text-cp-text">Stripe:</strong> Payment processing. Stripe receives your email
-              address and your ConvergePanel account ID, and handles your payment details directly.{" "}
+              address and your ConvergePanel account ID, and handles your payment details directly. Depending on
+              our Stripe account settings, Stripe may also email you payment receipts.{" "}
               <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
                 Stripe Privacy Policy
               </a>
@@ -248,17 +252,20 @@ export default function PrivacyPage() {
             <li>
               <strong className="text-cp-text">AI Model Providers:</strong> To produce results, the text you
               submit is sent to the AI providers whose models you select: OpenAI, Anthropic, Google (Gemini API),
-              xAI (Grok) and Perplexity. Perplexity also runs a live web search based on the text you submit.
-              For Deep Research, your question and context, and all the model answers, are also sent to Google
-              (Gemini API) to classify the question, compare the answers, check for bias and coverage, and write
-              the summary report, whether or not you selected a Google model. Your Deep Research question and the
-              model answers may also be sent to OpenAI (or Anthropic, as a fallback) to produce a combined
+              xAI (Grok) and Perplexity. For Deep Research, this includes your question and any context you add
+              (the text after a line starting with &quot;Context:&quot;, including text from a file you attach).
+              Perplexity also runs a live web search based on the text you submit. For Deep Research, your
+              question and all the model answers may also be sent to Google (Gemini API) to classify the
+              question, compare the answers, check for bias and coverage, and write the summary report, whether
+              or not you selected a Google model. The context you add is not sent separately in these steps, but
+              the model answers can quote or summarize it. For Deep Research, your question, any context you add
+              and the model answers may also be sent to OpenAI (or Anthropic, as a fallback) to produce a combined
               summary, whether or not you selected those models. Video data is sent as described in Section 6. We
               do not send your name, email address or account ID to these providers. Each provider handles the
               data it receives under its own terms and may log requests under its own policies.
-              {/* OWNER/LEGAL VERIFY: Gemini auxiliary calls (classifier.ts, alignment.ts, biasDetection.ts, coverageAudit.ts, synthesisReport.ts via orchestrate.ts) run only when ADAPTIVE_SCHEMAS_ENABLED is true or the user is a canary uid (env.ts:74,92). Production value UNVERIFIED (10- A5). Keep this sentence unless confirmed off. Synthesis sends the question too (app/api/synthesize-panel/route.ts:1213,1261). */}
+              {/* Traced at cabbdbb (R4 provider-input trace; pinned by app/privacy/__tests__/privacyPolicyProviderInputs.spec.tsx). Gemini auxiliary calls: lib/adaptiveSchema/classifier.ts:298, alignment.ts:217,376, biasDetection.ts:107, coverageAudit.ts:80, synthesisReport.ts:411 — every one passes context = null; inputs are the question (run-panel/route.ts:210 splits the "Context:" section off; orchestrate.ts:348; runPanelExecution.ts:730) plus model answers/claims. They run only when ADAPTIVE_SCHEMAS_ENABLED is true or the user is a canary uid (run-panel/route.ts:231). Production value UNVERIFIED (10- A5, checklist PP-12) — keep the sentence unless confirmed off. Synthesis: app/api/synthesize-panel/route.ts:822,835 -> lib/synthesis/authoritativeRunInputs.ts:70,96 -> composeSynthesisQuestion (lib/questionContext.ts:73-74) = question + persisted context; prompts route.ts:1213,1261,1664,1702; OpenAI route.ts:1391-1402 (+ retries :1746,:1974), Anthropic fallback route.ts:231-252 called at :1492,:1806,:1961. */}
               {" "}For Deep Research, where our fallback is enabled, if a selected model is temporarily unavailable,
-              your question and context may be sent to DeepSeek instead. DeepSeek states that it processes and
+              your question and any context you add may be sent to DeepSeek instead. DeepSeek states that it processes and
               stores data in the People&apos;s Republic of China.
               {/* OWNER/LEGAL VERIFY: DeepSeek fallback (lib/panel.ts) is active only when DEEPSEEK_API_KEY is set in Production — UNKNOWN (10- A5). Default slots are OpenAI/Anthropic/Google; PANEL_DEEPSEEK_FALLBACK_FOR can change them. Keep the sentence if the key is set; remove it if the fallback is disabled. DeepSeek is not reachable from Claim Verification. */}
               {/* OWNER/LEGAL VERIFY: no training, retention, region, ZDR or DPA statements are made here on purpose (03 Part C; 10- §4). Gemini paid/unpaid tier, OpenAI/Anthropic opt-in and feedback settings, xAI ZDR status and DPAs are unverified (10- A1-A3). Links below point to API/commercial documentation where an official page was identified in 10- §4; owner to confirm each is the governing document for our accounts. Perplexity's downstream search infrastructure is UNKNOWN (10- S14, §5). */}
@@ -275,8 +282,8 @@ export default function PrivacyPage() {
           {/* OWNER/LEGAL VERIFY: Sentry and PostHog are wired in code (instrumentation-client.ts, sentry.server.config.ts, components/PostHogProvider.tsx); whether each is live in Production depends on SENTRY_DSN / NEXT_PUBLIC_SENTRY_DSN / NEXT_PUBLIC_POSTHOG_KEY (10- A5-A7). Code comments claim PostHog is not configured in Production (app/signup/page.tsx ~365; app/api/user/email-verification-telemetry/route.ts:6) — unverified; keep the disclosure until A5/A6 confirm. Wording describes current code at cabbdbb (sendDefaultPii true, no Sentry setUser; replay 5% + 100% on error; PostHog autocapture and session recording not disabled in code; full URLs incl. query). Do not narrow it until a fix (e.g. PR #329) is deployed to Production. */}
           <ul className="list-disc list-inside text-cp-muted space-y-2">
             <li>
-              <strong className="text-cp-text">Sentry:</strong> Error monitoring, and session replay for a sample of
-              sessions and for sessions in which an error occurs. Sentry receives your IP address, technical
+              <strong className="text-cp-text">Sentry:</strong> Error monitoring, performance tracing for a sample of
+              requests, and session replay for a sample of sessions and for sessions in which an error occurs. Sentry receives your IP address, technical
               details about errors, and the addresses of the pages you visit. Session replay records what happens
               on the page.{" "}
               <a href="https://sentry.io/privacy/" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
@@ -310,7 +317,7 @@ export default function PrivacyPage() {
             <li>HTTPS encryption for all data in transit</li>
             <li>Firebase security rules to prevent unauthorized access</li>
             <li>Secure authentication via Firebase Auth</li>
-            <li>Regular security updates and monitoring</li>
+            <li>Error monitoring (see Section 7)</li>
           </ul>
           <p className="text-cp-muted mb-3">
             <strong className="text-cp-text">Who can see your content.</strong> Authorized ConvergePanel staff can
@@ -369,7 +376,7 @@ export default function PrivacyPage() {
           </p>
           {/* OWNER/LEGAL VERIFY: no supervisory authority, lead authority or representative is named; counsel to decide whether one must be. */}
           <p className="text-cp-muted">
-            The app does not currently let you delete your account or individual verifications yourself, so
+            The app does not currently let you delete your account, your research or individual verifications yourself, so
             deletion requests are handled by email. Our current account deletion removes your sign-in account and
             profile. Other stored records, such as verifications, research, audit-log entries and team copies, are
             not removed automatically by that step, and copies may remain in backups, in logs, in our analytics
