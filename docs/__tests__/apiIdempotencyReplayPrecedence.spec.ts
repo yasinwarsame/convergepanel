@@ -13,6 +13,7 @@
  *      NFC-different bodies).
  */
 import * as fs from "fs";
+import { randomBytes as cryptoRandomBytes } from "crypto";
 import * as path from "path";
 import {
   ApiResponse,
@@ -1957,5 +1958,557 @@ describe("Addendum 8 E3: the acceptance identity is generated independently and 
     runToEnd(handleDelete(sys, "live1", a.body?.id as string));
     runToEnd(sweep(sys));
     expect(sys.store.get<IdemRecord>(scope)).toEqual(restored);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 9: settlement derives from durable state and committed work, never from a pending
+// cancellation or DELETE (owner rule, R4 MINOR-2). The transition table is jobs-and-idempotency.md
+// §6.3, parsed; every row is executed for every pending request it names.
+// ---------------------------------------------------------------------------------------------
+type Pending = "none" | "cancel" | "DELETE";
+interface TRow { id: string; from: string; pending: string; event: string; to: string; charged: string; released: string }
+
+function transitionTable(): TRow[] {
+  const md = fs.readFileSync(JOBS, "utf8");
+  const start = md.indexOf("### 6.3 Settlement state transitions");
+  if (start < 0) return [];
+  const sec = md.slice(start, md.indexOf("## 7. Polling"));
+  return Array.from(sec.matchAll(/^\| (T\d+) \| ([^|]+?) \| ([^|]+?) \| ([^|]+?) \| ([^|]+?) \| ([^|]+?) \| ([^|]+?) \|$/gm), (m) => ({
+    id: m[1], from: m[2], pending: m[3], event: m[4], to: m[5], charged: m[6], released: m[7],
+  }));
+}
+
+const PENDING_VOCAB: Record<string, Pending[]> = { none: ["none"], cancel: ["cancel"], DELETE: ["DELETE"], "cancel or DELETE": ["cancel", "DELETE"], any: ["none", "cancel", "DELETE"] };
+const TERMINAL_KINDS = ["completed", "partial", "failed", "canceled"] as const;
+
+interface A9Run {
+  sys: System;
+  id: string;
+  reserved: number;
+  /** The organization's balance right after the reservation (before any settlement). */
+  afterReserve: number;
+  /** Committed usable provider calls, counted by the test itself (not read from the model). */
+  usable: number;
+  /** Settlement entry before the event (terminal rows only). */
+  settledBefore?: SettleEntry;
+  stateBefore: JobState;
+  creditsBefore: number;
+}
+
+let a9Seq = 0;
+function a9Setup(from: string, pending: Pending, usable: number, failed: number, terminal: (typeof TERMINAL_KINDS)[number] = "completed"): A9Run {
+  const sys = world();
+  patchOrg(sys, { creditsRemaining: 1000 });
+  const body = { ...SAME, input: { question: `a9 ${++a9Seq}` } };
+  let id: string;
+  if (from === "queued") {
+    const res = send(sys, req(body, { idempotencyKey: `a9-${a9Seq}` }));
+    id = res.body?.id as string;
+    sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), state: "queued" });
+  } else {
+    id = runningJob(sys, [...Array(usable).fill("ok"), ...Array(failed).fill("error")], body);
+    if (from === "synthesizing") sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), state: "synthesizing" });
+  }
+  const reserved = jobOf(sys, id).credits;
+  const afterReserve = creditsOf(sys);
+  let settledBefore: SettleEntry | undefined;
+  if (from === "terminal") {
+    if (terminal === "canceled") {
+      runToEnd(handleCancel(sys, "live1", id));
+      runToEnd(workerBoundary(sys, id));
+    } else runToEnd(finishJob(sys, id, terminal, terminal === "failed" ? "insufficient_usable_models" : undefined));
+    settledBefore = { ...settleOf(sys, id) };
+  }
+  if (pending === "cancel") runToEnd(handleCancel(sys, "live1", id));
+  if (pending === "DELETE") expect(runToEnd(handleDelete(sys, "live1", id)).status).toBe(202);
+  return { sys, id, reserved, afterReserve, usable: from === "queued" ? 0 : usable, settledBefore, stateBefore: jobOf(sys, id).state, creditsBefore: creditsOf(sys) };
+}
+
+/** Applies the event named by the table's exact "Event" text. Returns false for an unknown event. */
+function a9Event(r: A9Run, event: string): boolean {
+  const { sys, id } = r;
+  const put = (p: Partial<JobDoc>): void => sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), ...p });
+  switch (event) {
+    case "cancel": runToEnd(handleCancel(sys, "live1", id)); return true;
+    case "DELETE": case "DELETE again": expect(runToEnd(handleDelete(sys, "live1", id)).status).toBe(202); return true;
+    case "max queue wait, sweeper": sys.dynamic.now += model.MAX_QUEUE_WAIT_MS + 1; runToEnd(sweep(sys)); return true;
+    case "provider result committed":
+      expect(fmt(runToEnd(workerProviderCall(sys, id, "ok")))).toBe("200 undefined");
+      r.usable += 1;
+      return true;
+    case "worker crashes after the provider returned, before the call record commits": {
+      const g = workerProviderCall(sys, id, "ok");
+      expect(g.next().done).toBe(false); // the provider call is in flight
+      expect(g.next().done).toBe(false); // the provider returned; the record transaction is open
+      return true; // the worker dies here: the transaction never commits
+    }
+    case "lease expires, fewer than three times": put({ leaseExpiries: LEASE_LIMIT - 1 }); runToEnd(sweep(sys)); return true;
+    case "worker stops at the next safe boundary": runToEnd(workerBoundary(sys, id)); return true;
+    case "the stop transaction crashes before commit, then is retried": {
+      const g = workerBoundary(sys, id);
+      g.next(); // the stop transaction has read the job; the worker dies before commit
+      expect(jobOf(sys, id).state).toBe(r.stateBefore);
+      runToEnd(workerBoundary(sys, id));
+      return true;
+    }
+    case "an in-flight provider result commits while the stop transaction is open": {
+      const g = workerBoundary(sys, id);
+      g.next();
+      expect(fmt(runToEnd(recordCallResult(sys, id, "ok")))).toBe("200 undefined");
+      r.usable += 1;
+      runToEnd(g);
+      return true;
+    }
+    case "third lease expiry, sweeper": put({ leaseExpiries: LEASE_LIMIT }); runToEnd(sweep(sys)); return true;
+    case "the sweeper's terminal transaction crashes before commit, then is retried": {
+      put({ leaseExpiries: LEASE_LIMIT });
+      const g = sweep(sys);
+      g.next(); // inside the terminal transaction, before commit; the sweeper dies
+      expect(jobOf(sys, id).state).toBe(r.stateBefore);
+      runToEnd(sweep(sys));
+      return true;
+    }
+    case "lease expires once, the retried panel step starts": put({ leaseExpiries: 1 }); runToEnd(workerBoundary(sys, id)); return true;
+    case "finalize, every requested section completed": runToEnd(finishJob(sys, id, "completed", undefined, { summary: "r" })); return true;
+    case "finalize, a requested section failed": runToEnd(finishJob(sys, id, "partial", undefined, { summary: "r" })); return true;
+    case "job failure": runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models")); return true;
+    case "provider result arrives late": expect(fmt(runToEnd(recordCallResult(sys, id, "ok")))).toBe("409 late_write_refused"); return true;
+    case "duplicate terminal event":
+      runToEnd(finishJob(sys, id, "completed"));
+      runToEnd(finishJob(sys, id, "failed", "worker_timeout"));
+      runToEnd(finishJob(sys, id, "canceled"));
+      runToEnd(workerBoundary(sys, id));
+      put({ leaseExpiries: LEASE_LIMIT });
+      runToEnd(sweep(sys));
+      return true;
+    case "DELETE, then the deletion completes": runToEnd(handleDelete(sys, "live1", id)); runToEnd(sweep(sys)); return true;
+    default: return false;
+  }
+}
+const LEASE_LIMIT = model.LEASE_EXPIRY_LIMIT;
+
+interface A9Result { state: JobState; code: string | undefined; charged: number | null; released: number | null }
+const a9Result = (r: A9Run): A9Result => {
+  const e = r.sys.store.get<SettleEntry>(`ledger/settle_${r.id}`);
+  const j = jobOf(r.sys, r.id);
+  return { state: j.state, code: j.state === "failed" ? j.failureCode : undefined, charged: e ? e.charged : null, released: e ? e.released : null };
+};
+
+/** Asserts one table row for one (pending, usable, failed[, terminal]) case. */
+function a9Check(row: TRow, r: A9Run): A9Result {
+  const { sys, id, reserved } = r;
+  const tag = { row: row.id, pending: row.pending, usable: r.usable };
+  const job = jobOf(sys, id);
+  const e = sys.store.get<SettleEntry>(`ledger/settle_${id}`);
+  // To
+  if (row.to === "unchanged") expect({ ...tag, state: job.state }).toEqual({ ...tag, state: r.stateBefore });
+  else {
+    const [state, code] = row.to.split(": ");
+    expect({ ...tag, state: job.state }).toEqual({ ...tag, state });
+    if (code) expect({ ...tag, code: job.failureCode }).toEqual({ ...tag, code });
+  }
+  // Charged / Released
+  const want = Math.min(reserved, r.usable);
+  if (row.charged === "none yet") {
+    expect({ ...tag, settlement: e ?? null, balance: creditsOf(sys) }).toEqual({ ...tag, settlement: null, balance: r.afterReserve });
+    expect(job.callsMade ?? 0).toBe(r.usable); // only committed calls are recorded work
+  } else if (row.charged === "unchanged") {
+    expect({ ...tag, settlement: e }).toEqual({ ...tag, settlement: r.settledBefore });
+    expect(creditsOf(sys)).toBe(r.creditsBefore);
+  } else {
+    expect(e).toBeDefined();
+    const entry = e as SettleEntry;
+    if (row.charged === "0") expect({ ...tag, charged: entry.charged }).toEqual({ ...tag, charged: 0 });
+    else if (row.charged === "committed usable work") expect({ ...tag, charged: entry.charged }).toEqual({ ...tag, charged: want });
+    else if (row.charged === "unresolved") expect([0, want]).toContain(entry.charged);
+    else throw new Error(`unknown Charged value "${row.charged}" in ${row.id}`);
+    if (row.released === "whole reservation") expect({ ...tag, released: entry.released }).toEqual({ ...tag, released: reserved });
+    else if (row.released === "the rest" || row.released === "unresolved") expect({ ...tag, released: entry.released }).toEqual({ ...tag, released: reserved - entry.charged });
+    else throw new Error(`unknown Released value "${row.released}" in ${row.id}`);
+    // Conservation, one settlement, balance restored by exactly the release, never negative.
+    expect(entry.charged + entry.released).toBe(reserved);
+    expect(entry.reserved).toBe(reserved);
+    expect(entry.charged).toBeGreaterThanOrEqual(0);
+    expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+    expect(creditsOf(sys)).toBe(r.afterReserve + entry.released);
+    expect([job.settledCharged, job.settledReleased]).toEqual([entry.charged, entry.released]);
+  }
+  expect(creditsOf(sys)).toBeGreaterThanOrEqual(0);
+  expect(active(sys)).toBe(countedActive(sys, "o1"));
+  // A pending deletion completes once the job is terminal, and the tombstone keeps the settlement.
+  if (job.deletionRequested && TERMINAL_STATES.has(job.state)) {
+    runToEnd(sweep(sys));
+    const t = jobOf(sys, id);
+    expect({ ...tag, deleted: t.deleted, charged: t.settledCharged, released: t.settledReleased }).toEqual({ ...tag, deleted: true, charged: e?.charged, released: e?.released });
+    expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+  }
+  return a9Result(r);
+}
+const TERMINAL_STATES: ReadonlySet<JobState> = new Set<JobState>(["completed", "partial", "failed", "canceled", "expired"]);
+
+describe("Addendum 9: settlement state transitions (jobs-and-idempotency.md §6.3, parsed)", () => {
+  it("the table has rows T1–T24 with known vocabulary", () => {
+    const rows = transitionTable();
+    expect(rows.map((r) => r.id)).toEqual(Array.from({ length: 24 }, (_, i) => `T${i + 1}`));
+    for (const r of rows) {
+      expect({ row: r.id, pending: PENDING_VOCAB[r.pending] !== undefined }).toEqual({ row: r.id, pending: true });
+      expect({ row: r.id, from: ["queued", "running", "synthesizing", "terminal"].includes(r.from) }).toEqual({ row: r.id, from: true });
+      expect({ row: r.id, charged: ["0", "committed usable work", "none yet", "unchanged", "unresolved"].includes(r.charged) }).toEqual({ row: r.id, charged: true });
+      expect({ row: r.id, released: ["whole reservation", "the rest", "none yet", "unchanged", "unresolved"].includes(r.released) }).toEqual({ row: r.id, released: true });
+    }
+  });
+
+  it("the table states the owner's headline rows: a crash ends failed: worker_timeout, charged 0, whatever is pending", () => {
+    const rows = transitionTable();
+    const crash = rows.filter((r) => r.event === "third lease expiry, sweeper");
+    const pendings = new Set(crash.flatMap((r) => PENDING_VOCAB[r.pending] ?? []));
+    expect(Array.from(pendings).sort()).toEqual(["DELETE", "cancel", "none"]);
+    for (const r of crash) expect({ row: r.id, to: r.to, charged: r.charged, released: r.released }).toEqual({ row: r.id, to: "failed: worker_timeout", charged: "0", released: "whole reservation" });
+  });
+
+  it("every row, for every pending request it names, 0–3 committed usable calls and 0–1 failed calls (executed)", () => {
+    const rows = transitionTable();
+    expect(rows.length).toBeGreaterThan(0);
+    let cases = 0;
+    for (const row of rows) {
+      const kinds = row.from === "terminal" ? TERMINAL_KINDS : (["completed"] as const);
+      const usables = row.from === "queued" ? [0] : [0, 1, 2, 3];
+      for (const terminal of kinds) {
+        for (const usable of usables) {
+          for (const failed of row.from === "queued" ? [0] : [0, 1]) {
+            const results: Array<[Pending, A9Result]> = [];
+            for (const pending of PENDING_VOCAB[row.pending] ?? []) {
+              const r = a9Setup(row.from, pending, usable, failed, terminal);
+              expect({ row: row.id, event: row.event, known: a9Event(r, row.event) }).toEqual({ row: row.id, event: row.event, known: true });
+              results.push([pending, a9Check(row, r)]);
+              cases++;
+            }
+            // DELETE-independence: every pending request a row names gives the same settlement.
+            for (const [p, res] of results) expect({ row: row.id, terminal, usable, failed, p, res }).toEqual({ row: row.id, terminal, usable, failed, p, res: results[0][1] });
+          }
+        }
+      }
+    }
+    expect(cases).toBeGreaterThan(200);
+  });
+});
+
+describe("Addendum 9: a worker crash settles identically with and without a pending DELETE (owner rule)", () => {
+  it("exhaustive: running and synthesizing × 0–8 usable × 0–2 failed calls × {none, cancel, DELETE}: failed: worker_timeout, charged 0, whole reservation released", () => {
+    let n = 0;
+    for (const from of ["running", "synthesizing"]) {
+      for (let ok = 0; ok <= 8; ok++) {
+        for (let bad = 0; bad <= 2; bad++) {
+          const out: Record<string, unknown> = {};
+          for (const pending of ["none", "cancel", "DELETE"] as const) {
+            const r = a9Setup(from, pending, ok, bad);
+            const before = r.afterReserve + r.reserved; // the balance before the reservation
+            r.sys.store.put(`jobs/${r.id}`, { ...jobOf(r.sys, r.id), leaseExpiries: LEASE_LIMIT });
+            runToEnd(sweep(r.sys));
+            const j = jobOf(r.sys, r.id);
+            const e = settleOf(r.sys, r.id);
+            out[pending] = { state: j.state, code: j.failureCode, charged: e.charged, released: e.released, balance: creditsOf(r.sys) - before };
+            expect({ from, ok, bad, pending, v: out[pending] }).toEqual({ from, ok, bad, pending, v: { state: "failed", code: "worker_timeout", charged: 0, released: r.reserved, balance: 0 } });
+            // Provider cost is still recorded, one entry per committed call, whatever the charge.
+            expect(costsOf(r.sys, r.id).length).toBe(ok + bad);
+            if (pending === "DELETE") {
+              const op = r.sys.store.get<DeletionOp>(model.deletionPath(`del_${r.id.slice(4)}`)) as DeletionOp;
+              expect({ op: op.status, deleted: j.deleted, tombCharged: j.settledCharged }).toEqual({ op: "completed", deleted: true, tombCharged: 0 });
+            }
+            n++;
+          }
+          expect(out.DELETE).toEqual(out.none);
+          expect(out.cancel).toEqual(out.none);
+        }
+      }
+    }
+    expect(n).toBe(2 * 9 * 3 * 3);
+  });
+
+  it("a crash after the provider returned but before the call record committed is not billable: a later stop settles only committed calls", () => {
+    for (const pending of ["cancel", "DELETE"] as const) {
+      const r = a9Setup("running", "none", 2, 0);
+      const g = workerProviderCall(r.sys, r.id, "ok");
+      expect(g.next().done).toBe(false);
+      expect(g.next().done).toBe(false); // the record transaction is open; the worker dies
+      expect(r.sys.store.keys(`calls/${r.id}/`).length).toBe(2);
+      expect(jobOf(r.sys, r.id).callsMade).toBe(2);
+      if (pending === "cancel") runToEnd(handleCancel(r.sys, "live1", r.id));
+      else runToEnd(handleDelete(r.sys, "live1", r.id));
+      runToEnd(workerBoundary(r.sys, r.id)); // the retried step stops at its start
+      const e = settleOf(r.sys, r.id);
+      expect({ pending, state: jobOf(r.sys, r.id).state, charged: e.charged, released: e.released }).toEqual({ pending, state: "canceled", charged: 2, released: r.reserved - 2 });
+      // The lost call left no cost entry either (owner question Addendum 9 §7 Q2): only committed calls are recorded.
+      expect(costsOf(r.sys, r.id).length).toBe(2);
+    }
+  });
+
+  it("cancel before committed work charges 0; cancel after committed work charges that work; identical for cancel and DELETE", () => {
+    for (const usable of [0, 1, 4]) {
+      const res: unknown[] = [];
+      for (const pending of ["cancel", "DELETE"] as const) {
+        const r = a9Setup("running", pending, usable, 1);
+        runToEnd(workerBoundary(r.sys, r.id));
+        const e = settleOf(r.sys, r.id);
+        expect({ usable, pending, charged: e.charged, released: e.released }).toEqual({ usable, pending, charged: Math.min(r.reserved, usable), released: r.reserved - Math.min(r.reserved, usable) });
+        res.push([e.charged, e.released]);
+      }
+      expect(res[0]).toEqual(res[1]);
+    }
+  });
+
+  it("duplicate and late events after a crash with DELETE pending change nothing", () => {
+    const r = a9Setup("running", "DELETE", 3, 1);
+    r.sys.store.put(`jobs/${r.id}`, { ...jobOf(r.sys, r.id), leaseExpiries: LEASE_LIMIT });
+    runToEnd(sweep(r.sys));
+    const settled = { ...settleOf(r.sys, r.id) };
+    const balance = creditsOf(r.sys);
+    expect(settled.charged).toBe(0);
+    expect(fmt(runToEnd(recordCallResult(r.sys, r.id, "ok")))).toBe("409 late_write_refused"); // late provider result
+    expect(fmt(runToEnd(workerProviderCall(r.sys, r.id)))).toBe("409 late_write_refused");
+    runToEnd(workerBoundary(r.sys, r.id)); // a zombie worker reaching its boundary
+    runToEnd(finishJob(r.sys, r.id, "canceled", "deletion_requested"));
+    const again = runToEnd(handleDelete(r.sys, "live1", r.id)) as ApiResponse & { deletion?: DeletionOp & { id: string } };
+    expect([again.status, again.deletion?.status]).toEqual([202, "completed"]);
+    runToEnd(sweep(r.sys));
+    runToEnd(sweep(r.sys));
+    expect(settleOf(r.sys, r.id)).toEqual(settled);
+    expect(creditsOf(r.sys)).toBe(balance);
+    expect(r.sys.settlements.filter((x) => x === r.id).length).toBe(1);
+    expect(r.sys.releases.filter((x) => x === r.id).length).toBe(1);
+    expect(jobOf(r.sys, r.id)).toMatchObject({ deleted: true, state: "failed", settledCharged: 0, settledReleased: r.reserved });
+    expect(costsOf(r.sys, r.id).length).toBe(5); // 4 committed calls + the late one (cost only)
+  });
+
+  it("every interleaving of a slow worker's stop and the sweeper: the outcome set is identical with cancel and with DELETE", () => {
+    const outcomes = (pending: "cancel" | "DELETE"): string[] => {
+      let id = "";
+      const setup = (): System => {
+        const s = world();
+        id = runningJob(s, ["ok", "ok"], { ...SAME, input: { question: "slow worker" } });
+        if (pending === "cancel") runToEnd(handleCancel(s, "live1", id));
+        else runToEnd(handleDelete(s, "live1", id));
+        s.store.put(`jobs/${id}`, { ...jobOf(s, id), leaseExpiries: LEASE_LIMIT });
+        return s;
+      };
+      return interleavings(setup, [
+        { name: "worker", start: (s) => workerBoundary(s, id) },
+        { name: "sweeper", start: (s) => sweep(s) },
+      ]).map((o) => {
+        const e = settleOf(o.sys, id);
+        expect(e.charged + e.released).toBe(e.reserved);
+        expect(o.sys.settlements.filter((x) => x === id).length).toBe(1);
+        return `${jobOf(o.sys, id).state}:${e.charged}`;
+      });
+    };
+    const set = (xs: string[]): string[] => Array.from(new Set(xs)).sort();
+    const c = outcomes("cancel");
+    expect(c.length).toBeGreaterThan(2);
+    // Whichever terminal transition commits first wins (§5B); the set of possible settlements is
+    // the same whether the stop was requested by cancel or by DELETE.
+    expect(set(outcomes("DELETE"))).toEqual(set(c));
+    expect(set(c)).toEqual(["canceled:2", "failed:0"]);
+  });
+
+  it("retries during settlement: every interleaving of the crash sweeper and an in-flight call result, DELETE pending → failed, charged 0", () => {
+    let id = "";
+    const setup = (): System => {
+      const s = world();
+      id = runningJob(s, ["ok"], { ...SAME, input: { question: "retry settle" } });
+      runToEnd(handleDelete(s, "live1", id));
+      s.store.put(`jobs/${id}`, { ...jobOf(s, id), leaseExpiries: LEASE_LIMIT });
+      return s;
+    };
+    let n = 0;
+    for (const o of interleavings(setup, [
+      { name: "sweeper", start: (s) => sweep(s) },
+      { name: "call", start: (s) => recordCallResult(s, id, "ok") },
+    ])) {
+      n++;
+      runToEnd(sweep(o.sys));
+      const e = settleOf(o.sys, id);
+      expect({ state: jobOf(o.sys, id).state, charged: e.charged, released: e.released }).toEqual({ state: "failed", charged: 0, released: e.reserved });
+      expect(o.sys.settlements.filter((x) => x === id).length).toBe(1);
+      expect(jobOf(o.sys, id).deleted).toBe(true);
+    }
+    expect(n).toBeGreaterThan(3);
+  });
+});
+
+describe("Addendum 9 §2.5 'Settlement source' (ledger-and-billing.md, parsed as a rule)", () => {
+  it("states the committed-work definition, the crash outcome and its independence from a pending request", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const para = /\*\*Settlement source \(Addendum 9\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    const crash = /is ended by the sweeper as `failed: ([a-z_]+)` and charged (\d+) credits with its entire reservation released, whether or not a cancellation or a deletion is pending/.exec(para);
+    expect(crash).not.toBeNull();
+    expect([crash?.[1], Number(crash?.[2])]).toEqual(["worker_timeout", 0]);
+    const usable = /committed usable work when that record's status is (.+?) \(§2\.4\)/.exec(para)?.[1] ?? "";
+    expect(Array.from(usable.matchAll(/`([a-z_]+)`/g), (m) => m[1])).toEqual(["ok", "substituted"]);
+    expect(para).toMatch(/A pending cancellation or deletion is never an input to a settlement\./);
+    expect(para).toMatch(/is never charged\./);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// R4 MINOR-1: acceptance identity entropy through a controlled RNG seam (kills M07, M15)
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 9 (R4 MINOR-1): the acceptance identity comes only from a CSPRNG, through an injectable seam", () => {
+  type Rng = (size: number) => Uint8Array;
+  const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
+  const bitsOf = (acc: string): number[] => Array.from(Buffer.from(acc.slice(4), "hex")).flatMap((byte) => Array.from({ length: 8 }, (_, i) => (byte >> (7 - i)) & 1));
+  const hamming = (a: string, b: string): number => {
+    const x = bitsOf(a);
+    const y = bitsOf(b);
+    return x.reduce((n, bit, i) => n + (bit !== y[i] ? 1 : 0), 0);
+  };
+
+  it("the default generator is crypto.randomBytes", () => {
+    expect((new System() as unknown as { acceptanceRng: Rng }).acceptanceRng).toBe(cryptoRandomBytes);
+  });
+
+  it("each acceptance draws exactly ACCEPTANCE_ID_BYTES (≥ 16) bytes once, and the ID is exactly those bytes in hex", () => {
+    const draws: number[] = [];
+    const scripted: Rng = (size) => {
+      draws.push(size);
+      return Uint8Array.from({ length: size }, (_, i) => (draws.length * 31 + i * 7) % 256);
+    };
+    const sys = world();
+    (sys as unknown as { acceptanceRng: Rng }).acceptanceRng = scripted;
+    const a = send(sys, req(SAME, { idempotencyKey: "seam-1" })).body?.id as string;
+    const b = send(sys, req(DIFFERENT, { idempotencyKey: "seam-2" })).body?.id as string;
+    expect(draws).toEqual([model.ACCEPTANCE_ID_BYTES, model.ACCEPTANCE_ID_BYTES]);
+    expect(model.ACCEPTANCE_ID_BYTES).toBeGreaterThanOrEqual(16);
+    expect(jobOf(sys, a).idemAcceptanceId).toBe(`acc_${hex(Uint8Array.from({ length: 16 }, (_, i) => (31 + i * 7) % 256))}`);
+    expect(jobOf(sys, b).idemAcceptanceId).toBe(`acc_${hex(Uint8Array.from({ length: 16 }, (_, i) => (62 + i * 7) % 256))}`);
+    // A replay draws nothing.
+    send(sys, req(SAME, { idempotencyKey: "seam-1" }));
+    expect(draws.length).toBe(2);
+  });
+
+  it("nothing but the generator enters the ID: a generator that repeats its bytes repeats the ID across keys, orgs and time", () => {
+    const constant: Rng = (size) => new Uint8Array(size).fill(0xab);
+    const ids: string[] = [];
+    for (const [keyId, idem] of [["live1", "k1"], ["test1", "k2"], ["live_app2", "k3"]] as const) {
+      const sys = world();
+      sys.dynamic.now += ids.length * 1_000_003;
+      (sys as unknown as { acceptanceRng: Rng }).acceptanceRng = constant;
+      const id = send(sys, req({ ...SAME, input: { question: idem } }, { keyId, idempotencyKey: idem })).body?.id as string;
+      ids.push(jobOf(sys, id).idemAcceptanceId as string);
+    }
+    expect(new Set(ids)).toEqual(new Set([`acc_${"ab".repeat(16)}`]));
+  });
+
+  it("Math.random is never used to generate an acceptance identity", () => {
+    const spy = jest.spyOn(Math, "random");
+    try {
+      const sys = world();
+      for (let i = 0; i < 8; i++) send(sys, req({ ...SAME, input: { question: `mr ${i}` } }, { idempotencyKey: `mr-${i}` }));
+      model.newAcceptanceId();
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("statistics of the default generator (4096 IDs): every bit is set 40–60 % of the time, consecutive IDs differ in ≥ 24 of 128 bits, mean distance 60–68, all distinct", () => {
+    const ids = Array.from({ length: 4096 }, () => model.newAcceptanceId());
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) expect(id).toMatch(/^acc_[0-9a-f]{32}$/);
+    const ones = new Array(128).fill(0);
+    for (const id of ids) bitsOf(id).forEach((b, i) => (ones[i] += b));
+    for (let i = 0; i < 128; i++) expect({ bit: i, inRange: ones[i] / ids.length > 0.4 && ones[i] / ids.length < 0.6 }).toEqual({ bit: i, inRange: true });
+    const d = ids.slice(1).map((id, i) => hamming(ids[i], id));
+    expect(Math.min(...d)).toBeGreaterThanOrEqual(24);
+    const mean = d.reduce((a, b) => a + b, 0) / d.length;
+    expect(mean).toBeGreaterThan(60);
+    expect(mean).toBeLessThan(68);
+  });
+
+  it("through T-create with the default generator: 64 consecutive acceptances differ pairwise in ≥ 24 bits", () => {
+    const sys = world();
+    patchOrg(sys, { concurrencyLimit: 100, creditsRemaining: 100_000 });
+    const ids: string[] = [];
+    for (let i = 0; i < 64; i++) {
+      const id = send(sys, req({ ...SAME, input: { question: `stat ${i}` } }, { idempotencyKey: `stat-${i}` })).body?.id as string;
+      ids.push(jobOf(sys, id).idemAcceptanceId as string);
+    }
+    for (let i = 1; i < ids.length; i++) expect(hamming(ids[i - 1], ids[i])).toBeGreaterThanOrEqual(24);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// R4 MINOR-3: the soft failed-job ratio throttle (kills M19)
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 9 (R4 MINOR-3): the soft failed-job ratio limits concurrency to 1", () => {
+  const history = (sys: System, failed: number, completed: number): void => {
+    for (let i = 0; i < completed; i++) runToEnd(finishJob(sys, runningJob(sys, ["ok"], { ...SAME, input: { question: `good ${i}` } }), "completed"));
+    for (let i = 0; i < failed; i++) runToEnd(finishJob(sys, runningJob(sys, ["ok"], { ...SAME, input: { question: `bad ${i}` } }), "failed", "insufficient_usable_models"));
+  };
+  it.each([
+    // [failed, completed]: ratio and job count against the parsed thresholds (> 30 %, ≥ 20 jobs)
+    [7, 14],
+    [6, 15],
+    [7, 12],
+    [9, 11],
+  ])("%i failed + %i completed: soft iff ratio > threshold with ≥ min jobs; a second concurrent create is refused only when soft", (failed, completed) => {
+    const sys = world();
+    history(sys, failed, completed);
+    const jobs = failed + completed;
+    const soft = jobs >= FAILED_RATIO_MIN_JOBS && failed / jobs > FAILED_RATIO_SOFT;
+    const c = failureControls(sys, "o1");
+    expect({ soft: c.soft, hard: c.hard, jobs: c.jobs24h }).toEqual({ soft, hard: false, jobs });
+    expect(fmt(send(sys, req({ ...SAME, input: { question: "first" } }, { idempotencyKey: "soft-1" })))).toBe("202 new");
+    expect(active(sys)).toBe(1);
+    expect(fmt(send(sys, req({ ...SAME, input: { question: "second" } }, { idempotencyKey: "soft-2" })))).toBe(soft ? "429 concurrency_limit" : "202 new");
+  });
+
+  it("the soft cases above include at least one soft and one not-soft case", () => {
+    const soft = (f: number, c: number): boolean => f + c >= FAILED_RATIO_MIN_JOBS && f / (f + c) > FAILED_RATIO_SOFT;
+    expect([soft(7, 14), soft(6, 15), soft(7, 12), soft(9, 11)]).toEqual([true, false, false, true]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// R4 MINOR-4: ledger rules parsed as rules, not phrases (kills D01, D02)
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 9 (R4 MINOR-4): the Addendum 8 ledger paragraphs are parsed into rules and compared with the model", () => {
+  const codes = (t: string): string[] => Array.from(t.matchAll(/`([a-z_]+)`/g), (m) => m[1]);
+
+  it("§2.5 Fully failed: the parsed charge and release drive the check for every failure code named, 0–3 usable calls", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const para = /\*\*Fully failed \(Addendum 8\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    const rule = /: it is charged (\d+) credits and its (entire) reservation is released, in its one settlement\. §2\.4 does not apply to it\./.exec(para);
+    expect(rule).not.toBeNull();
+    const charge = Number(rule?.[1]);
+    expect(charge).toBe(0);
+    const scope = /A fully failed job is every job that ends `failed`, whatever its failure code \((.+?)\) and however many provider calls it made, including calls that returned usable output:/.exec(para)?.[1] ?? "";
+    const named = codes(scope);
+    expect(named.sort()).toEqual(["capacity_unavailable", "insufficient_usable_models", "persistence_failed", "query_not_executable", "worker_timeout"]);
+    for (const code of named) {
+      for (let usable = 0; usable <= 3; usable++) {
+        const sys = world();
+        const before = creditsOf(sys);
+        const id = runningJob(sys, Array(usable).fill("ok"));
+        runToEnd(finishJob(sys, id, "failed", code));
+        const e = settleOf(sys, id);
+        expect({ code, usable, charged: e.charged, released: e.released }).toEqual({ code, usable, charged: charge, released: e.reserved - charge });
+        expect(creditsOf(sys)).toBe(before - charge);
+      }
+    }
+  });
+
+  it("§4.3 Short-circuit attribution: the parsed attributable list equals the model's; the parsed platform list is disjoint and platform-caused", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const para = /\*\*Short-circuit attribution \(Addendum 8\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    const attributable = codes(/customer-attributable failures alone \(([^)]*)\) reach the short-circuit threshold/.exec(para)?.[1] ?? "");
+    expect(attributable).toEqual([...CUSTOMER_FAILURE_CODES]);
+    const platform = codes(/A block that is reached only because (.+?) failures contributed never counts against the customer/.exec(para)?.[1] ?? "");
+    expect(platform.length).toBeGreaterThan(0);
+    for (const p of platform) {
+      expect({ p, platform: PLATFORM_FAULT_CODES.includes(p), attributable: attributable.includes(p) }).toEqual({ p, platform: true, attributable: false });
+    }
+    // Together they are exactly the short-circuit feed of Addendum 7.
+    expect([...attributable, ...platform].sort()).toEqual([...SHORT_CIRCUIT_CODES].sort());
   });
 });
