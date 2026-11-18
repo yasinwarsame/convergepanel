@@ -72,7 +72,8 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
       "Use up to 2 models per run",
       "Core unified answer view",
       "Basic agreement/disagreement highlighting",
-      "Store recent sessions (last 7 days)",
+      // Copy only: historyRetentionDays is not enforced anywhere, so no time limit is advertised.
+      "Run history saved to your account",
     ],
   },
   lite: {
