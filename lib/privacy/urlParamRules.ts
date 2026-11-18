@@ -133,7 +133,7 @@ export const CONTENT_HANDOFFS: readonly ContentHandoffRule[] = [
 
 /** Fragments a page legitimately routes on (kept byte-for-byte), keyed by path. Every other key=value fragment is dropped. */
 export const ROUTING_FRAGMENT_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
-  // Pre-existing bearer invitation link (lib/client/invitationAcceptance.ts strips it itself; reviewer's out-of-scope item).
+  // Pre-existing routing fragment, kept unchanged (out of scope for this PR).
   ["/workspace-invitations/accept", ["invitationId", "token"]],
 ]);
 /** A plain in-page anchor (`#faq`): kept. */
@@ -141,6 +141,12 @@ export const PLAIN_ANCHOR = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
 // Bounds for nested targets (owner ruling: explicit; beyond them the parameter is dropped entirely).
 export const MAX_NEST_DEPTH = 3;
+/**
+ * Measured on the once-decoded nested target, where its content is still percent-encoded. Deliberately NOT aligned with
+ * verifyPrefill's MAX_PENDING_CHARS (5000): a legacy nested claim link whose target exceeds this bound loses the text,
+ * and the post-auth redirect falls back to "/" (fail closed). In a `/verify?source=extension&text=` target that is about
+ * 1400 characters of typical English, about 220 of CJK text, about 170 emoji. Disclosed in the PR body.
+ */
 export const MAX_NESTED_TARGET_CHARS = 2048;
 export const MAX_EXTRA_DECODE_PASSES = 3;
 export const MAX_QUERY_PAIRS = 64;
