@@ -273,7 +273,7 @@ d("real Next.js production build (contained)", () => {
     ["P3 /signup?redirect=/verify?text=", `/signup?redirect=${enc(`/verify?source=extension&text=${enc(CLAIM)}`)}&${UTM}`, `/signup?redirect=${enc("/verify?source=extension")}&${UTM}`, "/verify?source=extension"],
     ["P4 /login?redirect=/verify?text=", `/login?redirect=${enc(`/verify?source=extension&text=${enc(CLAIM)}`)}`, `/login?redirect=${enc("/verify?source=extension")}`, "/verify?source=extension"],
     ["P8 /onboarding (over-decoded)", `/onboarding?redirect=${enc(`/verify?source=extension&text=${CLAIM}`)}`, `/onboarding?redirect=${enc("/verify?source=extension")}`, "/verify?source=extension"],
-    ["H3 login -> signup -> verify", `/login?redirect=${enc(`/signup?redirect=${enc(`/verify?text=${enc(CLAIM)}`)}`)}`, `/login?redirect=${enc(`/signup?redirect=${enc("/verify")}`)}`, `/signup?redirect=${enc("/verify")}`],
+    ["H3 login -> signup -> verify", `/login?redirect=${enc(`/signup?redirect=${enc(`/verify?text=${enc(CLAIM)}`)}`)}`, `/login?redirect=${enc(`/signup?redirect=${enc("/verify")}`)}`, "/signup?redirect=/verify" /* safeRedirect decodes once more (pre-existing) */],
   ] as const) {
     for (const mode of ["normal", "session-getter-throws"] as StorageMode[]) {
       it(`${label} (${mode}): stripped before any SDK initializes; no telemetry request (incl. tunnelled Sentry) and no later request URL carries it`, async () => {

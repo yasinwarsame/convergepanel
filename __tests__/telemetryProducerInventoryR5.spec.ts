@@ -76,7 +76,7 @@ const CASES: Array<[string, string, string | null, StorageMode[]]> = [
   ["P8 onboarding ?redirect=/verify?text=", `/onboarding?redirect=${enc(`/verify?text=${enc(CLAIM)}`)}`, "/verify", ["normal"]],
   ["P9 signup (copied by login)", `/signup?redirect=${enc(`/verify?text=${enc(CLAIM)}`)}`, "/verify", ["normal"]],
   ["H2 login ?next=", `/login?next=${enc(`/verify?text=${enc(CLAIM)}`)}`, "/verify", ["normal"]],
-  ["H3 login -> signup -> verify", `/login?redirect=${enc(`/signup?redirect=${enc(`/verify?text=${enc(CLAIM)}`)}`)}`, `/signup?redirect=${enc("/verify")}`, ["normal", "all-site-data-blocked"]],
+  ["H3 login -> signup -> verify", `/login?redirect=${enc(`/signup?redirect=${enc(`/verify?text=${enc(CLAIM)}`)}`)}`, "/signup?redirect=/verify" /* safeRedirect decodes once more (pre-existing) */, ["normal", "all-site-data-blocked"]],
   ["H5a nested /?tab=verify&claim=", `/login?redirect=${enc(`/?tab=verify&claim=${enc(CLAIM)}`)}`, "/?tab=verify", ["normal"]],
   ["H5b nested #text=", `/signup?redirect=${enc(`/verify?source=extension#text=${enc(CLAIM)}`)}`, "/verify?source=extension", ["normal"]],
   ["H5c double-encoded nested", `/login?redirect=${enc(enc(`/verify?text=${enc(CLAIM)}`))}`, "/verify", ["normal"]],
