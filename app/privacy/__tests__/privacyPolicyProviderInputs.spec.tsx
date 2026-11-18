@@ -118,7 +118,6 @@ function runResearchAttach(prev: string, fileText: string): string {
   const setQuestion = (u: string | ((p: string) => string)) => {
     value = typeof u === "function" ? u(value) : u;
   };
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const make = new Function("setQuestion", "setResearchAttachedFile", "setError", `${js}; return __handler;`);
   const handler = make(setQuestion, () => undefined, () => undefined) as (text: string, fileName: string) => void;
   handler(fileText, "attached.txt");
