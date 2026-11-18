@@ -120,14 +120,17 @@ function rowsFor(outs: Outcome[], mode: Mode): Row[] {
     if (o === "PE") return { modelId, status: "parse_error", verdict: "parse_error", confidence: "low", summary: "x", correctParts: [], incorrectParts: [], unverifiableParts: [] };
     const rec = mode.slot(i);
     // Distinct, long incorrect parts so the digest's opposite-side heuristic fires between I and supporting rows.
-    const incorrectParts = o === "I" || o === "P" ? [`slot ${modelId} lists a distinct problem number ${i} with the claim wording`] : [];
+    // Lexically disjoint per slot, so the digest's low-overlap rule pairs opposite-side slots (conflict points exist).
+    const DISJOINT = ["Completion happened eighteen eighty-nine", "Gustave engineering bureau designed ironwork", "Visitors climbed staircases during exposition", "Radio antennas saved demolition plans", "Painters repaint every seven years"];
+    const incorrectParts = o === "I" || o === "P" ? [DISJOINT[i]] : [];
     return {
       modelId,
       status: "ok",
       verdict: VERDICT[o],
       confidence: "high",
       summary: `${modelId} ${o}`,
-      correctParts: [],
+      // Supporting rows share one correct part, so the digest has agreement points whenever two of them answered.
+      correctParts: o === "A" || o === "P" ? ["The tower stands on the Champ de Mars in Paris"] : [],
       incorrectParts,
       unverifiableParts: [],
       ...(rec.sub ? { substituted: true } : {}),
@@ -166,6 +169,8 @@ function* mixes(): Generator<{ outs: Outcome[]; mode: Mode }> {
 
 const AGREEMENT_WORDS = /models disagree|models diverged|agreement across models|majority agreement|where models agree|where models disagree/i;
 
+let seenSections = { betweenModels: false, betweenSlots: false, agreeModels: false, agreeRepeated: false };
+
 function check(outs: Outcome[], mode: Mode): string[] {
   const errs: string[] = [];
   const o = oracle(outs, mode);
@@ -192,7 +197,12 @@ function check(outs: Outcome[], mode: Mode): string[] {
 
   // Copied verdict: "Where models disagree:" only over pairs of two different identified providers.
   const clip = buildClaimVerdictClipboardText(payload);
-  const sec = clip.split("Where models disagree:\n")[1];
+  if (clip.includes("Where models disagree:")) seenSections.betweenModels = true;
+  if (clip.includes("Points that differ across responses (not a disagreement between independent models):")) seenSections.betweenSlots = true;
+  if (clip.includes("Where models agree:")) seenSections.agreeModels = true;
+  if (clip.includes("Points repeated across responses (not agreement between independent models):")) seenSections.agreeRepeated = true;
+  // Only the bullets of that section (it ends at the next blank line).
+  const sec = clip.split("Where models disagree:\n")[1]?.split("\n\n")[0];
   if (sec) {
     for (const m of sec.matchAll(/^• Conflicting assessments: \((\w+)\) vs \((\w+)\)/gm)) {
       const pa = o.providerOfSlot(m[1]);
@@ -201,6 +211,10 @@ function check(outs: Outcome[], mode: Mode): string[] {
     }
   }
   if (!o.independent && /Where models (agree|disagree):/.test(clip)) errs.push("clipboard agreement heading on a non-independent record");
+  // "Where models agree" only when every answering slot is its own identified executing model (a shared point could
+  // otherwise come from one model's several slots).
+  if (clip.includes("Where models agree:") && !o.oneModelPerSlot) errs.push("clipboard 'Where models agree' without one identified model per slot");
+  if (o.independent && o.oneModelPerSlot && payload.whereModelsAgree.length > 0 && !clip.includes("Where models agree:")) errs.push("clipboard lost 'Where models agree' on a clean run");
 
   // Memo, given the wiring flags (the oracle's truth): "Models diverged" only with a cross-model disagreement.
   const memo = generateVerificationMemo({
@@ -227,6 +241,7 @@ describe("independent identity oracle: agreement / disagreement wording needs id
     let total = 0;
     const failures: string[] = [];
     let failing = 0;
+    seenSections = { betweenModels: false, betweenSlots: false, agreeModels: false, agreeRepeated: false };
     const allFailures: Array<{ mix: string; errs: string[] }> = [];
     for (const { outs, mode } of mixes()) {
       total += 1;
@@ -240,6 +255,8 @@ describe("independent identity oracle: agreement / disagreement wording needs id
     if (process.env.ORACLE_DUMP) require("fs").writeFileSync(process.env.ORACLE_DUMP, JSON.stringify({ total, failing, all: allFailures }));
     expect({ failing, sample: failures }).toEqual({ failing: 0, sample: [] });
     expect(total).toBeGreaterThan(65_310 / 2);
+    // Non-vacuous: the enumeration exercises both digest sections and both agreement headings.
+    expect(seenSections).toEqual({ betweenModels: true, betweenSlots: true, agreeModels: true, agreeRepeated: true });
   }, 600_000);
 });
 
@@ -264,6 +281,13 @@ describe("named scenarios (R3)", () => {
   it("partial support resting on one substitute is not 'Partial agreement across models'", () => {
     const b = banner(["P", "P", "U", "U"], MODE("ds:1-2"));
     expect(b.subtitle).not.toContain("Partial agreement across models");
+  });
+
+  it("agreement points from one substitute's slots are not 'Where models agree' (copied verdict)", () => {
+    const clip = (mode: Mode) => buildClaimVerdictClipboardText(mapStoredVerificationToClientPayload(storedDoc(rowsFor(["A", "A", "A"], mode)), "v"));
+    expect(clip(MODE("ds:1-2"))).not.toContain("Where models agree:");
+    expect(clip(MODE("ds:1-2"))).toContain("Points repeated across responses (not agreement between independent models):");
+    expect(clip(MODE("own"))).toContain("Where models agree:");
   });
 
   it("unknown provider identity: no multi-model wording at all", () => {
