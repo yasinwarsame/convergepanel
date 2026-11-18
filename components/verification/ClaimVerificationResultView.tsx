@@ -48,6 +48,8 @@ import {
   claimPayloadSlotTally,
   claimProviderSides,
   claimSlotResponsesNote,
+  claimStatementBasis,
+  type ClaimStatementBasis,
   claimSlotTallyNote,
   CLAIM_SLOT_RESPONSES_DIFFER_SUBTITLE,
   CLAIM_SLOT_RESPONSES_DIFFER_TITLE,
@@ -59,7 +61,6 @@ import {
 } from "@/lib/verification/claimVerdictCounts";
 import {
   independentModelsAmong,
-  rendersAsIndependent,
   runSlotStatement,
   type RunExecutionIdentity,
 } from "@/lib/panel/executionIdentity";
@@ -181,20 +182,48 @@ export function claimViewIndependence(data: Pick<ClaimVerificationClientPayload,
   };
 }
 
-/** True when the view's counts of rows are counts of independent executing models (verified, every answering slot its own model). */
-function slotCountsAreModelCounts(view: ReturnType<typeof claimViewIndependence>): boolean {
-  return view.independence === "independent" && view.identity.verified && rendersAsIndependent(view.identity);
+/**
+ * R4 (owner ruling 2026-11-18): the ONE basis for every statement this payload's surfaces make about models —
+ * the distinct reliably identified executing models (lib/verification/claimVerdictCounts.ts claimStatementBasis) over
+ * the gate's K for a record presented "independent". Read-time only; nothing is re-scored.
+ */
+export function claimStatementBasisOf(data: Pick<ClaimVerificationClientPayload, "modelIndependence" | "modelEvidence" | "auditBundle">): ClaimStatementBasis {
+  const view = claimViewIndependence(data);
+  const k = view.independence === "independent" && view.identity.verified ? view.identity.independentModels : null;
+  return claimStatementBasis(data.modelEvidence, k, claimPayloadSlotTally(data));
 }
 
-/** C-b CB-07: what the slot counts of a qualified claim are (stated once, after the counts). */
-export function claimSlotCountsNote(view: ReturnType<typeof claimViewIndependence>): string {
+/** True when counts of the usable rows are counts of identified executing models (one identified model per slot). */
+function slotCountsAreModelCounts(data: Parameters<typeof claimStatementBasisOf>[0]): boolean {
+  return claimStatementBasisOf(data).oneModelPerSlot;
+}
+
+/**
+ * True when the payload's rows may be listed as MODELS under their slot family names: one identified model per slot, no
+ * slot written by a substitute (its family name would not be the executing model) and every row answered (a failed or
+ * malformed slot is not a model's assessment).
+ */
+function rowsAreNamedModels(data: Parameters<typeof claimStatementBasisOf>[0]): boolean {
+  const basis = claimStatementBasisOf(data);
+  const tally = claimPayloadSlotTally(data);
+  return basis.oneModelPerSlot && basis.substitutedUsable === 0 && tally !== null && tally.usable === data.modelEvidence.length;
+}
+
+/**
+ * C-b CB-07: what the slot counts of a qualified claim are (stated once, after the counts). A number of independent
+ * models is stated only when the identified providers establish it (R4: `basis.modelsIdentified`, or a verified single
+ * key for "insufficient"); otherwise the note says the providers do not establish it.
+ */
+export function claimSlotCountsNote(view: ReturnType<typeof claimViewIndependence>, basis?: ClaimStatementBasis): string {
   // Never more than the presented independence states: an "unverified" claim states no K, whatever its rows hold.
   const statement =
     view.independence === "unverified"
       ? "model independence unverified"
-      : view.identity.verified
-        ? runSlotStatement(view.identity)
-        : "fewer than two independent models answered";
+      : !view.identity.verified
+        ? "fewer than two independent models answered"
+        : view.independence === "independent" && basis !== undefined && !basis.modelsIdentified
+          ? "the recorded providers do not establish how many independent models answered"
+          : runSlotStatement(view.identity);
   return `These counts are of panel slots (${statement}), not of agreeing models.`;
 }
 
@@ -209,15 +238,14 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
     return "No strong cross-model agreement phrases detected automatically.";
   }
   const view = claimViewIndependence(data);
-  const asModels = slotCountsAreModelCounts(view);
+  // R4: rows are named as models only when each is its own identified, non-substitute executing model and answered.
+  const asModels = rowsAreNamedModels(data);
   const unit = (n: number) => (asModels ? `model${n === 1 ? "" : "s"}` : `panel slot${n === 1 ? "" : "s"}`);
 
-  const notVerified = rows.filter(
-    (m) =>
-      m.verdict === "unverifiable" ||
-      m.verdict === "parse_error" ||
-      m.verdict === "failed"
-  );
+  // Only an answered "unverifiable" verdict is a slot that could not verify the claim; a failed or malformed slot
+  // returned no usable verdict (stated separately, never counted as having assessed the claim).
+  const notVerified = rows.filter((m) => m.status === "ok" && m.verdict === "unverifiable");
+  const noVerdict = rows.filter((m) => m.status !== "ok");
   const accurate = rows.filter((m) => m.status === "ok" && m.verdict === "accurate");
   const partial = rows.filter((m) => m.status === "ok" && m.verdict === "partially_accurate");
   const inaccurate = rows.filter((m) => m.status === "ok" && m.verdict === "inaccurate");
@@ -229,6 +257,9 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
     sentences.push(
       `${notVerified.length} of ${total} ${unit(total)} could not verify this claim.`
     );
+  }
+  if (noVerdict.length > 0) {
+    sentences.push(`${noVerdict.length} of ${total} ${unit(total)} returned no usable verdict.`);
   }
 
   const describeVerdictGroup = (
@@ -258,7 +289,7 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
   if (sentences.length === 0) {
     return "No strong cross-model agreement phrases detected automatically.";
   }
-  if (!asModels) sentences.push(claimSlotCountsNote(view));
+  if (!asModels) sentences.push(claimSlotCountsNote(view, claimStatementBasisOf(data)));
   return sentences.join(" ");
 }
 
@@ -281,27 +312,60 @@ export function claimDigestSections(data: ClaimVerificationClientPayload): {
     return { agreeHeading: CLAIM_NOT_INDEPENDENT_AGREE_HEADING, agree: data.whereModelsAgree, disagreeBetweenModels: [], disagreeBetweenSlots: data.whereModelsDisagree };
   }
   const sides = claimProviderSides(data.modelEvidence);
-  const tally = claimPayloadSlotTally(data);
-  const oneModelPerSlot = tally !== null && sides.reliable && sides.providers === view.identity.independentModels && sides.providers === tally.usable;
   const split = splitClaimDisagreementsByIdentity(data.whereModelsDisagree, sides);
   return {
-    agreeHeading: oneModelPerSlot ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
+    agreeHeading: claimStatementBasisOf(data).oneModelPerSlot ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
     agree: data.whereModelsAgree,
     disagreeBetweenModels: split.betweenModels,
     disagreeBetweenSlots: split.betweenSlots,
   };
 }
 
-/** The memo's `claimCrossModel` input for this payload (R3): what the identified providers establish. */
-export function claimMemoCrossModel(data: ClaimVerificationClientPayload): { disagreement: boolean; oneModelPerSlot: boolean; disagreementPointsBetweenModels: string[] } {
-  const view = claimViewIndependence(data);
-  const sides = claimProviderSides(data.modelEvidence);
-  const tally = claimPayloadSlotTally(data);
-  const digest = claimDigestSections(data);
+/** The memo's `claimCrossModel` input for this payload (R3/R4): the shared statement basis and the digest split. */
+export function claimMemoCrossModel(data: ClaimVerificationClientPayload): ClaimStatementBasis & { disagreementPointsBetweenModels: string[] } {
   return {
-    disagreement: sides.crossModelDisagreement,
-    oneModelPerSlot: tally !== null && sides.reliable && sides.providers === view.identity.independentModels && sides.providers === tally.usable,
-    disagreementPointsBetweenModels: digest.disagreeBetweenModels.map((d) => d.point),
+    ...claimStatementBasisOf(data),
+    disagreementPointsBetweenModels: claimDigestSections(data).disagreeBetweenModels.map((d) => d.point),
+  };
+}
+
+/**
+ * The claim memo's input for this payload — what the Personal wrapper exports (components/ClaimVerificationResult.tsx).
+ * C-b (CB-10): the independence the view presents (server value confirmed by the shared gate over the rows) and, for an
+ * independent claim, the gate's counts — never the number of rows; R4: the shared statement basis.
+ */
+// The return type is structural (lib/verification/generateMemo.ts MemoInput): this shared view imports no export module.
+export function claimMemoInput(data: ClaimVerificationClientPayload) {
+  const view = claimViewIndependence(data);
+  const evidenceQ = data.evidenceQuality ?? data.auditBundle.evidenceQuality;
+  const claimExecution =
+    view.independence === "independent" && view.identity.verified && view.identity.independentModels !== null
+      ? { independentModels: view.identity.independentModels, answeredSlots: view.identity.answeredSlots }
+      : undefined;
+  return {
+    type: "claim" as const,
+    claim: data.claim,
+    verdict: data.verdict,
+    consensusScore: data.consensusScore,
+    confidenceLabel: data.confidenceLabel,
+    evidenceQuality: typeof evidenceQ === "string" ? evidenceQ : "mixed",
+    modelEvidence: data.modelEvidence.map((m) => ({
+      modelId: m.modelId,
+      status: m.status,
+      verdict: m.verdict,
+      confidence: m.confidence,
+      summary: m.summary,
+      correctParts: m.correctParts,
+      incorrectParts: m.incorrectParts,
+      unverifiableParts: m.unverifiableParts,
+    })),
+    agreementPoints: data.whereModelsAgree,
+    disagreementPoints: data.whereModelsDisagree.map((d) => d.point),
+    verificationId: data.verificationId ?? "",
+    // Fail closed: a payload without recorded independence is "unverified" (no consensus score in the memo).
+    claimModelIndependence: view.independence,
+    ...(claimExecution ? { claimExecution } : {}),
+    claimCrossModel: claimMemoCrossModel(data),
   };
 }
 
@@ -411,7 +475,7 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
       <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-cp-faint">
         {/* C-b CB-09: the stored bundle's rows are panel slots; they are model counts only for a verified run in which
             every answering slot is its own executing model. The bundle itself is shown as recorded. */}
-        {slotCountsAreModelCounts(view) ? "Models" : "Panel slots"} ({bundle.perModel.length})
+        {rowsAreNamedModels(data) && bundle.perModel.length === data.modelEvidence.length ? "Models" : "Panel slots"} ({bundle.perModel.length})
       </p>
       <ul className="mt-2 space-y-1.5 text-sm">
         {bundle.perModel.map((row) => {
@@ -493,26 +557,42 @@ export function claimVerdictBanner(data: ClaimVerificationClientPayload): {
       subtitle: CLAIM_UNVERIFIED_BANNER_SUBTITLE,
     };
   }
+  // R4 (owner ruling 2026-11-18): one statement basis for every sentence — distinct identified executing models and,
+  // for any claim of support, a majority of at least two of them; otherwise the recorded slot responses are stated.
+  const basis = claimStatementBasisOf(data);
   const sides = claimProviderSides(data.modelEvidence);
-  // Model counts may be stated only when the identified providers are exactly the gate's independent models.
-  const modelsIdentified = sides.reliable && sides.providers === view.identity.independentModels;
-  const oneModelPerSlot = modelsIdentified && sides.providers === tally.usable;
   const slotNote = claimSlotResponsesNote(tally);
   const c = tally.verdicts;
+  const tone = {
+    confirmed: "bg-emerald-50 border-emerald-200 text-emerald-900",
+    disputed: "bg-rose-50 border-rose-200 text-rose-900",
+    partially_true: "bg-amber-50 border-amber-200 text-amber-900",
+    unverifiable: "bg-cp-raised border-cp-border text-cp-text",
+  }[v];
+  // A stored label the recorded answers do not bear out (e.g. a historical record scored by older rules) is named as
+  // recorded and followed by the answers — never re-scored, never described beyond what the answers show.
+  const recorded = {
+    className: tone,
+    icon: AGGREGATE_VERDICT_ICONS[v],
+    title: `Recorded verdict: ${aggregateVerdictLabel(v)}`,
+    subtitle: `Panel slot responses: ${formatClaimVerdictCounts(c)}. ${slotNote}`,
+  };
+  const support = c.accurate + c.partially_accurate;
   switch (v) {
     case "confirmed":
       // C-b CB-06 "a/u models" (a substitute in several slots counts once) — only while the identified models answered
       // consistently and a majority of at least two identified models rated it accurate; otherwise slot responses.
-      if (modelsIdentified && sides.consistent && sides.accurateProviders >= 2 && 2 * sides.accurateProviders > sides.providers) {
+      if (basis.supportMajority) {
         return {
-          className: "bg-emerald-50 border-emerald-200 text-emerald-900",
+          className: tone,
           icon: AGGREGATE_VERDICT_ICONS.confirmed,
           title: `This claim is supported by ${sides.accurateProviders}/${sides.providers} models`,
           subtitle: "Majority agreement: accurate",
         };
       }
+      if (c.accurate === 0) return recorded;
       return {
-        className: "bg-emerald-50 border-emerald-200 text-emerald-900",
+        className: tone,
         icon: AGGREGATE_VERDICT_ICONS.confirmed,
         title: `This claim is supported by ${c.accurate} of ${c.usable} answers`,
         subtitle: `Recorded verdict: Confirmed. ${slotNote}`,
@@ -523,49 +603,61 @@ export function claimVerdictBanner(data: ClaimVerificationClientPayload): {
       // denominator; "models" only when every answering slot is its own identified executing model.
       if (isDisputedWithoutSupport(data.verdict, c)) {
         return {
-          className: "bg-rose-50 border-rose-200 text-rose-900",
+          className: tone,
           icon: AGGREGATE_VERDICT_ICONS.disputed,
           title: claimNoSupportStatement({
             inaccurate: c.inaccurate,
             unverifiable: c.unverifiable,
             total: c.usable,
-            unit: (k) => (oneModelPerSlot ? `model${k === 1 ? "" : "s"}` : `answer${k === 1 ? "" : "s"}`),
+            unit: (k) => (basis.oneModelPerSlot ? `model${k === 1 ? "" : "s"}` : `answer${k === 1 ? "" : "s"}`),
           }),
-          subtitle: oneModelPerSlot ? CLAIM_NO_SUPPORT_BANNER_SUBTITLE : `${CLAIM_NO_SUPPORT_BANNER_SUBTITLE} ${slotNote}`,
+          subtitle: basis.oneModelPerSlot ? CLAIM_NO_SUPPORT_BANNER_SUBTITLE : `${CLAIM_NO_SUPPORT_BANNER_SUBTITLE} ${slotNote}`,
         };
       }
       // "Models disagree" only when a supporting and an inaccurate answer come from two DIFFERENT identified models.
       // One substitute that answered both sides produced differing slot responses, not a disagreement between models.
-      if (sides.crossModelDisagreement) {
+      if (basis.disagreement) {
         return {
-          className: "bg-rose-50 border-rose-200 text-rose-900",
+          className: tone,
           icon: AGGREGATE_VERDICT_ICONS.disputed,
           title: "Models disagree on this claim",
           subtitle: "Review per-model evidence below",
         };
       }
+      if (!hasSplitVerdicts(c)) return recorded;
       return {
-        className: "bg-rose-50 border-rose-200 text-rose-900",
+        className: tone,
         icon: AGGREGATE_VERDICT_ICONS.disputed,
         title: CLAIM_SLOT_RESPONSES_DIFFER_TITLE,
         subtitle: `${CLAIM_SLOT_RESPONSES_DIFFER_SUBTITLE} ${slotNote}`,
       };
     }
     case "partially_true":
+      if (support === 0) return recorded;
       return {
-        className: "bg-amber-50 border-amber-200 text-amber-900",
+        className: tone,
         icon: AGGREGATE_VERDICT_ICONS.partially_true,
         title: "Core claim may hold — details need correction",
-        // "Partial agreement across models" needs at least two identified models with a supporting answer.
-        subtitle: sides.supportAgreement ? "Partial agreement across models" : `Partial support in the panel slot responses. ${slotNote}`,
+        // "Partial agreement across models" needs a majority of at least two distinct identified supporting models.
+        subtitle: basis.partialSupportMajority ? "Partial agreement across models" : `Partial support in the panel slot responses. ${slotNote}`,
       };
     case "unverifiable":
     default:
+      // "Models cannot verify" needs a majority of at least two distinct identified models rating it unverifiable.
+      if (basis.unverifiableMajority) {
+        return {
+          className: tone,
+          icon: AGGREGATE_VERDICT_ICONS.unverifiable,
+          title: "Models cannot verify this claim with sufficient confidence",
+          subtitle: "Majority of models: unverifiable",
+        };
+      }
+      if (c.unverifiable === 0) return recorded;
       return {
-        className: "bg-cp-raised border-cp-border text-cp-text",
+        className: tone,
         icon: AGGREGATE_VERDICT_ICONS.unverifiable,
-        title: "Models cannot verify this claim with sufficient confidence",
-        subtitle: "Insufficient agreement or too many unknowns",
+        title: `${c.unverifiable} of ${c.usable} answers rated this claim unverifiable`,
+        subtitle: `Recorded verdict: Unverifiable. ${slotNote}`,
       };
   }
 }
@@ -649,7 +741,7 @@ export default function ClaimVerificationResultView({
             {verdictCounts !== null && verdictCounts.usable > 0 && (
               <div data-testid="claim-verdict-counts">
                 <p className="text-lg font-semibold text-cp-text">{formatClaimVerdictCounts(verdictCounts)}</p>
-                <p className="text-xs text-cp-faint">{slotCountsAreModelCounts(view) ? "Model verdicts" : "Panel slot verdicts"}</p>
+                <p className="text-xs text-cp-faint">{slotCountsAreModelCounts(data) ? "Model verdicts" : "Panel slot verdicts"}</p>
                 {tallyNote ? (
                   <p className="mt-0.5 text-xs text-cp-faint" data-testid="claim-slot-tally-note">
                     {tallyNote}
@@ -790,7 +882,7 @@ export default function ClaimVerificationResultView({
         <div className="space-y-2 rounded-lg border border-cp-border bg-cp-raised p-4 text-xs text-cp-muted">
           <p className="font-semibold text-cp-text">Disclaimer</p>
           <p>
-            Claim verification results are generated by multiple AI language models and reflect their training data
+            Claim verification results are generated by AI language models and reflect their training data
             and reasoning capabilities at the time of the query. Results do not constitute fact-checking by human
             experts, journalistic verification, or legal determination of truth. AI models may hallucinate, reason
             incorrectly, or lack access to current information.

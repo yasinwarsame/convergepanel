@@ -184,6 +184,7 @@ export type ClaimProviderSides = {
   providers: number;
   accurateProviders: number;
   supportProviders: number;
+  unverifiableProviders: number;
   crossModelDisagreement: boolean;
   supportAgreement: boolean;
   consistent: boolean;
@@ -214,10 +215,54 @@ export function claimProviderSides(rows: ReadonlyArray<unknown>): ClaimProviderS
     providers: verdictsBy.size,
     accurateProviders: withVerdict((v) => v === "accurate").size,
     supportProviders: support.size,
+    unverifiableProviders: withVerdict((v) => v === "unverifiable").size,
     crossModelDisagreement: reliable && [...support].some((s) => [...inaccurate].some((i) => i !== s)),
     supportAgreement: reliable && support.size >= 2,
     consistent: reliable && [...verdictsBy.values()].every((v) => v.size === 1),
     providerOfSlot,
+  };
+}
+
+/**
+ * What a claim surface may state about MODELS (owner ruling 2026-11-18, R4) — the one basis every customer-visible
+ * explanatory sentence uses (banner, rendered view, copied verdict, memo). A sentence about agreement, alignment,
+ * corroboration or disagreement needs the actual DISTINCT executed models it rests on; a single substitute that answered
+ * several slots is one model, never several confirmations. Everything else is stated as panel slot responses.
+ *  - `modelsIdentified`: the record is independent by the shared gate (`independentModels` = its K ≥ 2) and the
+ *    reliably identified executing providers are exactly those K models (so "K models" is a count of identified
+ *    models; an own slot recording another slot's provider, or any unregistered provider, fails this);
+ *  - `oneModelPerSlot`: models identified and every answering slot is its own identified model;
+ *  - `supportMajority` / `partialSupportMajority` / `unverifiableMajority`: models identified, every identified model
+ *    answered all its slots with one verdict, and at least two DISTINCT identified models — more than half of them —
+ *    rated it accurate / accurate-or-partially-accurate / unverifiable (the banner's "a/u models" condition);
+ *  - `disagreement`: a supporting and an inaccurate answer from two different identified models;
+ *  - `substitutedUsable`: answering slots written by a substitute (slot family names are then not the executing model).
+ * Fail closed: an uncountable tally or a non-independent record establishes nothing about models.
+ */
+export type ClaimStatementBasis = {
+  modelsIdentified: boolean;
+  identifiedModels: number;
+  oneModelPerSlot: boolean;
+  supportMajority: boolean;
+  partialSupportMajority: boolean;
+  unverifiableMajority: boolean;
+  disagreement: boolean;
+  substitutedUsable: number;
+};
+
+export function claimStatementBasis(rows: ReadonlyArray<unknown>, independentModels: number | null, tally: ClaimSlotTally | null): ClaimStatementBasis {
+  const sides = claimProviderSides(rows);
+  const modelsIdentified = tally !== null && independentModels !== null && independentModels >= 2 && sides.reliable && sides.providers === independentModels;
+  const majority = (n: number) => modelsIdentified && sides.consistent && n >= 2 && 2 * n > sides.providers;
+  return {
+    modelsIdentified,
+    identifiedModels: sides.providers,
+    oneModelPerSlot: modelsIdentified && tally !== null && sides.providers === tally.usable,
+    supportMajority: majority(sides.accurateProviders),
+    partialSupportMajority: majority(sides.supportProviders),
+    unverifiableMajority: majority(sides.unverifiableProviders),
+    disagreement: sides.crossModelDisagreement,
+    substitutedUsable: tally?.substitutedUsable ?? 0,
   };
 }
 

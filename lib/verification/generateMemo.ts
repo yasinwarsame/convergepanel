@@ -133,9 +133,26 @@ export interface MemoInput {
    *    as points repeated across responses, not "WHERE MODELS AGREE";
    *  - `disagreementPointsBetweenModels`: the conflict points that are between two identified models; the other points
    *    are listed as points that differ across responses.
-   * Absent → exactly the memo as before.
+   * R4 (owner ruling 2026-11-18) — the shared statement basis (claimVerdictCounts.ts claimStatementBasis): every
+   * explanatory sentence about models needs it:
+   *  - `modelsIdentified`: the identified providers are exactly the gate's K ("K independent executing models");
+   *  - `supportMajority` / `partialSupportMajority` / `unverifiableMajority`: a majority of ≥ 2 DISTINCT identified
+   *    models rated it accurate / at least partially accurate / unverifiable;
+   *  - `substitutedUsable`: slot family names are listed as the executing models only when no answering slot was
+   *    written by a substitute.
+   * Absent → fail closed: an independent claim memo states panel slot responses only (no models count, no models
+   * sentence, no "WHERE MODELS AGREE / DISAGREE").
    */
-  claimCrossModel?: { disagreement: boolean; oneModelPerSlot: boolean; disagreementPointsBetweenModels: string[] };
+  claimCrossModel?: {
+    disagreement: boolean;
+    oneModelPerSlot: boolean;
+    disagreementPointsBetweenModels: string[];
+    modelsIdentified?: boolean;
+    supportMajority?: boolean;
+    partialSupportMajority?: boolean;
+    unverifiableMajority?: boolean;
+    substitutedUsable?: number;
+  };
 
   /**
    * C-b (CB-12, PQ-2 (a) strict): video memo only — the independence of the video rows by the shared gate. Video rows
@@ -259,21 +276,40 @@ export const CLAIM_MEMO_NO_SUPPORT_NOTE = "The recorded verdict label is Dispute
 export const CLAIM_MEMO_SLOT_RESPONSES_DIFFER =
   "The panel slot responses differ, but the opposing responses did not come from two reliably identified executing models; this is not a disagreement between models. The recorded verdict label is Disputed.";
 
+/**
+ * R4 — a claim memo summary in slot-response terms: the recorded label, then the recorded per-verdict counts (counts of
+ * slot responses with a usable verdict, never of agreeing models).
+ */
+export function claimMemoSlotCountsSentence(verdict: string | undefined, counts: ClaimModelVerdictCounts | null): string {
+  const label = `Recorded verdict: ${formatVerdictLabel(verdict ?? "")}.`;
+  if (counts === null || counts.usable === 0) return `${label} The panel slot responses do not establish agreement between independent models.`;
+  return `${label} Panel slot responses: ${formatClaimVerdictCounts(counts)}; these are counts of slot responses, not of agreeing models.`;
+}
+
+/**
+ * The claim memo's verdict sentence (independent branch). R4 (owner ruling 2026-11-18): a sentence about the MODELS —
+ * support, alignment, divergence, inability to verify — only when the shared statement basis establishes it from
+ * distinct identified executing models (a majority of at least two for any support / unverifiable statement, two
+ * different identified models on opposite sides for divergence); otherwise the recorded slot responses. Fail closed
+ * without `crossModel`.
+ */
 function claimSummarySentence(verdict: string | undefined, counts: ClaimModelVerdictCounts | null = null, crossModel?: MemoInput["claimCrossModel"]): string {
   const v = (verdict ?? "").toLowerCase().replace(/\s+/g, "_");
   // Doc 14 W1: a stored `disputed` over answers none of which supported the claim is stated from the answers, not as
   // models diverging (the stored label is still printed under VERDICT).
   if (isDisputedWithoutSupport(v, counts)) return `${claimNoSupportAnswerSentence(counts)} ${CLAIM_MEMO_NO_SUPPORT_NOTE}`;
-  if (v === "disputed" && crossModel && !crossModel.disagreement) return CLAIM_MEMO_SLOT_RESPONSES_DIFFER;
-  if (v === "confirmed")
+  if (v === "confirmed" && crossModel?.supportMajority === true)
     return "The models largely supported the claim, with meaningful alignment on the core statement.";
-  if (v === "disputed")
+  if (v === "disputed" && crossModel?.disagreement === true)
     return "Models diverged on important aspects of this claim; treat conclusions as contested.";
-  if (v === "partially_true")
-    return "The core statement may hold, but models flagged imprecise or debatable details.";
-  if (v === "unverifiable")
-    return "Models could not verify the claim with sufficient independent evidence or agreement.";
-  return "Models evaluated this claim independently; review per-model detail below.";
+  if (v === "disputed" && crossModel && hasSplitVerdicts(counts)) return CLAIM_MEMO_SLOT_RESPONSES_DIFFER;
+  if (v === "partially_true" && crossModel?.partialSupportMajority === true)
+    return "A majority of the independent models supported the core statement at least in part; review the per-model verdicts for imprecise or debatable details.";
+  if (v === "unverifiable" && crossModel?.unverifiableMajority === true)
+    return "Most of the independent models could not verify the claim with sufficient evidence.";
+  if (!["confirmed", "disputed", "partially_true", "unverifiable"].includes(v) && crossModel?.oneModelPerSlot === true)
+    return "Models evaluated this claim independently; review per-model detail below.";
+  return claimMemoSlotCountsSentence(verdict, counts);
 }
 
 function videoSummarySentence(verdict: string | undefined): string {
@@ -359,6 +395,20 @@ export const VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING = "POINTS REPEATED ACROSS 
 export const VIDEO_MEMO_NOT_INDEPENDENT_DISAGREE_HEADING = "POINTS THAT DIFFER ACROSS RESPONSES (NOT A DISAGREEMENT BETWEEN INDEPENDENT MODELS)";
 export const VIDEO_MEMO_UNVERIFIED_METHODOLOGY_TAIL = "Which models actually executed could not be established from the stored record (model independence unverified), so no consensus score is reported.";
 
+/**
+ * R4 — the claim memo's opening count (independent branch): "N AI models evaluated this claim independently" only
+ * with one identified executing model per answering slot; "M panel slots … K independent executing models" only when
+ * the identified providers are exactly K; otherwise the slots, without a number of models.
+ */
+function claimMemoLead(exec: { independentModels: number; answeredSlots: number } | null, recordedSlots: number, cross: MemoInput["claimCrossModel"]): string {
+  if (!exec) return `${recordedSlots} panel slot${recordedSlots === 1 ? " recorded for this claim; which model executed it" : "s recorded for this claim; which models executed them"} is not established.`;
+  if (cross?.oneModelPerSlot === true && exec.answeredSlots === exec.independentModels)
+    return `${exec.independentModels} AI models evaluated this claim independently.`;
+  if (cross?.modelsIdentified === true)
+    return `${exec.answeredSlots} panel slots answered this claim; ${exec.independentModels} independent executing models wrote those answers.`;
+  return `${exec.answeredSlots} panel slot${exec.answeredSlots === 1 ? "" : "s"} answered this claim; the recorded providers do not establish how many independent models wrote those answers.`;
+}
+
 function generateClaimMemo(input: MemoInput): string {
   const lines: string[] = [];
   const claim = (input.claim ?? "").trim() || "—";
@@ -401,9 +451,7 @@ function generateClaimMemo(input: MemoInput): string {
       ? CLAIM_MEMO_SINGLE_MODEL_SUMMARY
       : coverage === "unverified"
         ? CLAIM_MEMO_UNVERIFIED_SUMMARY
-        : slotsOverModels
-          ? `${exec!.answeredSlots} panel slots answered this claim; ${exec!.independentModels} independent executing models wrote those answers. ${claimSummarySentence(input.verdict, verdictCounts, input.claimCrossModel)}`
-          : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict, verdictCounts, input.claimCrossModel)}`
+        : `${claimMemoLead(exec, rows.length, input.claimCrossModel)} ${claimSummarySentence(input.verdict, verdictCounts, input.claimCrossModel)}`
   );
   lines.push("");
 
@@ -426,15 +474,17 @@ function generateClaimMemo(input: MemoInput): string {
   const agree = noConsensus ? [] : dedupeCap(input.agreementPoints ?? []);
   if (agree.length) {
     // R3: agreement between models only when every answering slot is its own identified model.
-    lines.push(cross && !cross.oneModelPerSlot ? VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING : "WHERE MODELS AGREE");
+    // R4: fail closed — without the basis nothing is stated as agreement between models.
+    lines.push(cross?.oneModelPerSlot === true ? "WHERE MODELS AGREE" : VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING);
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 
   const disagree = noConsensus ? [] : dedupeCap(input.disagreementPoints ?? []);
   // R3: a conflict point is a disagreement between models only when it is between two identified models.
-  const betweenModels = cross ? disagree.filter((p) => cross.disagreementPointsBetweenModels.includes(p)) : disagree;
-  const betweenSlots = cross ? disagree.filter((p) => !cross.disagreementPointsBetweenModels.includes(p)) : [];
+  // R4: fail closed — without the basis no point is presented as between models.
+  const betweenModels = cross ? disagree.filter((p) => cross.disagreementPointsBetweenModels.includes(p)) : [];
+  const betweenSlots = cross ? disagree.filter((p) => !cross.disagreementPointsBetweenModels.includes(p)) : disagree;
   if (betweenModels.length) {
     lines.push("WHERE MODELS DISAGREE");
     betweenModels.forEach((p) => lines.push(`- ${p}`));
@@ -476,6 +526,12 @@ function generateClaimMemo(input: MemoInput): string {
   const nn = Math.max(1, n);
   const namesPhrase =
     modelNamesList.length > 0 ? ` (${modelNamesList.join(", ")})` : "";
+  // R4: the answering slots are described as N named models only when each is its own identified model and none was
+  // written by a substitute (the names are slot family names); K only when the identified providers are exactly K.
+  const crossM = input.claimCrossModel;
+  const namedModels = exec !== null && !slotsOverModels && crossM?.oneModelPerSlot === true && crossM.substitutedUsable === 0;
+  const kIdentified = exec !== null && crossM?.modelsIdentified === true;
+  const slotsPhrase = exec ? `${exec.answeredSlots} answering panel slot${exec.answeredSlots === 1 ? "" : "s"}` : `${rows.length} panel slot${rows.length === 1 ? "" : "s"}`;
 
   lines.push("METHODOLOGY");
   lines.push(
@@ -483,7 +539,9 @@ function generateClaimMemo(input: MemoInput): string {
       ? coverage === "insufficient"
         ? CLAIM_MEMO_SINGLE_MODEL_METHODOLOGY
         : CLAIM_MEMO_UNVERIFIED_METHODOLOGY
-      : slotsOverModels
+      : !namedModels && !kIdentified
+        ? `This claim was sent to ${slotsPhrase}${namesPhrase} via ConvergePanel; the recorded providers do not establish how many independent models wrote those answers. Each slot received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. The consensus score was computed over answering slots, so it is not a count of independent models.`
+        : !namedModels
         ? `This claim was sent to ${exec!.answeredSlots} answering panel slots${namesPhrase} via ConvergePanel, written by ${exec!.independentModels} independent executing models (a model that answered several slots counts once). Each slot received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. The consensus score was computed over answering slots, so it is not a count of independent models.`
         : `This claim was independently evaluated by ${nn} large language model${nn === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`
   );

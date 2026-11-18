@@ -161,7 +161,13 @@ function check(outs: Outcome[], mode: Mode): string[] {
   }
   if (banner.title === "Models disagree on this claim" && !(support > 0 && o.I > 0)) errs.push(`"Models disagree" without answers on both sides (support=${support} I=${o.I})`);
   if (view.independence !== "independent" && (ns || sm || sa || /disagree/i.test(banner.title))) errs.push("multi-model statement on a non-independent record");
-  if (/\d/.test(banner.title) && !ns && !sm && !sa) errs.push(`unclassified numeric banner: ${banner.title}`);
+  // R4: an unverifiable record without a majority of >= 2 identified models rating it unverifiable states the answers.
+  const ua = /^(\d+) of (\d+) answers rated this claim unverifiable$/.exec(banner.title);
+  if (ua) {
+    if (Number(ua[1]) !== o.U || Number(ua[2]) !== o.usable) errs.push(`unverifiable answers ${ua[1]}/${ua[2]} vs U=${o.U} usable=${o.usable}`);
+    if (!banner.subtitle.includes(SLOT_NOTE)) errs.push("unverifiable-answers banner without the slot disclosure");
+  }
+  if (/\d/.test(banner.title) && !ns && !sm && !sa && !ua) errs.push(`unclassified numeric banner: ${banner.title}`);
 
   // 2. Slot note (consensus card / copied verdict): the recorded slot outcomes, exactly.
   const tally = claimPayloadSlotTally(payload);

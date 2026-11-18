@@ -275,7 +275,7 @@ describe("doc 14 PR-1 R3 — Personal wrapper memo wiring by identified executin
     const { input, memo } = await exportMemo(
       doc([r("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }), r("claude", "ok", "inaccurate", { ...DS, incorrectParts: [LONG_B] }), r("gemini", "ok", "unverifiable")], ["chatgpt", "claude", "gemini"], "disputed")
     );
-    expect(input.claimCrossModel).toEqual({ disagreement: false, oneModelPerSlot: false, disagreementPointsBetweenModels: [] });
+    expect(input.claimCrossModel).toMatchObject({ disagreement: false, oneModelPerSlot: false, supportMajority: false, disagreementPointsBetweenModels: [] });
     expect(memo).not.toContain("Models diverged");
     expect(memo).toContain("The panel slot responses differ, but the opposing responses did not come from two reliably identified executing models");
     expect(memo).not.toContain("WHERE MODELS DISAGREE");

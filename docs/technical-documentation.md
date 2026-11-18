@@ -952,7 +952,7 @@ never inflates a provider count). Counts are stated in "models" only when the id
 gate's independent models (and, for the no-support banner, one per answering slot); otherwise in "answers" with the slot
 note. "Models disagree on this claim" / memo "Models diverged…" need a supporting and an inaccurate answer from two
 different identified providers — one substitute answering both sides is "Panel slot responses differ on this claim";
-"Partial agreement across models" needs two identified providers with a supporting answer; "supported by a/u models" +
+"Partial agreement across models" needs a consistent majority of at least two identified providers with a supporting answer (R4; R3 required only two); "supported by a/u models" +
 "Majority agreement" needs a consistent majority of at least two identified models; "Where models agree" needs one
 identified model per answering slot, and "Where models disagree" lists only pairs from two different identified
 providers (other points go under the "points … across responses" headings). Rows that cannot be counted (or that
@@ -960,6 +960,27 @@ disagree with the audit bundle) get the unverified banner. The Team list summary
 `modelVerdicts` (absent when the bundle cannot be counted; the Team client parser accepts it absent, ignores additional
 keys, and drops unusable counts for that row only — it never fails the page over them). The Personal history item does
 **not** carry it (deferred: `app/page.tsx` is byte-frozen).
+
+**One statement basis for every explanatory sentence (PR-1 R4, owner ruling 2026-11-18).** Every customer-visible
+claim sentence about models — banner, rendered view (consensus card label, agreement fallback copy, digest headings,
+audit trail heading), copied verdict, memo (summary, methodology, headings) — reads one basis,
+`claimStatementBasis` (`lib/verification/claimVerdictCounts.ts`, via `claimStatementBasisOf` in the shared view):
+`modelsIdentified` (presented "independent" and the reliably identified providers are exactly the gate's K),
+`oneModelPerSlot`, `supportMajority` / `partialSupportMajority` / `unverifiableMajority` (every identified model answered
+consistently, and at least two DISTINCT identified models — more than half — rated it accurate / at least partially
+accurate / unverifiable) and `disagreement` (two different identified models on opposite sides). A single substitute
+that wrote several supporting slots is one model, never several confirmations. Without the basis, a surface states the
+recorded label and the slot-response counts ("Recorded verdict: Confirmed. Panel slot responses: 4 accurate, 1
+inaccurate; these are counts of slot responses, not of agreeing models."). A stored label the answers do not bear out
+(e.g. a historical record scored by older rules) is named as recorded with the counts — never re-scored. The memo input
+is built by `claimMemoInput` (shared view module); `generateVerificationMemo` fails closed when a claim memo has no basis
+(no models count, no models sentence, no "WHERE MODELS AGREE / DISAGREE"). Slot family names are listed as models only
+for an identified own (non-substitute) model per answering slot. A failed or malformed slot "returned no usable verdict";
+it is never counted as having "could not verify" the claim. Test oracle: a closed-world sentence inventory
+(`lib/verification/__tests__/claimStatementInventory.harness.tsx` + `claimStatementInventory*.spec.tsx`): every text unit
+of every claim surface must match exactly one inventoried template, and each template's semantic claim is checked
+against an independent oracle over the full mix space (1–5 slots × 6 outcomes × 13 provider modes, plus historical
+labels).
 
 **Agreement digest (PR-1, doc 14 D-5).** `buildAgreementDisagreementDigest` takes each row's verdict. "Conflicting
 assessments" is reported for a part one model lists as correct and another lists as incorrect, or (legacy heuristic)

@@ -83,7 +83,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "935b42fd472afea11e41044842cc3f33588e4240",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "f2a47e1350304939ebb51991842b4c930bc4e7bc",
 };
 
 /**
@@ -204,12 +204,21 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * Re-pinned (doc 14 PR-1 R3, owner ruling 2026-11-18): vocabularyManifest.json b343d773… → 935b42fd… (1 claim-memo entry
  * appended: the "panel slot responses differ" summary for a disputed record without a cross-model disagreement; none
  * removed). Same 32-file pinned set.
+ *
+ * Re-pinned (doc 14 PR-1 R4, owner ruling 2026-11-18 — every explanatory sentence needs distinct executed models and a
+ * supporting majority): vocabularyManifest.json 935b42fd… → f2a47e13… (4 claim-memo entries appended: the slot-response
+ * verdict sentence and its no-counts variant, the majority-gated partially-true sentence, the slot methodology without a
+ * number of models; 1 removed: "Models could not verify the claim with sufficient independent evidence or agreement.",
+ * replaced by the majority-gated unverifiable sentence; 4 rules extended with the R4 gating).
+ *   historicalParity.spec.tsx: fce2e317… → 0a494367… (the three legacy claim memo inputs, which record no independence or
+ *   identity, are superseded by exact hash over their untouched sealed 2c17feee entries; every other shared memo is
+ *   still byte-identical). Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
-  "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "fce2e3172049cd868607e83a8a0a0147ec4939f3",
+  "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {

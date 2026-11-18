@@ -20,7 +20,7 @@ jest.mock("@/lib/firebase/admin", () => ({
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ClaimVerificationResultView, { buildClaimVerdictClipboardText } from "@/components/verification/ClaimVerificationResultView";
+import ClaimVerificationResultView, { buildClaimVerdictClipboardText, claimMemoInput } from "@/components/verification/ClaimVerificationResultView";
 import { mapStoredVerificationToClientPayload } from "@/lib/user/mapStoredVerificationToClientPayload";
 import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 import { buildClaimVerificationAuditBundle } from "@/lib/verification/auditBundle";
@@ -53,21 +53,9 @@ function doc(rows: Row[], stored: { verdict: string; consensusScore: number; con
   } as unknown as ClaimVerificationFirestoreDoc;
 }
 const html = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(el).replace(/<!-- -->/g, "").replace(/&#x27;/g, "'");
-const memoOf = (p: ReturnType<typeof mapStoredVerificationToClientPayload>) =>
-  generateVerificationMemo({
-    type: "claim",
-    claim: p.claim,
-    verdict: p.verdict,
-    consensusScore: p.consensusScore,
-    confidenceLabel: p.confidenceLabel,
-    evidenceQuality: p.evidenceQuality ?? "mixed",
-    modelEvidence: p.modelEvidence,
-    agreementPoints: p.whereModelsAgree,
-    disagreementPoints: p.whereModelsDisagree.map((d) => d.point),
-    verificationId: "v",
-    claimModelIndependence: p.modelIndependence,
-    claimExecution: { independentModels: p.modelEvidence.filter((m) => m.status === "ok").length, answeredSlots: p.modelEvidence.filter((m) => m.status === "ok").length },
-  });
+// R4: the memo input exactly as the Personal wrapper builds it (claimMemoInput: independence, gate counts and the
+// shared statement basis) — a hand-built input without the basis now fails closed to slot wording.
+const memoOf = (p: ReturnType<typeof mapStoredVerificationToClientPayload>) => generateVerificationMemo(claimMemoInput(p));
 
 // Stored as main writes them (labels from computeClaimVerdict; scores illustrative of the stored record).
 const NO_SUPPORT_WITH_U = doc([row("chatgpt", "inaccurate"), row("claude", "inaccurate"), row("grok", "inaccurate"), row("gemini", "unverifiable")], { verdict: "disputed", consensusScore: 50, confidenceLabel: "Medium", evidenceQuality: "weak" });
