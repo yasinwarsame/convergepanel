@@ -240,6 +240,15 @@ describe("A2 — identity-bound rendering of the /verify input (every committed 
   });
 });
 
+describe("expiry sweep on mount (no auth callback needed)", () => {
+  it("an expired record is removed from storage as soon as /verify mounts, even before auth resolves", () => {
+    session.setItem("convergePanelVerifyPendingV2", JSON.stringify({ v: 2, text: A_CLAIM, boundUid: null, expiresAt: Date.now() - 1 }));
+    load("/verify?source=extension");
+    expect(session.getItem("convergePanelVerifyPendingV2")).toBeNull();
+    assertFrames("SENTINEL_ACCOUNT_A", () => false);
+  });
+});
+
 describe("A3 — fragment hand-off, legacy links, and the /verify -> app hand-off", () => {
   it("extension fragment: the text never reaches a URL after capture; the fragment is removed", async () => {
     load(ext(ANON_CLAIM));
@@ -282,6 +291,22 @@ describe("A3 — fragment hand-off, legacy links, and the /verify -> app hand-of
     load(`/?tab=research&q=${encodeURIComponent(ANON_CLAIM)}`);
     expect(g.window.location.search).toBe("?tab=research");
     expect(JSON.stringify(session.keys().map((k) => session.getItem(k)))).toContain("SENTINEL_ANON");
+  });
+
+  it("/verify with blocked sessionStorage: the URL keeps the text (survives reload) and the page still shows it", async () => {
+    g.window.sessionStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => undefined,
+      key: () => null,
+      length: 0,
+    };
+    load(legacyExt(ANON_CLAIM));
+    await auth(null);
+    expect(g.window.location.search).toContain("text=");
+    expect(textareaValue()).toBe(ANON_CLAIM); // in-memory fallback for this page
   });
 
   it("legacy links are NOT stripped when the hand-off cannot be stored (no silent loss)", () => {

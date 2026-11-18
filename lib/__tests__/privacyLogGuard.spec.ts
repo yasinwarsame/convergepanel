@@ -71,9 +71,22 @@ function wrapperNames(src: string): string[] {
 }
 
 /** Catch blocks whose try body parses text: any log of `<err>.message` / `.stack` / the whole error is content. */
+/** Local functions whose body parses text — a `try` that CALLS one is a parse path too (synthesisReport's `callNarrative`). */
+function parseHelperNames(src: string): string[] {
+  const names: string[] = [];
+  const defs = [...src.matchAll(/(?:async\s+)?function\s+(\w+)\s*\(|(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::[^=]*)?=>/g)];
+  defs.forEach((d, i) => {
+    const end = i + 1 < defs.length ? defs[i + 1].index! : src.length;
+    if (PARSE_TRY.test(src.slice(d.index!, Math.min(end, d.index! + 4000)))) names.push((d[1] ?? d[2])!);
+  });
+  return names;
+}
+
 function parseCatchHits(src: string, file: string): string[] {
   const hits: string[] = [];
   const lines = src.split("\n");
+  const helpers = parseHelperNames(src);
+  const helperCall = helpers.length ? new RegExp(`\\b(?:${helpers.join("|")})\\s*\\(`) : null;
   lines.forEach((line, i) => {
     const m = line.match(/\}\s*catch\s*\((\w+)/);
     if (!m) return;
@@ -81,7 +94,8 @@ function parseCatchHits(src: string, file: string): string[] {
     const indent = line.length - line.trimStart().length;
     let j = i - 1;
     while (j >= 0 && !(/^\s*try\s*\{/.test(lines[j]) && lines[j].length - lines[j].trimStart().length === indent)) j--;
-    if (j < 0 || !PARSE_TRY.test(lines.slice(j, i).join("\n"))) return;
+    const tryBody = j < 0 ? "" : lines.slice(j, i).join("\n");
+    if (j < 0 || !(PARSE_TRY.test(tryBody) || (helperCall !== null && helperCall.test(tryBody)))) return;
     let k = i + 1;
     while (k < lines.length && !(lines[k].trim().startsWith("}") && lines[k].length - lines[k].trimStart().length === indent)) k++;
     const body = lines.slice(i + 1, k).join("\n");
@@ -174,6 +188,7 @@ describe("R3 guard — evasion shapes are caught", () => {
     [".substr", "console.log(\"[x]\", { p: responseText.substr(0, 50) });"],
     ["console.trace/dir/table", "console.table(data.results);"],
     ["wrapper function", "const warn = (m: string, d?: unknown) => logger.warn(m, d);\nwarn(\"[x]\", { preview: markdown.substring(0, 80) });"],
+    ["MAJOR-1 through a parse helper", "async function callNarrative() {\n  return JSON.parse(stripJsonFences(r.rawText));\n}\nasync function run() {\n  try {\n    await callNarrative();\n  } catch (err: any) {\n    logger.warn(\"[x] threw\", { error: err?.message });\n  }\n}"],
     ["MAJOR-1: err.message after JSON.parse", "try {\n  const p = JSON.parse(stripJsonFences(result.rawText));\n} catch (err: any) {\n  logger.warn(\"[x] threw\", { error: err?.message });\n}"],
   ])("%s", (_name, src) => {
     expect(scanSnippet(src).length).toBeGreaterThan(0);

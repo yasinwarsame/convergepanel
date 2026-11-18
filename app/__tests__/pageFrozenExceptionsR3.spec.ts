@@ -85,4 +85,16 @@ describe("new hand-off writers never put claim / question text in a URL", () => 
     const blocked = { getItem: () => null, setItem: () => { throw new Error("blocked"); }, removeItem: () => undefined };
     expect(appHandoffHref("verify", "x y", "uid-a", blocked)).toBe("/?tab=verify&claim=x%20y");
   });
+  it("a hand-off bound to account A is never returned to account B (and is removed), nor to the wrong tab", () => {
+    const { writeAppHandoff, consumeAppHandoff } = require("@/lib/client/verifyPrefill");
+    const { FakeStorage } = require("@/lib/client/__tests__/helpers/fakeStorage");
+    const st = new FakeStorage();
+    writeAppHandoff(st, "verify", "SENTINEL_A claim", "uid-a");
+    expect(consumeAppHandoff("verify", "uid-b", st)).toBeNull();
+    expect(st.length).toBe(0);
+    writeAppHandoff(st, "verify", "SENTINEL_A claim", "uid-a");
+    expect(consumeAppHandoff("research", "uid-a", st)).toBeNull();
+    writeAppHandoff(st, "verify", "SENTINEL_ANON claim", null);
+    expect(consumeAppHandoff("verify", "uid-b", st)).toBe("SENTINEL_ANON claim"); // unbound: first reader
+  });
 });

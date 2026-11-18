@@ -81,8 +81,11 @@ describe.each(MODES)("MAJOR-1 sites — %s", (_label, impl) => {
     expect(logged()).not.toContain(SENTINEL);
   });
 
-  it("synthesisReport.ts (narrative + regenerate): no model text in logs", async () => {
-    await buildAdaptiveSynthesisReport("Q", "generic" as any, [], results);
+  it("synthesisReport.ts (narrative call, reached with a real row): no model text in logs", async () => {
+    const cell = (modelId: string) => ({ modelId, stance: "agrees", rawStance: "asserts", confidence: "settled", excerpt: `${modelId} excerpt` });
+    const row = { id: "r1", claimText: "Tides follow the moon", cells: [cell("chatgpt"), cell("claude")], agreementScore: 0.9, certaintyScore: 0.9, status: "consensus" };
+    await buildAdaptiveSynthesisReport("Q", "generic" as any, [row] as any, results);
     expect(logged()).not.toContain(SENTINEL);
+    expect(logged()).toMatch(/narrative|Bias detection|Coverage audit/i); // control: the degraded path is logged
   });
 });

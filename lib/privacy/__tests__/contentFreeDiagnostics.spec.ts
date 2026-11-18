@@ -34,3 +34,19 @@ describe("contentFreeDiagnostics", () => {
     expect(issueFieldsFromStrings([`stance: received '${SENTINEL}'`, "no colon"])).toEqual(["stance", "(unknown)"]);
   });
 });
+
+describe("R3 — diagnosticCode / contentFreeError are bounded and content-free", () => {
+  const { contentFreeError, diagnosticCode } = require("@/lib/privacy/contentFreeDiagnostics");
+  it.each([
+    [new Error(`${SENTINEL} plain error`), "error"],
+    [Object.assign(new Error(`${SENTINEL} with status`), { status: 429 }), "http_429"],
+    [Object.assign(new Error(`${SENTINEL}`), { name: "AbortError" }), "aborted"],
+    [new Error(`${SENTINEL} request timed out`), "timeout"],
+    [new TypeError("Failed to fetch"), "network_error"],
+    ["a string thrown", "error"],
+    [null, "error"],
+  ])("%s → %s, never the message", (err, code) => {
+    expect(diagnosticCode(err)).toBe(code);
+    expect(JSON.stringify(contentFreeError(err))).not.toContain(SENTINEL);
+  });
+});
