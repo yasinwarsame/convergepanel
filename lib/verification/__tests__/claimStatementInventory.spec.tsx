@@ -57,3 +57,29 @@ describe("named scenarios (R4)", () => {
     expect(memoFor(x.payload)).not.toMatch(/majority of the independent models/);
   });
 });
+
+describe("claimStatementBasis fails closed on its own (defense in depth behind the shared gate)", () => {
+  // The shared gate already presents a record with an unregistered provider as "unverified", so no surface reaches the
+  // basis with one. The basis must still never count such an identity, whatever K a caller passes.
+  const { claimStatementBasis, claimSlotTally } = jest.requireActual("@/lib/verification/claimVerdictCounts");
+  const r = (modelId: string, verdict: string, provider?: string) => ({ modelId, status: "ok", verdict, ...(provider !== undefined ? { provider } : {}) });
+
+  it("an unknown or missing provider is never a distinct identified model", () => {
+    for (const rows of [
+      [r("chatgpt", "accurate", "unknown"), r("claude", "accurate", "anthropic"), r("gemini", "accurate", "google")],
+      [r("chatgpt", "accurate"), r("claude", "accurate", "anthropic"), r("gemini", "accurate", "google")],
+      [r("chatgpt", "accurate", "acme"), r("claude", "accurate", "acme2"), r("gemini", "inaccurate", "google")],
+    ]) {
+      for (const k of [2, 3]) {
+        const b = claimStatementBasis(rows, k, claimSlotTally(rows));
+        expect([k, b.modelsIdentified, b.oneModelPerSlot, b.supportMajority, b.partialSupportMajority, b.disagreement]).toEqual([k, false, false, false, false, false]);
+      }
+    }
+  });
+
+  it("control: three identified own models with an accurate majority establish it", () => {
+    const rows = [r("chatgpt", "accurate", "openai"), r("claude", "accurate", "anthropic"), r("gemini", "inaccurate", "google")];
+    const b = claimStatementBasis(rows, 3, claimSlotTally(rows));
+    expect([b.modelsIdentified, b.oneModelPerSlot, b.supportMajority, b.disagreement]).toEqual([true, true, true, true]);
+  });
+});
