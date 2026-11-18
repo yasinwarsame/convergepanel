@@ -2092,8 +2092,10 @@ interface A9Result { state: JobState; code: string | undefined; charged: number 
 const a9Result = (r: A9Run): A9Result => {
   const e = r.sys.store.get<SettleEntry>(`ledger/settle_${r.id}`);
   const j = jobOf(r.sys, r.id);
-  return { state: j.state, code: j.state === "failed" ? j.failureCode : undefined, charged: e ? e.charged : null, released: e ? e.released : null };
+  return { state: j.state, code: j.state === "failed" ? a9Code(r.sys, r.id) : undefined, charged: e ? e.charged : null, released: e ? e.released : null };
 };
+/** The failure code from the terminal outcome record, which (unlike the job) survives the purge. */
+const a9Code = (s: System, id: string): string | undefined => s.store.get<model.OutcomeDoc>(outcomePath(id))?.code;
 
 /** Asserts one table row for one (pending, usable, failed[, terminal]) case. */
 function a9Check(row: TRow, r: A9Run): A9Result {
@@ -2106,7 +2108,7 @@ function a9Check(row: TRow, r: A9Run): A9Result {
   else {
     const [state, code] = row.to.split(": ");
     expect({ ...tag, state: job.state }).toEqual({ ...tag, state });
-    if (code) expect({ ...tag, code: job.failureCode }).toEqual({ ...tag, code });
+    if (code) expect({ ...tag, code: a9Code(sys, id) }).toEqual({ ...tag, code });
   }
   // Charged / Released
   const want = Math.min(reserved, r.usable);
@@ -2208,7 +2210,7 @@ describe("Addendum 9: a worker crash settles identically with and without a pend
             runToEnd(sweep(r.sys));
             const j = jobOf(r.sys, r.id);
             const e = settleOf(r.sys, r.id);
-            out[pending] = { state: j.state, code: j.failureCode, charged: e.charged, released: e.released, balance: creditsOf(r.sys) - before };
+            out[pending] = { state: j.state, code: a9Code(r.sys, r.id), charged: e.charged, released: e.released, balance: creditsOf(r.sys) - before };
             expect({ from, ok, bad, pending, v: out[pending] }).toEqual({ from, ok, bad, pending, v: { state: "failed", code: "worker_timeout", charged: 0, released: r.reserved, balance: 0 } });
             // Provider cost is still recorded, one entry per committed call, whatever the charge.
             expect(costsOf(r.sys, r.id).length).toBe(ok + bad);

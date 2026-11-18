@@ -266,6 +266,11 @@ export class System {
 
   readonly settlements: string[] = [];
   readonly releases: string[] = [];
+  /**
+   * Addendum 9 (R4 MINOR-1): the acceptance-identity generator, injectable so tests can control it.
+   * The default is the CSPRNG `crypto.randomBytes`; T-create draws from it and nothing else.
+   */
+  acceptanceRng: AcceptanceRng = randomBytes;
   /** Final `422 repeated_failing_input` answers (failed-job controls, ledger-and-billing.md §4.3). */
   readonly shortCircuitRejections: ShortCircuitRejection[] = [];
 
@@ -289,8 +294,12 @@ export class System {
  * verification ID, the request content or the time.
  */
 export const ACCEPTANCE_ID_BYTES = 16;
-export function newAcceptanceId(): string {
-  return `acc_${randomBytes(ACCEPTANCE_ID_BYTES).toString("hex")}`;
+export type AcceptanceRng = (size: number) => Uint8Array;
+/** The ID is exactly ACCEPTANCE_ID_BYTES bytes drawn from `rng`, hex-encoded; nothing else enters it. */
+export function newAcceptanceId(rng: AcceptanceRng = randomBytes): string {
+  const bytes = rng(ACCEPTANCE_ID_BYTES);
+  if (bytes.length !== ACCEPTANCE_ID_BYTES) throw new Error("acceptance identity: short random draw");
+  return `acc_${Buffer.from(bytes).toString("hex")}`;
 }
 
 export function idemPath(key: KeyDoc, idempotencyKey: string): string {
@@ -462,7 +471,7 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
 
     // Step 15: job + reservation + idempotency record, one commit.
     const id = sys.newId();
-    const acceptanceId = newAcceptanceId(); // independent of id, key and content (Addendum 8)
+    const acceptanceId = newAcceptanceId(sys.acceptanceRng); // independent of id, key and content (Addendum 8, 9)
     const credits = creditsFor(v);
     const body: AcceptedBody = { object: "verification", id, status: "queued", type: v.type, credits_reserved: credits };
     const org3 = org2 as OrgDoc;
@@ -518,7 +527,10 @@ export interface JobDoc {
   queuedAt?: number;
   leaseExpiries?: number;
   failureCode?: string;
-  /** Recorded provider calls that returned usable output (the model's chargeable work). */
+  /**
+   * Committed provider calls that returned usable output (the model's chargeable work). A call counts
+   * only once its record and cost entry have committed while the job was non-terminal (Addendum 9).
+   */
   callsMade?: number;
   /** Recorded provider calls that failed (never chargeable; their cost is still recorded). */
   failedCalls?: number;
@@ -811,6 +823,9 @@ export function* recordCallResult(sys: System, id: string, outcome: CallOutcome 
     // outcome and whatever the customer is later charged (ledger-and-billing.md §3.1).
     tx.create(`cost/${id}/${n}`, { usd, outcome } satisfies CostDoc);
     tx.set(`jobs/${id}`, outcome === "ok" ? { ...job, callsMade: (job.callsMade ?? 0) + 1 } : { ...job, failedCalls: (job.failedCalls ?? 0) + 1 });
+    // Addendum 9: the provider has returned but nothing is committed yet. A worker that dies here
+    // leaves no call record, no cost entry and no committed work: the call is not billable.
+    yield;
     if (tx.commit() === "committed") return { status: 200 };
     yield;
   }
@@ -881,9 +896,10 @@ export function* completeDeletion(sys: System, delId: string): Generator<void, A
 
 /**
  * Sweeper pass (§4.4): bounded recovery for EVERY non-terminal state, deletion-pending or not.
- * `running` / `synthesizing` with LEASE_EXPIRY_LIMIT expired leases → terminal (`failed:
- * worker_timeout`, or `canceled: deletion_requested` when deletion is pending); `pending_dispatch` /
- * `queued` past the max queue wait (or with deletion pending) → terminal with a full release. Then
+ * `running` / `synthesizing` with LEASE_EXPIRY_LIMIT expired leases → `failed: worker_timeout`
+ * WHETHER OR NOT a cancellation or a deletion is pending (Addendum 9: a pending request is never an
+ * input to a settlement; the deletion then completes); `pending_dispatch` / `queued` past the max
+ * queue wait (or with deletion pending) → terminal with a full release (charged 0 either way). Then
  * it retries every pending deletion operation.
  */
 export function* sweep(sys: System): Generator<void, ApiResponse, void> {
@@ -892,7 +908,7 @@ export function* sweep(sys: System): Generator<void, ApiResponse, void> {
     if (TERMINAL.has(j.state)) continue;
     const id = p.slice("jobs/".length);
     if ((j.state === "running" || j.state === "synthesizing") && (j.leaseExpiries ?? 0) >= LEASE_EXPIRY_LIMIT) {
-      yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "failed", j.deletionRequested ? "deletion_requested" : "worker_timeout");
+      yield* finishJob(sys, id, "failed", "worker_timeout");
     } else if ((j.state === "pending_dispatch" || j.state === "queued") && (j.deletionRequested || sys.dynamic.now - (j.queuedAt ?? 0) > MAX_QUEUE_WAIT_MS)) {
       yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "expired", j.deletionRequested ? "deletion_requested" : "max_queue_wait");
     }
