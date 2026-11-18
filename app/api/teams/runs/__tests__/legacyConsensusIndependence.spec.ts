@@ -301,6 +301,48 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     expect(html(by["claim-two"])).toContain("<span>Consensus 92/100</span>");
   });
 
+  // R5 (review record 16, section F, MAJOR-1): the legacy Team queue presents the claim score on the SAME shared basis as
+  // the governance queue — four slots answered by one DeepSeek substitute + Perplexity is two models, but the score was
+  // computed over five slot responses, so it carries the R4 qualifier.
+  it("claim row: slots collapsed onto one substitute + one own model → score qualified as slot responses (R5 MAJOR-1)", async () => {
+    const ds = { substituted: true, provider: "deepseek" };
+    seedVerification(
+      "v-mix",
+      [
+        vrow("chatgpt", "ok", ds),
+        vrow("claude", "ok", ds),
+        vrow("gemini", "ok", ds),
+        vrow("grok", "ok", ds),
+        vrow("perplexity", "ok", { provider: "perplexity", verdict: "inaccurate" }),
+      ],
+      ["chatgpt", "claude", "gemini", "grok", "perplexity"]
+    );
+    seedVerification("v-own", [vrow("chatgpt", "ok", { provider: "openai" }), vrow("claude", "ok", { provider: "anthropic" })], ["chatgpt", "claude"]);
+    seedRun("r-mixed", [pm("chatgpt", "substituted", "deepseek"), pm("claude", "substituted", "deepseek"), pm("grok", "ok", "xai")]);
+    teamRunDocs.set("claim-mix", claimDoc("v-mix"));
+    teamRunDocs.set("claim-own", claimDoc("v-own"));
+    teamRunDocs.set("research-mixed", legacyDoc({ runId: "r-mixed", consensusScore: 72 }));
+    const by = await legacyItems();
+    expect([by["claim-mix"].consensusScore, "consensusWithheld" in by["claim-mix"], by["claim-mix"].consensusBasis]).toEqual([92, false, "slot_responses"]);
+    expect(html(by["claim-mix"])).toContain("<span>Consensus 92/100 (computed over panel slot responses, not independent corroboration)</span>");
+    expect(html(by["claim-mix"])).not.toContain("<span>Consensus 92/100</span>");
+    // Controls: one own model per slot → plain; a research row never carries the claim basis.
+    expect("consensusBasis" in by["claim-own"]).toBe(false);
+    expect(html(by["claim-own"])).toContain("<span>Consensus 92/100</span>");
+    expect("consensusBasis" in by["research-mixed"]).toBe(false);
+    expect(html(by["research-mixed"])).toContain("<span>Consensus 72/100</span>");
+  });
+
+  it("claim row: a verification read failure never yields a basis marker (withheld as unverified instead)", async () => {
+    const ds = { substituted: true, provider: "deepseek" };
+    seedVerification("v-mix", [vrow("chatgpt", "ok", ds), vrow("perplexity", "ok", { provider: "perplexity", verdict: "inaccurate" }), vrow("claude", "ok", ds)]);
+    teamRunDocs.set("claim-mix", claimDoc("v-mix"));
+    getAllShouldThrow = true;
+    getAllSucceedForFirstCalls = 1;
+    const by = await legacyItems();
+    expect([by["claim-mix"].consensusWithheld, "consensusBasis" in by["claim-mix"]]).toEqual(["independence_unverified", false]);
+  });
+
   it("claim row: missing / incomplete executing attribution → unverified (never presumed independent)", async () => {
     seedVerification("v-none", undefined);
     seedVerification("v-partial", [vrow("chatgpt", "ok"), vrow("claude", "ok")], ["chatgpt", "claude", "grok"]);
