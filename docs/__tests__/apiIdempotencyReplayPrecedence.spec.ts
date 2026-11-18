@@ -897,6 +897,25 @@ describe("Addendum 6: deletion lifecycle (jobs-and-idempotency.md §6.2, parsed)
     expect(table().map((r) => r.id)).toEqual(Array.from({ length: 12 }, (_, i) => `D${i + 1}`));
   });
 
+  it("the table covers every (Job at DELETE, Then) case the owner required (column binding)", () => {
+    const pairs = new Set(table().map((r) => `${r.at} | ${r.then}`));
+    const required = [
+      "queued | sweeper",
+      "running | worker reaches the next step boundary",
+      "running | in-flight provider call completes, then the boundary",
+      "synthesizing | worker reaches the next step boundary",
+      "running | worker crashes; leases expire; sweeper",
+      "running | normal completion races the deletion",
+      "completed | sweeper",
+      "running | a second DELETE, then the boundary",
+      "running | sweeper runs before the worker stops",
+      "running | worker stops; purge; then a late worker write",
+      "running | first stop attempt crashes before commit; retried",
+      "running | worker stops responding; fewer than three leases have expired so far",
+    ];
+    for (const p of required) expect({ p, present: pairs.has(p) }).toEqual({ p, present: true });
+  });
+
   /** Runs one row; returns the system, the job ID and the owner's read while deletion is pending. */
   function scenario(row: DRow): { sys: System; id: string; read: ApiResponse } {
     const sys = world();
@@ -1388,7 +1407,9 @@ describe("Addendum 7 m-5: platform-fault failures still feed the repeated-failin
   it("ledger-and-billing.md §4.3 counts worker_timeout and persistence_failed toward repeated failing input", () => {
     const md = fs.readFileSync(path.join(ROOT, "docs/product/api-0/ledger-and-billing.md"), "utf8");
     const rule = /\*\*Repeated failing input and platform faults \(Addendum 7\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
-    for (const c of ["worker_timeout", "persistence_failed"]) expect({ c, counted: rule.includes(`\`${c}\``) }).toEqual({ c, counted: true });
-    expect(rule).toContain("fingerprint");
+    // The counting clause itself, not the surrounding prose, must name both codes.
+    const clause = /the same input fingerprint ending (.+?) 3× in 1 h/.exec(rule)?.[1] ?? "";
+    const codes = Array.from(clause.matchAll(/`([a-z_]+)`/g), (m) => m[1]).sort();
+    expect(codes).toEqual(["insufficient_usable_models", "persistence_failed", "worker_timeout"]);
   });
 });
