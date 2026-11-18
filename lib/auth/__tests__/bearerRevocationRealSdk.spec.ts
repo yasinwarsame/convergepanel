@@ -11,6 +11,7 @@
 type Rec = { uid: string; disabled: boolean; tokensValidAfterTime?: string };
 const mockUsers = new Map<string, Rec | Error>();
 const mockGetUser = jest.fn();
+const mockOutage: { cookie: string | null; bearer: string | null } = { cookie: null, bearer: null };
 
 function decodePayload(t: string): Record<string, unknown> {
   const part = String(t).split(".")[1];
@@ -33,6 +34,14 @@ jest.mock("@/lib/firebase/admin", () => {
   auth.idTokenVerifier = verifier;
   auth.sessionCookieVerifier = verifier;
   auth.getUser = (...a: unknown[]) => mockGetUser(...a);
+  // Per-credential outage injection, independent of evaluation order: the SDK passes
+  // SESSION_COOKIE_REVOKED for cookies and ID_TOKEN_REVOKED for ID tokens.
+  auth.verifyDecodedJWTNotRevokedOrDisabled = function (decoded: unknown, info: { code?: string }) {
+    const kind = String(info?.code ?? "").includes("session-cookie") ? "cookie" : "bearer";
+    const code = mockOutage[kind];
+    if (code) return Promise.reject(Object.assign(new Error("upstream"), { code }));
+    return proto.verifyDecodedJWTNotRevokedOrDisabled.call(this, decoded, info);
+  };
   return { adminAuth: auth, adminDb: undefined, FIREBASE_PROJECT_ID: "test-proj", getInitializedFirebaseProjectId: () => "test-proj" };
 });
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
@@ -66,6 +75,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   delete process.env.FIREBASE_AUTH_EMULATOR_HOST; // emulator mode forces checkRevoked — would mask the defect
   mockUsers.clear();
+  mockOutage.cookie = null;
+  mockOutage.bearer = null;
   mockUsers.set("valid", { uid: "valid", disabled: false, tokensValidAfterTime: OLD });
   mockUsers.set("valid2", { uid: "valid2", disabled: false });
   mockUsers.set("revoked", { uid: "revoked", disabled: false, tokensValidAfterTime: REVOKED_AT });
@@ -129,6 +140,52 @@ describe("dual-credential rules are unchanged (parity matrix)", () => {
   ];
   it.each(cases)("%s", async (_n, opts, expected) => {
     await expect(resolveRequestIdentity(req(opts))).resolves.toEqual(expected);
+  });
+});
+
+describe("dual-credential rules under a verifier OUTAGE (fail closed; no fallback to the other credential)", () => {
+  const OUT = "app/network-error";
+  it("ANCHOR: the outage hook still delegates to the real SDK check when no outage is set", async () => {
+    await expect(resolveRequestIdentity(req({ bearer: token("revoked") }))).resolves.toEqual({ status: "unauthenticated", reason: "revoked_session" });
+  });
+  it("cookie valid + bearer outage → unauthenticated auth_unavailable (never authenticated via the cookie)", async () => {
+    mockOutage.bearer = OUT;
+    await expect(resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+  });
+  it("cookie outage + bearer valid → unauthenticated auth_unavailable (never authenticated via the bearer)", async () => {
+    mockOutage.cookie = OUT;
+    await expect(resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+  });
+  it("both outage → unauthenticated auth_unavailable", async () => {
+    mockOutage.cookie = OUT;
+    mockOutage.bearer = OUT;
+    await expect(resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+  });
+  it("cookie outage alone → auth_unavailable; bearer outage alone → auth_unavailable", async () => {
+    mockOutage.cookie = OUT;
+    await expect(resolveRequestIdentity(req({ cookie: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+    mockOutage.cookie = null;
+    mockOutage.bearer = OUT;
+    await expect(resolveRequestIdentity(req({ bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+  });
+  it("cookie A valid + bearer B outage → still unauthenticated (no mismatch-bypass via outage)", async () => {
+    mockOutage.bearer = OUT;
+    const r = await resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid2") }));
+    expect(r.status).toBe("unauthenticated");
+  });
+});
+
+describe("transient classification is EXACT-match (near-miss codes are credential failures)", () => {
+  it.each([
+    "auth/internal-error-extra",
+    "x-app/network-error",
+    "app/network-error ",
+    "APP/NETWORK-ERROR",
+    "auth/internal",
+    "app/network-timeout/retry",
+  ])("near-miss %p → invalid_bearer_token, NOT auth_unavailable", async (code) => {
+    mockUsers.set("valid", Object.assign(new Error("upstream"), { code }));
+    await expect(resolveRequestIdentity(req({ bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "invalid_bearer_token" });
   });
 });
 
