@@ -86,7 +86,7 @@ export async function buildEntryBundle(): Promise<string> {
 }
 
 /** Installed before any page script. */
-function initScript(mode: StorageMode): string {
+export function initScript(mode: StorageMode): string {
   return `(() => {
   const mode = ${JSON.stringify(mode)};
   // posthog-js treats automation (navigator.webdriver) as a bot and sends no events: present an ordinary browser.
