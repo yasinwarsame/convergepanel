@@ -210,3 +210,25 @@ describe("scrubUrlFields", () => {
     expect(cursor.url).toBe(`/x?q=${REDACTED}`);
   });
 });
+
+describe("R3 (review MINOR) — legitimate UTM and tab values are not dropped; sensitive names still redacted", () => {
+  it.each([
+    "/?utm_campaign=Black+Friday",
+    "/?utm_campaign=Black%20Friday",
+    "/?utm_source=news-letter&utm_medium=email",
+    "/?utm_content=Spring%20Sale%3A%2020%25%20off",
+    "/admin?tab=users",
+    "/admin?tab=runs",
+    "/admin?tab=policies",
+    "/governance?tab=queue",
+    "/governance?tab=audit",
+  ])("keeps %s", (u) => {
+    expect(sanitizeUrl(u)).toBe(u);
+  });
+  it("still redacts sensitive names regardless of value shape, and over-long / control-char UTM values", () => {
+    expect(sanitizeUrl("/?claim=Black+Friday")).toBe(`/?claim=${REDACTED}`);
+    expect(sanitizeUrl(`/?utm_campaign=${"x".repeat(101)}`)).toBe(`/?utm_campaign=${REDACTED}`);
+    expect(sanitizeUrl("/?utm_campaign=a%0Ab")).toBe(`/?utm_campaign=${REDACTED}`);
+    expect(sanitizeUrl(`/?tab=${encodeURIComponent("the moon is cheese")}`)).toBe(`/?tab=${REDACTED}`);
+  });
+});

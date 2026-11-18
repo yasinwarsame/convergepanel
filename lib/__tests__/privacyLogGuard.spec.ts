@@ -84,3 +84,28 @@ describe("static guard: no content excerpts or whole responses in log calls", ()
     }
   });
 });
+
+/**
+ * R3 (review MINOR — guard evadable, and it missed MAJOR-1). Each sample is a
+ * shape the reviewer showed slipping through, or the MAJOR-1 mechanism itself.
+ */
+describe("R3 guard — evasion shapes are caught", () => {
+  const scanSnippet = (src: string): string[] => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require("./privacyLogGuard.spec");
+    return typeof mod.scanSource === "function" ? mod.scanSource(src, "snippet.ts") : [];
+  };
+  it.each([
+    ["template interpolation", "logger.warn(`[x] failed ${result.rawText.slice(0, 120)}`);"],
+    ["whole-value content", "logger.error(\"[x] failed\", { body: result.rawText });"],
+    [".substr", "console.log(\"[x]\", { p: responseText.substr(0, 50) });"],
+    ["console.trace/dir/table", "console.table(data.results);"],
+    ["wrapper function", "const warn = (m: string, d?: unknown) => logger.warn(m, d);\nwarn(\"[x]\", { preview: markdown.substring(0, 80) });"],
+    ["MAJOR-1: err.message after JSON.parse", "try {\n  const p = JSON.parse(stripJsonFences(result.rawText));\n} catch (err: any) {\n  logger.warn(\"[x] threw\", { error: err?.message });\n}"],
+  ])("%s", (_name, src) => {
+    expect(scanSnippet(src).length).toBeGreaterThan(0);
+  });
+  it("control: content-free shapes pass", () => {
+    expect(scanSnippet("logger.warn(\"[x] failed\", { length: result.rawText.length, errorName: errorName(err) });")).toEqual([]);
+  });
+});
