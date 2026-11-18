@@ -19,6 +19,7 @@
 import {
   ORIGIN,
   chromiumAvailable,
+  isSentryRequest,
   openPage,
   requestsContaining,
   shutdown,
@@ -94,7 +95,7 @@ d("real posthog-js + Sentry: no claim text in any request (extension #text= hand
         expect(all.some((r) => r.layer === "network" && r.kind === "ping" && r.url.includes("/ingest/"))).toBe(true);
         // ...and the CONTROL sentinel is found in decoded PostHog AND Sentry bodies (decoding is live).
         expect(requestsContaining(all.filter((r) => r.url.includes("/ingest/")), CONTROL).length).toBeGreaterThan(0);
-        expect(requestsContaining(all.filter((r) => r.url.includes("sentry.io")), CONTROL).length).toBeGreaterThan(0);
+        expect(requestsContaining(all.filter(isSentryRequest), CONTROL).length).toBeGreaterThan(0);
         // The claim is in NO request of any kind.
         expect(describeLeaks(requestsContaining(all, SENTINEL))).toEqual([]);
         expect(run.websockets.filter((u) => u.includes(SENTINEL))).toEqual([]);

@@ -318,6 +318,15 @@ export async function openPage(path: string, opts: { mode: StorageMode; referer?
   };
 }
 
+/** True for a request to Sentry's ingest (by hostname, not substring). */
+export function isSentryRequest(r: RecordedRequest): boolean {
+  try {
+    return new URL(r.url).hostname.endsWith(".sentry.io");
+  } catch {
+    return false;
+  }
+}
+
 /** Every request (URL decoded, headers, decoded bodies) that contains `needle`. */
 export function requestsContaining(reqs: RecordedRequest[], needle: string): RecordedRequest[] {
   return reqs.filter((r) => {

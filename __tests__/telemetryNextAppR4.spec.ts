@@ -15,7 +15,7 @@
  * aborted (nothing leaves the machine). Synthetic sentinels only.
  */
 import { chromium, type Browser, type Page, type Request } from "playwright";
-import { chromiumAvailable, decodeBodies, initScript, requestsContaining, type RecordedRequest, type StorageMode } from "./helpers/telemetryBrowserHarness";
+import { chromiumAvailable, decodeBodies, initScript, isSentryRequest, requestsContaining, type RecordedRequest, type StorageMode } from "./helpers/telemetryBrowserHarness";
 
 jest.setTimeout(180_000);
 
@@ -167,7 +167,7 @@ d("real Next.js production build", () => {
           await run.page.waitForTimeout(5_000);
           const all = await run.all();
           expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(true);
-          const telemetry = all.filter((r) => r.url.includes("/ingest/") || r.url.includes("sentry.io"));
+          const telemetry = all.filter((r) => r.url.includes("/ingest/") || isSentryRequest(r));
           expect(leakList(requestsContaining(telemetry, SENTINEL))).toEqual([]);
           // Server-visible legacy URL (documented residual): the document request and the Referer of the parser-loaded
           // first-party assets carry it. Next 14 also keeps search params in the page segment of its router tree, which
