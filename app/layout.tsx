@@ -13,6 +13,7 @@ import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 import { PostHogProvider } from "@/components/PostHogProvider";
 import { ContentHandoffMigrator } from "@/components/ContentHandoffMigrator";
+import { IdentityScopedRoute } from "@/components/IdentityScopedRoute";
 import { Suspense } from "react";
 import { GOOGLE_SITE_VERIFICATION, BING_SITE_VERIFICATION } from "@/lib/env";
 
@@ -112,14 +113,16 @@ export default function RootLayout({
         <PostHogProvider>
           <ErrorBoundaryWrapper>
             <AuthProvider>
-            {/* Privacy (PR #329 R3): moves claim text out of the URL before any page effect or pageview reads it. */}
+            {/* Privacy (PR #329 R3/R4): moves claim text out of the URL on soft navigations. Full page loads are
+                scrubbed before any SDK initializes (instrumentation-client.ts, lib/privacy/preTelemetryUrlScrub.ts). */}
             <Suspense fallback={null}>
               <ContentHandoffMigrator />
             </Suspense>
             {/* Shell renders immediately - header is visible right away */}
             <TopNav />
-            {/* Children (page content) render in parallel */}
-            {children}
+            {/* Children (page content) render in parallel. Privacy (PR #329 R4): the "/" page is remounted on an
+                identity change, so no account's draft survives into another's session. */}
+            <IdentityScopedRoute>{children}</IdentityScopedRoute>
             {/* Footer */}
             <footer className="mt-10 border-t border-cp-border bg-cp-surface">
               <div className="mx-auto max-w-5xl px-6 py-8">

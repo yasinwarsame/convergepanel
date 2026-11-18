@@ -179,12 +179,15 @@ describe("C2 §G T6 — personalResearchFollowUpHref encodes the outbound query 
 
 describe("C2 §G T7 — the /verify producer still encodes its claim exactly once", () => {
   // PR #329 R3 (owner D5): /verify no longer writes ?claim= / ?q= at all — it hands the text off through the
-  // one-time tab-scoped hand-off (`appHandoffHref`). The legacy URL survives only as the blocked-storage fallback
-  // inside lib/client/verifyPrefill.ts, which is where the single-encode contract now lives.
+  // one-time tab-scoped hand-off (`appHandoffHref`). R4 (owner ruling): the blocked-storage fallback that still
+  // built `/?tab=verify&claim=${encodeURIComponent(text)}` is gone too (the hand-off is held in memory instead), so
+  // no producer encodes claim text into a URL any more — nothing is left to double-encode.
   const HANDOFF_SOURCE = readFileSync(join(__dirname, "..", "..", "lib", "client", "verifyPrefill.ts"), "utf8");
-  it("builds both (fallback) hand-off URLs with a single encodeURIComponent, and /verify writes none itself", () => {
-    expect(HANDOFF_SOURCE).toContain("`/?tab=verify&claim=${encodeURIComponent(text)}`");
-    expect(HANDOFF_SOURCE).toContain("`/?tab=research&q=${encodeURIComponent(text)}`");
+  it("no producer builds a claim- or question-bearing hand-off URL (not even as a blocked-storage fallback)", () => {
+    // Code only: the doc comments still describe the legacy links.
+    const HANDOFF_CODE = HANDOFF_SOURCE.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(HANDOFF_CODE).not.toMatch(/\?tab=verify&claim=|\?tab=research&q=/);
+    expect(HANDOFF_CODE).not.toMatch(/encodeURIComponent\(\s*text\s*\)/);
     expect(VERIFY_SOURCE).not.toMatch(/\?tab=verify&claim=|\?tab=research&q=/);
   });
 

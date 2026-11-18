@@ -17,6 +17,10 @@
  *     captures `#text=` (current extension) / `?text=` (legacy) before any
  *     effect runs. Run / Deep Research hand the text to the main app through
  *     the one-time tab-scoped hand-off — no claim text in the URL.
+ *   - R4 (owner ruling): the text is removed from the URL before any telemetry
+ *     initializes, also when sessionStorage is blocked (then it is held in this
+ *     page's memory only and a paste-manually notice is shown); typing is bound
+ *     to the current viewer, never to a previous account's record.
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -26,6 +30,7 @@ import { useAuth } from "@/components/AuthProvider";
 import {
   appHandoffHref,
   consumePendingVerifyInput,
+  isTabStorageUsable,
   pendingVerifyInputExpiresAt,
   readVisiblePendingVerifyInput,
   subscribeTabHandoffs,
@@ -80,6 +85,10 @@ function VerifyPageBody({ viewer }: { viewer: string | null | undefined }) {
 
   const identityKnown = viewer !== undefined;
 
+  // R4 (owner ruling): with sessionStorage blocked the text is never kept in the URL — only in this page's
+  // memory — so a reload or new tab loses it. Say so plainly and ask for a manual paste.
+  const storageUsable = useSyncExternalStore(subscribeTabHandoffs, () => isTabStorageUsable(), () => true);
+
   const handleClaimChange = (value: string) => {
     if (!identityKnown) return;
     updatePendingVerifyInput(tabStorage(), value, viewer ?? null);
@@ -91,7 +100,7 @@ function VerifyPageBody({ viewer }: { viewer: string | null | undefined }) {
 
   const handOff = (kind: "verify" | "research") => {
     if (typeof viewer !== "string" || !claim.trim()) return;
-    // `/?tab=<kind>` with the text in the one-time hand-off (legacy URL only if sessionStorage is blocked).
+    // `/?tab=<kind>` with the text in the one-time hand-off (this page's memory if sessionStorage is blocked).
     const href = appHandoffHref(kind, claim, viewer);
     consumePendingVerifyInput(tabStorage());
     router.push(href);
@@ -135,6 +144,12 @@ function VerifyPageBody({ viewer }: { viewer: string | null | undefined }) {
             className="w-full resize-y rounded-xl border border-cp-border bg-cp-raised px-4 py-3 text-sm text-cp-text placeholder:text-cp-faint focus:border-cp-accent focus:outline-none focus:ring-2 focus:ring-cp-primary-soft"
             placeholder="Paste a claim, quote, or statement to verify…"
           />
+          {!storageUsable && (
+            <p role="status" className="mt-2 text-xs text-cp-muted">
+              This browser is blocking temporary storage for this site, so the text can&apos;t be kept if the page
+              reloads or you open a new tab. If the box is empty, paste the claim manually.
+            </p>
+          )}
           {claim && (
             <div className="mt-2 flex items-center justify-between text-xs text-cp-faint">
               <p>

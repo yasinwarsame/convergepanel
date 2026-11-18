@@ -13,9 +13,16 @@
  *
  * STATE-LIFECYCLE CONTRACT (owner A2)
  *   - Storage: sessionStorage only (never localStorage, never a URL, never
- *     logged — nothing here logs or throws the value). If sessionStorage is
- *     unavailable the pending input falls back to an in-memory copy for this
- *     page only; the capture then does NOT strip the URL (no silent loss).
+ *     logged — nothing here logs or throws the value).
+ *   - R4 (owner ruling, review MAJOR-1): claim text is ALWAYS removed from the
+ *     address bar, whatever sessionStorage does. If sessionStorage is
+ *     unavailable or refuses the write, the record is held in THIS DOCUMENT'S
+ *     memory only (same bounds, expiry and identity binding; gone on reload or
+ *     in a new tab) — never put back into a URL. /verify then shows an ordinary
+ *     "paste the claim manually" notice (`isTabStorageUsable`). The in-memory
+ *     hold is safe because the JS heap is per document: it survives only the
+ *     app's soft navigations (router.push to /signup, /login, /verify, /),
+ *     and AuthProvider clears or re-binds it exactly like the stored record.
  *   - Size: ≤ MAX_PENDING_CHARS. Expiry: PENDING_TTL_MS (pending input, from
  *     the last write) / APP_HANDOFF_TTL_MS (hand-off). Expired, forged-expiry,
  *     malformed, oversized and legacy records are never returned and are
@@ -67,8 +74,15 @@ function notify(): void {
   for (const l of Array.from(listeners)) l();
 }
 
-// ── in-memory fallback for the pending input when sessionStorage is unusable ──
+// ── in-memory fallback (this document only) when sessionStorage is unusable ──
 let memoryPending: string | null = null;
+let memoryHandoff: string | null = null;
+
+/** Tests only: a reload starts a new document with empty memory. */
+export function __resetTabHandoffMemoryForTests(): void {
+  memoryPending = null;
+  memoryHandoff = null;
+}
 
 /** This tab's sessionStorage, or null when unavailable. */
 export function tabStorage(): StorageLike | null {
@@ -86,6 +100,23 @@ function safeGet(storage: StorageLike | null | undefined, key: string): string |
     return null;
   }
 }
+/**
+ * True when this tab's sessionStorage can actually hold a hand-off (a probe
+ * write succeeds). False when it is unavailable, throws, or refuses writes —
+ * /verify then shows the paste-manually notice. Never throws.
+ */
+export function isTabStorageUsable(storage: StorageLike | null | undefined = tabStorage()): boolean {
+  if (!storage) return false;
+  const probe = "convergePanelStorageProbe";
+  try {
+    storage.setItem(probe, "1");
+    storage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function safeRemove(storage: StorageLike | null | undefined, key: string): void {
   try {
     storage?.removeItem(key);
@@ -177,6 +208,66 @@ function sweepPending(storage: StorageLike | null | undefined, now: number): Pen
   return rec;
 }
 
+/** The app hand-off record from storage, else from the in-memory fallback. Pure. */
+function peekHandoffRaw(storage: StorageLike | null | undefined): string | null {
+  const raw = safeGet(storage, APP_HANDOFF_STORAGE_KEY);
+  return raw !== null ? raw : memoryHandoff;
+}
+function removeHandoff(storage: StorageLike | null | undefined): void {
+  safeRemove(storage, APP_HANDOFF_STORAGE_KEY);
+  memoryHandoff = null;
+}
+/** Writes the hand-off record. Returns true when it reached sessionStorage (false: memory fallback only). */
+function writeHandoffRecord(storage: StorageLike | null | undefined, record: HandoffRecord): boolean {
+  const json = JSON.stringify(record);
+  const durable = safeSet(storage, APP_HANDOFF_STORAGE_KEY, json);
+  memoryHandoff = durable ? null : json;
+  return durable;
+}
+
+/**
+ * R4 (review MINOR-2): the state to hand to `history.replaceState` when this
+ * module rewrites the address bar. Next 14's app router patches
+ * `history.replaceState` and SKIPS its own router sync when the state carries
+ * `__NA` — R3 passed `history.state` (which carries it), so the router kept the
+ * claim-bearing URL as its canonicalUrl and could write it back on a later
+ * update. Without `__NA` the patched method copies Next's `__NA` + tree back in
+ * and adopts the clean URL. Before hydration (no patch yet) the router later
+ * initializes from the already clean `window.location`.
+ */
+function stateForUrlRewrite(state: unknown): Record<string, unknown> {
+  if (!state || typeof state !== "object") return {};
+  const { __NA: _na, __N: _n, _N: _n2, __PRIVATE_NEXTJS_INTERNALS_TREE: _tree, ...rest } = state as Record<string, unknown>;
+  return rest;
+}
+
+/**
+ * Removes the named parameters from a raw query string, keeping every other
+ * parameter BYTE-FOR-BYTE and in order (R4: UTM values such as
+ * `utm_campaign=Spring%20Sale` must not be re-encoded to `Spring+Sale`).
+ * Returns "" or "?…".
+ */
+function withoutParams(search: string, names: readonly string[]): string {
+  const raw = search.startsWith("?") ? search.slice(1) : search;
+  if (!raw) return "";
+  const kept = raw.split("&").filter((pair) => {
+    if (pair === "") return false;
+    // The pair's NAME as URLSearchParams reads it (the same parser that found the text); the pair itself is kept raw.
+    const name = Array.from(new URLSearchParams(pair).keys())[0] ?? "";
+    return !names.includes(name);
+  });
+  return kept.length ? `?${kept.join("&")}` : "";
+}
+
+/** Rewrites the address bar to `url`. Never throws. */
+function rewriteUrl(history: HistoryLike | null | undefined, url: string): void {
+  try {
+    history?.replaceState(stateForUrlRewrite(history.state), "", url);
+  } catch {
+    /* ignore */
+  }
+}
+
 function readHashText(hash: string): string | null {
   if (!hash || hash.length < 2) return null;
   try {
@@ -212,10 +303,11 @@ export function pendingVerifyInputExpiresAt(storage: StorageLike | null | undefi
 /**
  * Captures `text` that arrived on /verify in the query (legacy extension
  * links) or the fragment (current extension). Stores it as the pending input
- * (bound to `currentUid`, or unbound when not yet known) and strips it from
- * the address bar — unless it could not be stored durably, in which case the
- * URL is left as is so the text is not lost on reload. Returns the text, or
- * null when nothing arrived. Never throws, never logs.
+ * (bound to `currentUid`, or unbound when not yet known) — in sessionStorage,
+ * or in this document's memory when sessionStorage is unusable — and ALWAYS
+ * strips it from the address bar (R4: fail closed; the text is never left in
+ * the URL "so it is not lost"). Every other parameter is kept byte-for-byte.
+ * Returns the text, or null when nothing arrived. Never throws, never logs.
  */
 export function capturePendingVerifyInput(env: {
   location: LocationLike;
@@ -236,18 +328,10 @@ export function capturePendingVerifyInput(env: {
   const fromHash = readHashText(location.hash);
   const arrived = fromQuery ?? fromHash;
   if (arrived === null) return null;
-  let durable = true;
-  if (arrived) durable = writePending(storage, arrived, currentUid, now);
+  // Address bar first: nothing below may leave the text in the URL.
+  rewriteUrl(history, `${location.pathname}${withoutParams(location.search, [VERIFY_TEXT_PARAM])}`);
+  if (arrived) writePending(storage, arrived, currentUid, now);
   else removePending(storage);
-  if (durable) {
-    params.delete(VERIFY_TEXT_PARAM);
-    const rest = params.toString();
-    try {
-      history?.replaceState(history.state, "", `${location.pathname}${rest ? `?${rest}` : ""}`);
-    } catch {
-      /* ignore */
-    }
-  }
   notify();
   return arrived.slice(0, MAX_PENDING_CHARS);
 }
@@ -259,11 +343,11 @@ export function updatePendingVerifyInput(
   currentUid: string | null,
   now: number = Date.now()
 ): void {
+  // R4 (review MINOR-3): the edit belongs to the CURRENT viewer. R3 kept the old
+  // record's binding, so an anonymous visitor typing over a record bound to A (a
+  // reopened tab) saved their text under A's identity.
   if (!text) removePending(storage);
-  else {
-    const rec = peekPending(storage, now);
-    writePending(storage, text, rec && rec.boundUid !== null ? rec.boundUid : currentUid, now);
-  }
+  else writePending(storage, text, currentUid, now);
   notify();
 }
 
@@ -289,11 +373,11 @@ export function reconcilePendingVerifyInputForIdentity(
     if (rec.boundUid === null) writePending(storage, rec.text, uid, now);
     else if (rec.boundUid !== uid) removePending(storage);
   }
-  const raw = safeGet(storage, APP_HANDOFF_STORAGE_KEY);
+  const raw = peekHandoffRaw(storage);
   const h = parseHandoff(raw, now);
-  if (raw !== null && !h) safeRemove(storage, APP_HANDOFF_STORAGE_KEY);
-  else if (h && h.boundUid === null) safeSet(storage, APP_HANDOFF_STORAGE_KEY, JSON.stringify({ ...h, boundUid: uid }));
-  else if (h && h.boundUid !== uid) safeRemove(storage, APP_HANDOFF_STORAGE_KEY);
+  if (raw !== null && !h) removeHandoff(storage);
+  else if (h && h.boundUid === null) writeHandoffRecord(storage, { ...h, boundUid: uid });
+  else if (h && h.boundUid !== uid) removeHandoff(storage);
   notify();
 }
 
@@ -303,21 +387,21 @@ export function reconcilePendingVerifyInputForIdentity(
  */
 export function sweepTabHandoffs(storage: StorageLike | null | undefined, now: number = Date.now()): void {
   sweepPending(storage, now);
-  const raw = safeGet(storage, APP_HANDOFF_STORAGE_KEY);
-  if (raw !== null && !parseHandoff(raw, now)) safeRemove(storage, APP_HANDOFF_STORAGE_KEY);
+  const raw = peekHandoffRaw(storage);
+  if (raw !== null && !parseHandoff(raw, now)) removeHandoff(storage);
 }
 
 /** AuthProvider, when a SIGNED-IN identity signs out. NOT called for an anonymous cold load's `null` callback. */
 export function clearPendingVerifyInputOnSignOut(storage: StorageLike | null | undefined): void {
   removePending(storage);
-  safeRemove(storage, APP_HANDOFF_STORAGE_KEY);
+  removeHandoff(storage);
   notify();
 }
 
 /**
  * Writes the one-time app hand-off (replaces `?claim=` / `?q=` in new links).
- * Returns false when sessionStorage is unavailable — the caller then decides
- * (see `appHandoffHref`).
+ * Returns true when it reached sessionStorage; false when sessionStorage is
+ * unusable, in which case it is held in this document's memory instead (R4).
  */
 export function writeAppHandoff(
   storage: StorageLike | null | undefined,
@@ -326,8 +410,7 @@ export function writeAppHandoff(
   boundUid: string | null,
   now: number = Date.now()
 ): boolean {
-  const record: HandoffRecord = { v: 1, kind, text: text.slice(0, MAX_PENDING_CHARS), boundUid, expiresAt: now + APP_HANDOFF_TTL_MS };
-  return safeSet(storage, APP_HANDOFF_STORAGE_KEY, JSON.stringify(record));
+  return writeHandoffRecord(storage, { v: 1, kind, text: text.slice(0, MAX_PENDING_CHARS), boundUid, expiresAt: now + APP_HANDOFF_TTL_MS });
 }
 
 /**
@@ -336,9 +419,9 @@ export function writeAppHandoff(
  * record is removed whatever the outcome (one-time). Returns null otherwise.
  */
 export function consumeAppHandoff(kind: AppHandoffKind, uid: string | null, storage: StorageLike | null | undefined = tabStorage(), now: number = Date.now()): string | null {
-  const raw = safeGet(storage, APP_HANDOFF_STORAGE_KEY);
+  const raw = peekHandoffRaw(storage);
   if (raw === null) return null;
-  safeRemove(storage, APP_HANDOFF_STORAGE_KEY);
+  removeHandoff(storage);
   const h = parseHandoff(raw, now);
   if (!h || h.kind !== kind) return null;
   if (h.boundUid !== null && h.boundUid !== uid) return null;
@@ -347,22 +430,22 @@ export function consumeAppHandoff(kind: AppHandoffKind, uid: string | null, stor
 
 /**
  * The navigation target for a hand-off of `text` into the main app:
- * `/?tab=<kind>` with the text in the one-time hand-off — or, ONLY when
- * sessionStorage is unavailable (blocked by the browser), the legacy URL so
- * the flow still works (documented residual: such a request carries the text;
- * telemetry is still sanitized).
+ * `/?tab=<kind>` with the text in the one-time hand-off. Never a
+ * claim-bearing URL (R4, owner ruling): when sessionStorage is unusable the
+ * hand-off is held in this document's memory, which the caller's
+ * `router.push` (a soft navigation in the same document) preserves.
  */
 export function appHandoffHref(kind: AppHandoffKind, text: string, uid: string | null, storage: StorageLike | null | undefined = tabStorage()): string {
-  if (writeAppHandoff(storage, kind, text, uid)) return `/?tab=${kind}`;
-  return kind === "verify" ? `/?tab=verify&claim=${encodeURIComponent(text)}` : `/?tab=research&q=${encodeURIComponent(text)}`;
+  writeAppHandoff(storage, kind, text, uid);
+  return `/?tab=${kind}`;
 }
 
 /**
  * Legacy `/?tab=verify&claim=…` and `/?tab=research&q=…` links (bookmarks,
- * history, old builds): moved into the one-time hand-off and removed from the
- * address bar at once (tab and every other parameter kept). If the hand-off
- * cannot be stored durably the URL is left untouched — the main app's legacy
- * reader still finds the parameter, so no text is silently lost.
+ * history, old builds): moved into the one-time hand-off and ALWAYS removed
+ * from the address bar at once (tab and every other parameter kept
+ * byte-for-byte). When sessionStorage is unusable the hand-off is held in this
+ * document's memory (R4: never left in the URL).
  */
 export function migrateLegacyAppHandoffLink(env: {
   location: LocationLike;
@@ -383,15 +466,32 @@ export function migrateLegacyAppHandoffLink(env: {
   const param = tab === "verify" ? "claim" : tab === "research" ? "q" : null;
   if (!param || !params.has(param)) return false;
   const text = params.get(param) ?? "";
-  if (text && !writeAppHandoff(storage, tab as AppHandoffKind, text, currentUid, env.now ?? Date.now())) return false;
-  params.delete(param);
-  const rest = params.toString();
-  try {
-    history?.replaceState(history.state, "", `/${rest ? `?${rest}` : ""}${location.hash || ""}`);
-  } catch {
-    return false;
-  }
+  // Address bar first: nothing below may leave the text in the URL.
+  rewriteUrl(history, `/${withoutParams(location.search, [param])}${location.hash || ""}`);
+  if (text) writeAppHandoff(storage, tab as AppHandoffKind, text, currentUid, env.now ?? Date.now());
   return true;
+}
+
+/**
+ * R4: moves user-authored text out of the CURRENT URL (whatever page) into the
+ * tab hand-offs and rewrites the address bar without it. Called synchronously
+ * before any telemetry SDK initializes (lib/privacy/preTelemetryUrlScrub.ts)
+ * and again by the layout's ContentHandoffMigrator on soft navigations.
+ * Idempotent; never throws, never logs.
+ */
+export function migrateContentFromUrl(env: {
+  location: LocationLike;
+  history: HistoryLike | null | undefined;
+  storage: StorageLike | null | undefined;
+  currentUid: string | null;
+  now?: number;
+}): void {
+  try {
+    if (env.location.pathname === "/verify") capturePendingVerifyInput(env);
+    else migrateLegacyAppHandoffLink(env);
+  } catch {
+    /* never throws */
+  }
 }
 
 /**

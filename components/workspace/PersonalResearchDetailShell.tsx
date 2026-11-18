@@ -309,7 +309,7 @@ export default function PersonalResearchDetailShell({ runId, reportLayout }: { r
   const handleRunFollowUp = useCallback(
     (followUpQuestion: string) => {
       // Privacy (PR #329 R3, owner D5): the question travels in the one-time tab-scoped hand-off and the
-      // navigation is `/?tab=research` — no question text in the URL (legacy URL only if sessionStorage is blocked).
+      // navigation is `/?tab=research` — no question text in the URL (this page's memory holds it if sessionStorage is blocked).
       const trimmed = typeof followUpQuestion === "string" ? followUpQuestion.trim() : "";
       if (!trimmed) return;
       router.push(appHandoffHref("research", trimmed, user?.uid ?? null));

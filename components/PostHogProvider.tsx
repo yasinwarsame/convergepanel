@@ -7,6 +7,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, Suspense } from "react";
 import { sanitizeUrl, sanitizeUrlsInText, scrubUrlFields } from "@/lib/privacy/sanitizeUrl";
 import { redactExceptionValue } from "@/lib/privacy/exceptionText";
+import { scrubUrlBeforeTelemetry } from "@/lib/privacy/preTelemetryUrlScrub";
 
 /**
  * Round 2 (review MINOR-1): query parameters PostHog's own personal-data
@@ -108,6 +109,11 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
     const host =
       process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
     if (!key) return;
+    // PR #329 R4 (review MAJOR-1): posthog.init records location.href and
+    // document.referrer into `$initial_person_info` and sends them with the
+    // `/flags` request — both bypass `before_send`. The URL is made clean HERE,
+    // synchronously, immediately before init; no effect ordering is relied on.
+    scrubUrlBeforeTelemetry();
     posthog.init(key, {
       api_host: "/ingest",
       ui_host: host,

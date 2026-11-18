@@ -32,11 +32,13 @@ function stored(s: FakeStorage) {
 }
 
 describe("capture", () => {
-  it("extension link (anonymous): returns the text, stores an UNBOUND record with expiry, strips ONLY text, keeps Next's history state", () => {
+  // R4 (review MINOR-2): the rewrite keeps custom history state but drops Next's `__NA` marker, so Next's patched
+  // replaceState syncs its router to the clean URL (it re-adds `__NA` and the tree itself).
+  it("extension link (anonymous): returns the text, stores an UNBOUND record with expiry, strips ONLY text, keeps custom history state", () => {
     const e = env(`?source=extension&text=${encodeURIComponent(CLAIM)}`);
     expect(capturePendingVerifyInput(e)).toBe(CLAIM);
     expect(stored(e.storage)).toEqual({ v: 2, text: CLAIM, boundUid: null, expiresAt: T0 + PENDING_TTL_MS });
-    expect(e.replaceState).toHaveBeenCalledWith(e.state, "", "/verify?source=extension");
+    expect(e.replaceState).toHaveBeenCalledWith({ tree: "synthetic" }, "", "/verify?source=extension");
     expect(JSON.stringify(e.replaceState.mock.calls)).not.toContain("seawater");
   });
 
@@ -49,7 +51,7 @@ describe("capture", () => {
   it("accepts a #text= fragment and strips the fragment", () => {
     const e = env("?source=extension", `#text=${encodeURIComponent(CLAIM)}`);
     expect(capturePendingVerifyInput(e)).toBe(CLAIM);
-    expect(e.replaceState).toHaveBeenCalledWith(e.state, "", "/verify?source=extension");
+    expect(e.replaceState).toHaveBeenCalledWith({ tree: "synthetic" }, "", "/verify?source=extension");
   });
 
   it("caps the stored and returned text at MAX_PENDING_CHARS", () => {
@@ -117,7 +119,7 @@ describe("capture", () => {
     expect(e.replaceState).not.toHaveBeenCalled();
     const e2 = env("?text=");
     expect(capturePendingVerifyInput(e2)).toBe("");
-    expect(e2.replaceState).toHaveBeenCalledWith(e2.state, "", "/verify");
+    expect(e2.replaceState).toHaveBeenCalledWith({ tree: "synthetic" }, "", "/verify");
     expect(e2.storage.length).toBe(0);
   });
 
@@ -174,11 +176,15 @@ describe("identity binding", () => {
 });
 
 describe("update / consume / return path", () => {
-  it("edits update the text (keeping the binding) and an empty textarea removes it", () => {
+  // R4 (review MINOR-3): an edit belongs to the CURRENT viewer. R3 kept the old binding, so an anonymous visitor
+  // typing over a record bound to A saved their text under A's identity.
+  it("edits update the text, bound to the current viewer, and an empty textarea removes it", () => {
     const s = new FakeStorage();
     capturePendingVerifyInput(env(`?text=${encodeURIComponent(CLAIM)}`, "", "uid-a", s));
-    updatePendingVerifyInput(s, "edited SYNTHETIC text", null, T0 + 10);
+    updatePendingVerifyInput(s, "edited SYNTHETIC text", "uid-a", T0 + 10);
     expect(stored(s)).toMatchObject({ text: "edited SYNTHETIC text", boundUid: "uid-a" });
+    updatePendingVerifyInput(s, "anonymous SYNTHETIC text", null, T0 + 15);
+    expect(stored(s)).toMatchObject({ text: "anonymous SYNTHETIC text", boundUid: null });
     updatePendingVerifyInput(s, "", "uid-a", T0 + 20);
     expect(s.length).toBe(0);
   });

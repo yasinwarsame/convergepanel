@@ -102,6 +102,7 @@ function setUrl(path: string) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  require("@/lib/client/verifyPrefill").__resetTabHandoffMemoryForTests?.(); // R4: each test is a fresh document
   session = new FakeStorage();
   local = new FakeStorage();
   replaceUrls = [];
@@ -292,7 +293,9 @@ describe("A3 — fragment hand-off, legacy links, and the /verify -> app hand-of
     expect(JSON.stringify(session.keys().map((k) => session.getItem(k)))).toContain("SENTINEL_ANON");
   });
 
-  it("/verify with blocked sessionStorage: the URL keeps the text (survives reload) and the page still shows it", async () => {
+  // R4 (owner ruling): superseded contract. With sessionStorage blocked the text is STILL removed from the URL (fail
+  // closed) and held in this page's memory only; it is lost on reload (a paste-manually notice says so).
+  it("/verify with blocked sessionStorage: the URL no longer keeps the text; the page still shows it from memory", async () => {
     g.window.sessionStorage = {
       getItem: () => null,
       setItem: () => {
@@ -304,11 +307,11 @@ describe("A3 — fragment hand-off, legacy links, and the /verify -> app hand-of
     };
     load(legacyExt(ANON_CLAIM));
     await auth(null);
-    expect(g.window.location.search).toContain("text=");
+    expect(g.window.location.search).toBe("?source=extension");
     expect(textareaValue()).toBe(ANON_CLAIM); // in-memory fallback for this page
   });
 
-  it("legacy links are NOT stripped when the hand-off cannot be stored (no silent loss)", () => {
+  it("legacy links are stripped even when the hand-off cannot be stored (R4: never left in the URL)", () => {
     g.window.sessionStorage = {
       getItem: () => null,
       setItem: () => {
@@ -319,6 +322,7 @@ describe("A3 — fragment hand-off, legacy links, and the /verify -> app hand-of
       length: 0,
     };
     load(`/?tab=verify&claim=${encodeURIComponent(ANON_CLAIM)}`);
-    expect(g.window.location.search).toContain("claim=");
+    expect(g.window.location.search).toBe("?tab=verify");
+    expect(require("@/lib/client/verifyPrefill").consumeAppHandoff("verify", null)).toBe(ANON_CLAIM); // memory hold
   });
 });

@@ -75,7 +75,7 @@ describe("new hand-off writers never put claim / question text in a URL", () => 
     expect(src).not.toMatch(/personalResearchFollowUpHref\(/);
     expect(src).toContain('router.push(appHandoffHref("research", trimmed, user?.uid ?? null))');
   });
-  it("appHandoffHref returns /?tab=<kind> and writes the one-time hand-off (legacy URL only when storage is blocked)", () => {
+  it("appHandoffHref returns /?tab=<kind> and writes the one-time hand-off (R4: never a legacy URL, even when storage is blocked)", () => {
     const { appHandoffHref, consumeAppHandoff } = require("@/lib/client/verifyPrefill");
     const { FakeStorage } = require("@/lib/client/__tests__/helpers/fakeStorage");
     const st = new FakeStorage();
@@ -83,7 +83,8 @@ describe("new hand-off writers never put claim / question text in a URL", () => 
     expect(consumeAppHandoff("research", "uid-a", st)).toBe("SENTINEL_Q what next?");
     expect(consumeAppHandoff("research", "uid-a", st)).toBeNull(); // one-time
     const blocked = { getItem: () => null, setItem: () => { throw new Error("blocked"); }, removeItem: () => undefined };
-    expect(appHandoffHref("verify", "x y", "uid-a", blocked)).toBe("/?tab=verify&claim=x%20y");
+    expect(appHandoffHref("verify", "x y", "uid-a", blocked)).toBe("/?tab=verify");
+    expect(consumeAppHandoff("verify", "uid-a", blocked)).toBe("x y"); // held in this document's memory
   });
   it("a hand-off bound to account A is never returned to account B (and is removed), nor to the wrong tab", () => {
     const { writeAppHandoff, consumeAppHandoff } = require("@/lib/client/verifyPrefill");

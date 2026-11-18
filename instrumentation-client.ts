@@ -5,6 +5,14 @@
 import * as Sentry from "@sentry/nextjs";
 import { resolveSentryDsn } from "./lib/telemetry/sentryDsn";
 import { scrubReplayRecordingEvent, scrubSentryBreadcrumb, scrubSentryEvent } from "./lib/privacy/sentryScrub";
+import { scrubUrlBeforeTelemetry } from "./lib/privacy/preTelemetryUrlScrub";
+
+// PR #329 R4 (review MAJOR-1): FIRST, before any SDK reads the URL. Moves claim
+// text (`#text=`, legacy `?text=` / `?claim=` / `?q=`) out of the address bar —
+// fail closed when sessionStorage is unusable — and sanitizes a content-bearing
+// referrer. Production builds prepend this file to the `main-app` entry, so it
+// runs before React hydrates and therefore before PostHog's init effect too.
+scrubUrlBeforeTelemetry();
 
 // Telemetry isolation: only an explicitly configured DSN is used. Missing or
 // empty means browser Sentry is never initialized (see lib/telemetry/sentryDsn.ts).
