@@ -757,7 +757,10 @@ describe("PersonalResearchDetailShell — claim/follow-up hand-off (C1 §J/§R)"
     });
     expect(mockedRouterPush).toHaveBeenCalledTimes(1);
     const href = String(mockedRouterPush.mock.calls[0][0]);
-    expect(href).toBe("/?tab=research&q=What%20did%20the%202024%20replication%20find%3F");
+    // PR #329 R4 (owner ruling): the question travels in the one-time tab hand-off, never in the URL — this test has no
+    // window, i.e. no sessionStorage, which in R3 fell back to `&q=<question>`; it is now held in memory instead.
+    expect(href).toBe("/?tab=research");
+    expect(require("@/lib/client/verifyPrefill").consumeAppHandoff("research", UID_A)).toBe("What did the 2024 replication find?");
     expect(mockedAuthedFetch.mock.calls.length).toBe(before);
     for (const call of mockedAuthedFetch.mock.calls) {
       expect(String(call[0])).not.toContain("/api/run-panel");
