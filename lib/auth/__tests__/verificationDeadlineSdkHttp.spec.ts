@@ -10,8 +10,9 @@
  * `checkRevoked` makes) is scripted to:
  *   - "hang": accept the request and never answer. Without a deadline the SDK
  *     makes 5 attempts × its fixed 25 s request timeout ≈ 132 s;
- *   - "retry-after": 503 + `Retry-After: 60` — the SDK honours the header
- *     (capped at 60 s per wait), i.e. minutes of retries;
+ *   - "retry-after": 503 + `Retry-After: 11` — the SDK honours the header
+ *     (up to 60 s per wait, 4 retries), so its first retry alone lands after
+ *     the deadline;
  *   - "late-valid": answer a VALID, enabled account record — 12 s late.
  * firebase-admin 12.7.0 exposes no per-call AbortSignal and no Auth retry or
  * timeout option (AuthHttpClient is built with defaultRetryConfig and the
@@ -63,6 +64,7 @@ let app: App;
 const sockets = new Set<Socket>();
 const timers = new Set<NodeJS.Timeout>();
 const savedEmulatorHost = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+const sdkCalls: Array<Promise<unknown>> = [];
 
 beforeAll(async () => {
   server = http.createServer((req, res) => {
@@ -85,7 +87,7 @@ beforeAll(async () => {
         case "hang":
           return; // accept, never answer
         case "retry-after":
-          res.writeHead(503, { "content-type": "application/json", "retry-after": "60" }).end(JSON.stringify({ error: { code: 503, message: "UNAVAILABLE" } }));
+          res.writeHead(503, { "content-type": "application/json", "retry-after": "11" }).end(JSON.stringify({ error: { code: 503, message: "UNAVAILABLE" } }));
           return;
         case "late-valid": {
           const t = setTimeout(ok, 12_000);
@@ -107,11 +109,23 @@ beforeAll(async () => {
     { projectId: "test-proj", credential: { getAccessToken: async () => ({ access_token: "local-test", expires_in: 3600 }) } },
     `verification-deadline-${process.pid}`
   );
-  mockState.auth = getAuth(app);
+  // The real Auth instance, with each verification's promise recorded so the
+  // tests can observe the ABANDONED SDK call settle (and drain it at the end).
+  const real = getAuth(app);
+  const record = <T>(p: Promise<T>): Promise<T> => {
+    sdkCalls.push(p);
+    return p;
+  };
+  mockState.auth = {
+    verifyIdToken: (t: string, c?: boolean) => record(real.verifyIdToken(t, c)),
+    verifySessionCookie: (t: string, c?: boolean) => record(real.verifySessionCookie(t, c)),
+  };
 });
 
 afterEach(() => {
-  // Release the abandoned SDK requests so they settle (and are ignored) promptly.
+  // Release the abandoned SDK requests so they settle (and are ignored) promptly:
+  // their next retry gets a fast valid answer instead of hanging again.
+  mockState.mode = "valid";
   for (const t of timers) clearTimeout(t);
   timers.clear();
   for (const s of sockets) s.destroy();
@@ -119,6 +133,9 @@ afterEach(() => {
 
 afterAll(async () => {
   mockState.mode = "valid";
+  // Drain every abandoned SDK call (their retries now get a fast valid answer).
+  for (const s of sockets) s.destroy();
+  await Promise.allSettled(sdkCalls);
   if (savedEmulatorHost === undefined) delete process.env.FIREBASE_AUTH_EMULATOR_HOST;
   else process.env.FIREBASE_AUTH_EMULATOR_HOST = savedEmulatorHost;
   for (const s of sockets) s.destroy();
@@ -165,24 +182,30 @@ it("Identity Toolkit HANGS: bearer, cookie, and cookie+bearer — each auth_unav
   process.stdout.write(`\nBENCH deadline-hang: ${results.map((r) => r.ms).join(",")}ms lookups=${lookupsOf("h1", "h2", "h3")}\n`);
 }, 30_000);
 
-it("503 + Retry-After: 60 (SDK would wait minutes between retries) → bounded at ~10 s", async () => {
+it("503 + Retry-After: 11 (the SDK sleeps past the deadline before retrying) → bounded at ~10 s", async () => {
   mockState.mode = "retry-after";
   const { value, ms } = await timed(resolveRequestIdentity(req({ bearer: idToken("ra") })));
   expect(value).toEqual(UNAVAILABLE);
   expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
-  expect(lookupsOf("ra")).toBe(1); // the SDK was sleeping 60 s before its first retry when the deadline fired
+  expect(lookupsOf("ra")).toBe(1); // the SDK was sleeping 11 s before its first retry when the deadline fired
 }, 30_000);
 
 it("the account lookup answers VALID 12 s late → auth_unavailable at the deadline; the late valid answer changes nothing", async () => {
   mockState.mode = "late-valid";
+  const before = sdkCalls.length;
   const p = resolveRequestIdentity(req({ bearer: idToken("late") }));
   const { value, ms } = await timed(p);
+  const abandoned = sdkCalls.slice(before);
+  expect(abandoned).toHaveLength(1);
   expect(value).toEqual(UNAVAILABLE);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
   // Let the server deliver the late VALID record to the abandoned SDK call.
   await new Promise((r) => setTimeout(r, 12_000 - ms + 500));
   expect(lookupsOf("late")).toBe(1);
+  // The abandoned SDK call really did complete with a VALID decoded token…
+  await expect(abandoned[0]).resolves.toMatchObject({ uid: "late" });
+  // …and the request's decision did not change.
   await expect(p).resolves.toEqual(UNAVAILABLE);
 }, 40_000);
 

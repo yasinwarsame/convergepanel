@@ -53,6 +53,35 @@ export type RequestIdentityUnauthenticatedReason =
   // reportReviewCaller); every other route answers its existing 401.
   | "auth_unavailable";
 
+/**
+ * R4o C1 — END-TO-END deadline for credential verification, per request,
+ * covering every presented credential (cookie and bearer are verified
+ * concurrently, so one deadline bounds both).
+ *
+ * Why it exists: with `checkRevoked`, firebase-admin 12.7.0 makes a live
+ * Identity Toolkit `getUser` read. If that service accepts the connection and
+ * never answers, the SDK makes 5 attempts (defaultRetryConfig: 4 retries on
+ * ETIMEDOUT/ECONNRESET/503) at its fixed 25 s request timeout — about 132 s —
+ * and a 503 carrying `Retry-After` can stretch each wait to 60 s. The SDK
+ * exposes no per-call AbortSignal and no Auth retry/timeout option
+ * (AuthHttpClient is built with defaultRetryConfig and the hard-coded
+ * FIREBASE_AUTH_TIMEOUT; `httpAgent` cannot change either), so the
+ * verification is RACED against this deadline. The late SDK promise is
+ * abandoned: it may keep its socket until the SDK gives up, but its result is
+ * ignored — the decision is final when the deadline fires.
+ *
+ * Why 10 s: the production function budget is Vercel Pro + Fluid, 300 s
+ * default (no vercel.json override; the research routes set maxDuration 300
+ * and reserve their own retry budget), and 15 s would be the non-Fluid Pro
+ * default — 10 s is inside both. A healthy check is one getUser round trip
+ * (sub-second); the SDK's own retry sequence for a fast-failing 503 or reset
+ * is 0 + 1 + 2 + 4 s ≈ 7 s, which still completes inside 10 s and so keeps the
+ * SDK's own error classification. Anything longer is an outage, answered
+ * `auth_unavailable` (503 at the wrappers that already answer it, 401
+ * elsewhere) — never an allow.
+ */
+export const AUTH_VERIFICATION_DEADLINE_MS = 10_000;
+
 export type RequestIdentityResult =
   | { status: "authenticated"; uid: string; source: RequestIdentitySource }
   | { status: "unauthenticated"; reason: RequestIdentityUnauthenticatedReason };
@@ -156,6 +185,9 @@ function classifyVerificationError(err: unknown, kind: "cookie" | "bearer"): Req
  * function's own return) diverge from what every existing caller already
  * mocks `verifySessionCookie` to represent.
  */
+/** What a credential slot becomes when its verification is still pending at the deadline. */
+const DEADLINE_EXCEEDED: CredentialCheck = { present: true, ok: false, reason: "auth_unavailable" };
+
 async function checkCookie(request: NextRequest): Promise<CredentialCheck> {
   try {
     const auth = await verifySessionCookie(request);
@@ -197,8 +229,8 @@ async function checkBearer(request: NextRequest): Promise<CredentialCheck> {
  * | invalid/expired/revoked | valid | unauthenticated (cookie's own reason) — no bearer fallback |
  * | invalid/expired/revoked | invalid/expired/revoked | unauthenticated (cookie's own reason) |
  *
- * Both credential checks run independently (cookie first, then bearer) —
- * whenever BOTH are present, BOTH must be inspected before a decision is
+ * Both credential checks run independently and concurrently — whenever BOTH
+ * are present, BOTH must be inspected before a decision is
  * made; neither is ever skipped merely because the other already failed
  * or succeeded. This is the direct fix for a live-verified gap: a stale
  * cookie for user A alongside an EXPIRED bearer token actually issued for
@@ -212,7 +244,26 @@ export async function resolveRequestIdentity(request: NextRequest): Promise<Requ
   // Firebase Auth read, and running them in sequence doubled the latency of
   // every cookie+bearer request. Neither check can reject (each catches its
   // own verification error), so Promise.all never short-circuits a decision.
-  const [cookie, bearer] = await Promise.all([checkCookie(request), checkBearer(request)]);
+  //
+  // Each check is raced against ONE per-request deadline (see
+  // AUTH_VERIFICATION_DEADLINE_MS): a slot still pending when it fires becomes
+  // `auth_unavailable`, and the truth table below decides once — a result that
+  // arrives later is never read. The timer is per request (no shared state
+  // between concurrent requests) and is always cleared.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<CredentialCheck>((resolve) => {
+    timer = setTimeout(() => resolve(DEADLINE_EXCEEDED), AUTH_VERIFICATION_DEADLINE_MS);
+  });
+  let cookie: CredentialCheck;
+  let bearer: CredentialCheck;
+  try {
+    [cookie, bearer] = await Promise.all([
+      Promise.race([checkCookie(request), deadline]),
+      Promise.race([checkBearer(request), deadline]),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!cookie.present && !bearer.present) {
     return { status: "unauthenticated", reason: "missing_credentials" };
