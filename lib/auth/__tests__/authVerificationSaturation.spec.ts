@@ -81,6 +81,8 @@ it("exports the signal thresholds: 60 s rate limit; a call is 'stuck' after 60 �
   expect(mod.MAX_INFLIGHT_AUTH_VERIFICATIONS).toBe(CAP);
   expect(mod.SATURATION_SIGNAL_INTERVAL_MS).toBe(60_000);
   expect(mod.STUCK_IN_FLIGHT_MS).toBe(600_000);
+  // R6 review MINOR-1: recovery is reported only at or below half the cap.
+  expect(mod.RECOVERY_INFLIGHT_MAX).toBe(128);
 });
 
 it("partial hang: 2 of every 40 verifications/s hang; in-flight never exceeds the cap; healthy ones are admitted until the cap fills, then refused without starting; recovery resumes admission", async () => {
@@ -225,42 +227,132 @@ it("stuck signal: below the cap, a call unsettled for > 600 s raises `saturated`
   await jest.advanceTimersByTimeAsync(0);
   expect(await verify(async () => "ok")).toBe("fulfilled");
   expect(await verify(async () => "ok")).toBe("fulfilled");
-  expect(recoveredSignals()).toEqual([{ site: "request_identity", inFlight: 0, abandonedInFlight: 0, cap: CAP }]);
+  expect(recoveredSignals()).toEqual([
+    {
+      site: "request_identity",
+      inFlight: 0,
+      abandonedInFlight: 0,
+      cap: CAP,
+      recoveryInFlightMax: 128,
+      refusedSinceLastSignal: 0,
+      refusedTotal: 0,
+      refusedBySite: { request_identity: 0, session_mint: 0 },
+    },
+  ]);
 });
 
-it("recovery after total saturation: slots return one per settled call; the first admission with nothing stuck emits `saturation_recovered` once", async () => {
+it("R6 review MINOR-1: recovery is reported only when genuinely recovered — never while at the cap, never within 60 s of a refusal — once per `saturated`, carrying the episode's refusal counts (MINOR-2)", async () => {
   const fill = Array.from({ length: CAP }, () => verify(hang));
   await jest.advanceTimersByTimeAsync(DEADLINE);
   await Promise.all(fill);
-  expect(await verify(async () => "ok")).toBe("capped");
+  expect(await verify(async () => "ok", "session_mint")).toBe("capped");
   expect(saturatedSignals()).toHaveLength(1);
 
+  // One slot frees and is taken again at once: the instance is still at the cap — no recovery line.
   hung.shift()!.resolve("late");
   await jest.advanceTimersByTimeAsync(0);
   expect(mod.authVerificationsInFlight()).toBe(CAP - 1);
   const admitted = verify(hang);
   expect(mod.authVerificationsInFlight()).toBe(CAP);
-  expect(recoveredSignals()).toHaveLength(1);
   expect(await verify(async () => "ok")).toBe("capped");
+  expect(recoveredSignals()).toHaveLength(0);
 
+  // Everything settles, but a refusal happened less than 60 s ago: still no recovery line.
   for (const h of hung.splice(0)) h.resolve("late");
   await jest.advanceTimersByTimeAsync(0);
   expect(await admitted).toBe("fulfilled"); // settled inside its own deadline
   expect(mod.authVerificationsInFlight()).toBe(0);
   for (let i = 0; i < 5; i++) expect(await verify(async () => "ok")).toBe("fulfilled");
-  // At most one `saturation_recovered` per emitted `saturated`: the refusal inside the 60 s window
-  // was counted but not signalled, so clean admissions do not repeat the recovery line.
+  await jest.advanceTimersByTimeAsync(60_000 - 1);
+  expect(await verify(async () => "ok")).toBe("fulfilled");
+  expect(recoveredSignals()).toHaveLength(0);
+
+  // A full interval with no refusal, well below the cap, nothing stuck → recovered, once.
+  await jest.advanceTimersByTimeAsync(1);
+  expect(await verify(async () => "ok")).toBe("fulfilled");
+  expect(recoveredSignals()).toEqual([
+    {
+      site: "request_identity",
+      inFlight: 0,
+      abandonedInFlight: 0,
+      cap: CAP,
+      recoveryInFlightMax: 128,
+      refusedSinceLastSignal: 1,
+      refusedTotal: 2,
+      refusedBySite: { request_identity: 1, session_mint: 1 },
+    },
+  ]);
+  for (let i = 0; i < 5; i++) expect(await verify(async () => "ok")).toBe("fulfilled");
   expect(recoveredSignals()).toHaveLength(1);
   expect(saturatedSignals()).toHaveLength(1);
   expect(mod.authVerificationRefusalsTotal()).toBe(2);
 
-  // Past the window, the next refusal is signalled again with the suppressed count.
+  // A new episode: the next refusal is signalled again, counting from the recovery line.
   const refill = Array.from({ length: CAP }, () => verify(hang));
-  await jest.advanceTimersByTimeAsync(60_000);
+  await jest.advanceTimersByTimeAsync(DEADLINE);
   await Promise.all(refill);
   expect(await verify(async () => "ok")).toBe("capped");
   expect(saturatedSignals()).toHaveLength(2);
-  expect(saturatedSignals()[1]).toMatchObject({ trigger: "cap_refused", refusedSinceLastSignal: 2, refusedTotal: 3 });
+  expect(saturatedSignals()[1]).toMatchObject({ trigger: "cap_refused", refusedSinceLastSignal: 1, refusedTotal: 3 });
+});
+
+it("R6 review MINOR-1: near the cap — refusal-free for over 60 s but more than half the slots still held — no recovery; at ≤ 128 in flight, recovered", async () => {
+  const fill = Array.from({ length: CAP }, () => verify(hang));
+  await jest.advanceTimersByTimeAsync(DEADLINE);
+  await Promise.all(fill);
+  expect(await verify(async () => "ok")).toBe("capped");
+
+  for (const h of hung.splice(0, CAP - 129)) h.resolve("late");
+  await jest.advanceTimersByTimeAsync(60_000);
+  expect(mod.authVerificationsInFlight()).toBe(129);
+  expect(await verify(async () => "ok")).toBe("fulfilled");
+  expect(recoveredSignals()).toHaveLength(0);
+
+  hung.shift()!.resolve("late");
+  await jest.advanceTimersByTimeAsync(0);
+  expect(mod.authVerificationsInFlight()).toBe(128);
+  expect(await verify(async () => "ok")).toBe("fulfilled");
+  expect(recoveredSignals()).toHaveLength(1);
+  expect(recoveredSignals()[0]).toMatchObject({ inFlight: 128, abandonedInFlight: 128, recoveryInFlightMax: 128 });
+});
+
+it("R6 review MINOR-3: an idle gap (15 min with no admission decision) never frees slots held by hung calls", async () => {
+  const fill = Array.from({ length: CAP }, () => verify(hang));
+  await jest.advanceTimersByTimeAsync(DEADLINE);
+  await Promise.all(fill);
+  await jest.advanceTimersByTimeAsync(15 * 60_000);
+  expect(mod.authVerificationsInFlight()).toBe(CAP);
+  expect(mod.abandonedAuthVerificationsInFlight()).toBe(CAP);
+  const start = jest.fn(async () => "would-be-valid");
+  expect(await verify(start)).toBe("capped");
+  expect(start).not.toHaveBeenCalled();
+  expect(mod.authVerificationsInFlight()).toBe(CAP);
+});
+
+it("R6 review NIT-1: ages and the rate limit use a MONOTONIC clock — a wall-clock step of ±1 h fakes no stuck call, does not reopen the 60 s window, and frees no slot", async () => {
+  const first = verify(hang);
+  await jest.advanceTimersByTimeAsync(DEADLINE);
+  expect(await first).toBe("deadline");
+
+  jest.setSystemTime(Date.now() + 3_600_000);
+  expect(await verify(async () => "ok")).toBe("fulfilled");
+  expect(saturatedSignals()).toHaveLength(0); // not "stuck": it has been in flight 10 s, not an hour
+  expect(mod.oldestAuthVerificationInFlightMs()).toBe(DEADLINE);
+
+  const rest = Array.from({ length: CAP - 1 }, () => verify(hang));
+  expect(await verify(async () => "ok")).toBe("capped");
+  expect(saturatedSignals()).toHaveLength(1);
+
+  jest.setSystemTime(Date.now() - 7_200_000);
+  expect(await verify(async () => "ok")).toBe("capped");
+  expect(saturatedSignals()).toHaveLength(1); // still inside the same 60 s window
+  expect(mod.authVerificationsInFlight()).toBe(CAP);
+
+  await jest.advanceTimersByTimeAsync(60_000);
+  await Promise.all(rest);
+  expect(await verify(async () => "ok")).toBe("capped");
+  expect(saturatedSignals()).toHaveLength(2);
+  expect(saturatedSignals()[1]).toMatchObject({ refusedSinceLastSignal: 2, oldestInFlightMs: DEADLINE + 60_000 });
 });
 
 it("concurrency: 1,000 verifications started in one tick — exactly CAP start; the rest refused synchronously; none is ever fulfilled by a refused call", async () => {
