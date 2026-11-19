@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Append-only design amendment. It records the owner's decisions on the three questions that Addendum 9 §7 left open, the specification and test changes made to apply them, and the corrections for the R5 independent review of #325 at `3cf36cc` (CLEAN_WITH_MINOR: MINOR-1, MINOR-2, NIT-1 to NIT-3). **It authorizes no implementation stage, no release and no merge.** |
+| **Status** | Append-only design amendment (corrected by §9 for the R6 review). It records the owner's decisions on the three questions that Addendum 9 §7 left open, the specification and test changes made to apply them, and the corrections for the R5 independent review of #325 at `3cf36cc` (CLEAN_WITH_MINOR: MINOR-1, MINOR-2, NIT-1 to NIT-3). **It authorizes no implementation stage, no release and no merge.** |
 | **Authority** | Product owner decisions Q1, Q2 and Q3 (reaffirmed 2026-11-19), quoted in §2. R5 specification refinement only. |
 | **Amends** | `jobs-and-idempotency.md`: §4.1 (new step 8, *Lease fencing*), §4.2 (`cancelRequested` row), §4.4 (dispatch record bullet; sweeper sentence), §5A (modelled list), §5B.2 (new item 5), §6.3 (durable state, atomicity, charge rule, crash recovery, row T18, new rows T25–T26, notes on T5, T18 and T25–T26). `ledger-and-billing.md`: §2.5 (new paragraph *Committed work and stale workers*), §3.1 (new paragraph *Dispatch record and cost recovery*), §6 (new row *Dispatch vs cost*). `retention-and-deletion.md` §1 class (c) contents. `../api-platform-prd.md` (changelog row "4 (A10)"). `README.md`. The reference model and its spec. |
 | **Does not change** | The ledger policy (`ledger-and-billing.md` §2.4–§2.5, OD-8), owner ruling E1 (Addendum 8) and the owner rule of Addendum 9 §2. No price, fee, tariff, status code, error code, identity or research change. Addenda 1–9 are append-only and are not edited; they are superseded only where §6 says so. `openapi.yaml` and `error-catalog.md` were checked: nothing in them changes (`lease_lost` and the dispatch record are internal and never appear in a response). |
@@ -86,11 +86,35 @@ These tests do **not** prove the distributed implementation. The API-3 obligatio
 
 ## 7. Owner questions (not decided here)
 
-- **OQ-A. Q1 and sweeper-ended jobs (confirmation).** Q1 says "a crash does not erase already committed billable work". A job that the sweeper ends `failed: worker_timeout` may hold committed usable calls. Under E1 (Addendum 8) every `failed` job is charged 0 whatever it committed, so that work does not qualify under the tariff, and this addendum keeps T14–T17 at 0. Please confirm that Q1 does not reopen E1 for these jobs.
-- **OQ-B. Other step-start cancellations at a retried panel step.** §4.2 still reads "→ `canceled`, full release" before the `panel` step for an org suspension, a hard abuse state and the platform spend ceiling. On a retried `panel` step with committed calls, the reading of Q1 that applies to T18 would settle that work instead. The documents do not decide this, and the transition table does not cover it.
-- **OQ-C. Is a dispatch record alone reliable evidence?** When no provider response ever arrives, the recovered cost is the §3.1 upper-bound estimate, marked `costEstimated: true`, as §3.1 already does for timeouts. It counts toward the failed-job cost limit and the platform spend ceiling. Please confirm that this estimate should also count in margin reporting until the monthly invoice reconciliation corrects it, or restrict it to the cost controls.
+*Revised by the R6 corrections (§9): OQ-A and OQ-C are reworded, and OQ-B is now also marked inline in `jobs-and-idempotency.md` §4.2.*
+
+- **OQ-A. Q1 and sweeper-ended jobs.** The same committed usable work is billed or not depending on how many leases expire before the job ends:
+  - one crash, then a cancellation found by the retried step (T18): `canceled`, the committed usable work is charged;
+  - the same crash with the same cancellation pending, where the third expiry comes before any retried step (T15): `failed: worker_timeout`, charged 0.
+
+  Two options, presented neutrally:
+  1. **Keep E1 at 0** for every `failed` job, including sweeper-ended ones. This is what the documents say today and what this addendum applies. The asymmetry above remains.
+  2. **Bill committed usable work for sweeper-ended jobs.** This removes the asymmetry, but it changes E1 (Addendum 8) and the Addendum 9 rule (T14–T17), and it needs a new owner ruling.
+- **OQ-B. Other step-start cancellations at a retried panel step.** §4.2 still reads "→ `canceled`, full release" before the `panel` step for an org suspension, a hard abuse state and the platform spend ceiling. Those rows are now marked "open: Addendum 10 §7 OQ-B". On a retried `panel` step with committed calls, the reading of Q1 applied to T18 would settle that work instead. The documents do not decide this, and the transition table does not cover it.
+- **OQ-C. May an estimate from a dispatch record alone count toward the customer-facing failed-job gate?** A dispatch record is written before the request is sent, so the request may never have been sent. The estimate it yields is the §3.1 upper bound, and it often comes from a platform-caused `worker_timeout`. Today `ledger-and-billing.md` §3.1 lets it count toward the failed-job provider-cost limit (§4.3). That limit drives the customer-facing `403 failed_job_threshold_exceeded` and `abuseState = review`, not only margin reporting. The documents mark this as pending OQ-C. Options:
+  - it counts, as written now;
+  - it counts only toward the platform spend ceiling and margin estimates, never toward the customer's gate;
+  - it counts only after a provider usage report or invoice confirms the call was sent.
 - **OQ-D. §4.2 synthesis column (confirmation of a wording reconciliation).** §4.2 now says `canceled`, matching §3, §6 and T11. Before, it read "finalize with work done". The charge is the same either way.
 
 ## 8. Merge status
 
 Unchanged: #325 needs an independent review of this head, a fresh approval after that review's record, and an owner merge instruction.
+
+## 9. R6 corrections (independent review of `97fcb15`, NOT CLEAN: 1 MAJOR)
+
+| Finding | Correction |
+|---|---|
+| **MAJOR-1.** The cost-entry and dispatch-record ID `{verId}:{step}:{callKey}` is per call, but a resumed attempt re-issues an unrecorded call under the same call key (§4.4). A T5 crash followed by a re-issue under a new lease collides in either order: the recovered estimate blocks the new attempt's record-and-cost transaction (committed work cannot commit, against Q1), or the new dispatch record overwrites the old one and its cost is lost (against Q2). A fenced result and the new holder's re-issue collide in the same way. The model hid this by drawing a fresh key per attempt | The ID is now **per attempt**: `{verId}:{step}:{callKey}:{leaseEpoch}`, in `ledger-and-billing.md` §3.1 (both places), PRD §12.1 and `jobs-and-idempotency.md` §4.4. The per-call record `steps/{step}/calls/{callKey}` stays per call, so replays find it. The model now reuses the deterministic call key on a re-issue and keys cost entries and dispatch records per attempt. Tests cover both collision orders for the crash case and for the fenced-result case |
+| MINOR-1 | The §4.2 suspension, hard-abuse and spend-ceiling rows are marked "open: Addendum 10 §7 OQ-B" |
+| MINOR-2 | OQ-C is reworded (§7). §3.1 marks the current counting as pending OQ-C |
+| MINOR-3 | Test: a revocation committed between a retried step's grant and its stop refuses the stop |
+| NIT-1 | The model's lease transaction can record the unrecorded expiry it replaces (§4.1 step 8). The re-grant test now uses it, so it no longer contradicts §4.4 (a redelivery during a live lease is a no-op) |
+| NIT-2 | README row 23 and the PRD changelog "4 (A10)" now state that sweeper-ended `failed` jobs stay at 0 under E1 (OQ-A) |
+| OQ-A | Reworded (§7) to state the T18/T15 asymmetry and both options neutrally |
+

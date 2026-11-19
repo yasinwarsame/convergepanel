@@ -875,9 +875,9 @@ export interface CallResultOptions {
  * attempt must be part of the key.
  */
 export function costEntryKey(callKey: string, lease: string): string {
-  // FAILING-FIRST SCAFFOLD: the documents as they stand define entryId = {verId}:{step}:{callKey}.
-  void lease;
-  return callKey;
+  // R6 MAJOR-1: entryId = {verId}:{step}:{callKey}:{leaseEpoch}; the lease epoch identifies the
+  // execution attempt (every attempt runs under its own lease grant).
+  return `${callKey}:${lease.split("/")[0]}`;
 }
 
 /** Records a cost entry exactly once per call attempt (deterministic path; create-once semantics). */
@@ -1134,7 +1134,7 @@ export interface CostDoc {
 /** Addendum 10 (Q2): written before a provider request is sent. Class (c): no content. */
 export interface DispatchDoc {
   usdEstimate: number;
-  /** The fencing token of the worker that dispatched the call. */
+  /** The fencing token of the worker that dispatched the call (its epoch is part of the entry key). */
   lease: string;
   at: number;
 }
