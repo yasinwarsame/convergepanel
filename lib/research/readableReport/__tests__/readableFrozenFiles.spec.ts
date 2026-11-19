@@ -56,7 +56,18 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
   "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
   "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
-  "app/page.tsx": "b3d6ad98ab9b6689a32618018b853ced496c83ed",
+  // Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18, review B2): ONLY nine client
+  // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
+  // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no render, report or
+  // provenance code. 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5 → f880b0562d904897d6bb6a6110a4f1371cd5e372.
+  // Re-pinned (owner-authorized PR #329 R3, 2026-11-18, D5 frozen-file reader exception): ONLY one import line and
+  // the two hand-off reader lines (`params.get("claim") || consumeAppHandoff("verify", user.uid)` and the `q` twin);
+  // the legacy param is still read first. app/__tests__/pageFrozenExceptionsR3.spec.ts reverses exactly the R2 and
+  // R3 edits and requires the original 8d97e629 blob. f880b0562d904897d6bb6a6110a4f1371cd5e372 → 05d515b6170522b2f30d0497a212b8c780be527b.
+  // Doc 14 PR-1 (PR #330), R4 owner rulings + R6 decision B3: ONLY two added history-basis lines (see the comment
+  // block above READABLE_GATE_OPTION_BY_INC1). Reconciled with main c308d888 (2026-11-19): main's 05d515b6 plus ONLY
+  // those two lines, recomputed from the reconciled tree. b3d6ad98 (PR #330) / 05d515b6 (main) → 9cd3da44.
+  "app/page.tsx": "9cd3da44ade8624755c6410bee4004ca6f28219b",
 };
 
 /**
@@ -195,6 +206,13 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * Re-pinned (review of O-2, NIT): dsProvenanceUiBoundaries.spec.ts changed only its Team detail route pin (comment-only
  * route change). c0774a6d0452c69795fd49442091d78f3cb8112d → da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9. Same 32-file pinned set.
  *
+ * Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18): dsProvenanceUiBoundaries.spec.ts changed
+ * only its own app/page.tsx pin (client console-logging arguments, see the app/page.tsx entry above).
+ * da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9 → 4a0d36e2914445e4b9573c749ee6b2b91928151a. Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized PR #329 R3, 2026-11-18): dsProvenanceUiBoundaries.spec.ts again changed only its own
+ * app/page.tsx pin (D5 reader exception). 4a0d36e2914445e4b9573c749ee6b2b91928151a → 2cbe00fe52d039eecdaa2125615d5761c198e794. Same 32-file pinned set.
+ *
  * Re-pinned (doc 14 PR-1, claim-verification correctness; owner scope 2026-11-17 authorises the manifest memo pins):
  *   - vocabularyManifest.json: d74147abf059576c671fdcc115e809917eb4fa06 → b343d7738c1f93a0b9e4b512e88b5abe283f68e8 (3
  *     claim-memo entries appended: the split-qualified CONSENSUS SCORE literal, its "; verdicts split:" fragment and the
@@ -227,10 +245,14 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * server `consensusBasis` value (the explicit basis marker every R6 claim history item carries), and the claim
  * `HistoryItem` field's type is the server item's. Still exactly 2 added lines vs cabbdbb (`git diff cabbdbb --
  * app/page.tsx`). dsProvenanceUiBoundaries.spec.ts 60b66ab8… → 27bbd798… (its app/page.tsx pin, the same record).
+ *
+ * Reconciled (PR #330 merged with main c308d888, 2026-11-19, owner GO "PR #330 RECONCILIATION"): both histories above
+ * are kept. dsProvenanceUiBoundaries.spec.ts now carries both comment records and the reconciled app/page.tsx pin
+ * 9cd3da44; recomputed from the reconciled tree. 27bbd798 (PR #330) / 2cbe00fe (main) → 68300e78. Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "27bbd79805e6eab60b4423016cc88ca3c67e00f4",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "68300e783c036853985142d9127713a0a68ed21a",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };

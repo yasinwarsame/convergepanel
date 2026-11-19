@@ -17,6 +17,7 @@ import { logger } from "@/lib/logger";
 import { AdaptiveEnumCoercion, AdaptiveModelResult, FieldSpec, FieldType, ResultSchema } from "./types";
 import { stripJsonFences, truncateWords } from "./util";
 import { coerceClaimEnums } from "./enumCoercion";
+import { errorName, issueFieldsFromStrings } from "@/lib/privacy/contentFreeDiagnostics";
 
 // Caps intrinsic to the atomic unit interfaces themselves (types.ts), not
 // schema-specific — these apply regardless of which ResultSchema is active.
@@ -346,7 +347,7 @@ export function validateAdaptiveResponse(
     warn("[adaptiveSchema] Response was not valid JSON", {
       modelId,
       schemaId: schema.id,
-      error: err?.message,
+      errorName: errorName(err), // privacy: a SyntaxError message quotes the model's text
     });
     return {
       modelId,
@@ -368,7 +369,7 @@ export function validateAdaptiveResponse(
     warn("[adaptiveSchema] Coerced enum drift before validation", {
       modelId,
       schemaId: schema.id,
-      coercions: coercions.map((c) => ({ field: c.field, path: c.path, raw: c.raw, coerced: c.coerced })),
+      coercions: coercions.map((c) => ({ field: c.field, path: c.path, rawLength: String(c.raw ?? "").length, coerced: c.coerced })), // privacy: raw is model text
     });
   }
 
@@ -392,7 +393,7 @@ export function validateAdaptiveResponse(
       warn("[adaptiveSchema] Response failed schema validation", {
         modelId,
         schemaId: schema.id,
-        issues: salvaged.issues,
+        issueFields: issueFieldsFromStrings(salvaged.issues), // privacy: Zod messages quote received values
       });
       return {
         modelId,
@@ -409,7 +410,7 @@ export function validateAdaptiveResponse(
       modelId,
       schemaId: schema.id,
       invalidFields,
-      issues: salvaged.issues,
+      issueFields: issueFieldsFromStrings(salvaged.issues), // privacy: Zod messages quote received values
     });
   }
 

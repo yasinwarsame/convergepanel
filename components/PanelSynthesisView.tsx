@@ -1186,7 +1186,7 @@ export default function PanelSynthesisView({
           }
         } catch (textError: any) {
           console.error("[PanelSynthesisView] Failed to read error response:", {
-            error: textError?.message || textError,
+            errorName: textError?.name, // privacy (PR #329 R3): no message
           });
         }
         
@@ -1232,13 +1232,13 @@ export default function PanelSynthesisView({
         data = JSON.parse(responseText);
         console.log("[PanelSynthesisView] Parsed response keys:", Object.keys(data));
       } catch (parseError: any) {
+        // Privacy (2026-11-18): no response preview, and no SyntaxError message
+        // (it quotes the start of the response, i.e. the synthesized report).
         console.error("[PanelSynthesisView] JSON parse error:", {
-          error: parseError?.message || parseError,
           name: parseError?.name,
-          stack: parseError?.stack,
-          responsePreview: responseText.substring(0, 500),
+          responseLength: responseText.length,
         });
-        throw new Error(`Failed to parse server response: ${parseError.message}`);
+        throw new Error(`Failed to parse server response (${parseError?.name ?? "error"})`);
       }
 
       // Validate response structure

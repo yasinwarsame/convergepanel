@@ -32,7 +32,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const { selectedText: text } = await chrome.storage.local.get('selectedText');
     if (!text || !text.trim()) return;
 
-    const url = `${CONVERGEPANEL_VERIFY_URL}?source=extension&text=${encodeURIComponent(text)}`;
+    // Privacy (PR #329 R3, owner D4): the selection travels in the URL FRAGMENT, which browsers never send to the
+    // server (so it is never in request logs). /verify moves it into tab-scoped storage and clears the fragment.
+    const url = `${CONVERGEPANEL_VERIFY_URL}?source=extension#text=${encodeURIComponent(text)}`;
     chrome.tabs.create({ url });
   });
 

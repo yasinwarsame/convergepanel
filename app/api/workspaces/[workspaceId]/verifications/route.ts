@@ -73,6 +73,7 @@ import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorRespo
 import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetResponse } from "@/lib/projects/projectErrorResponse";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import type { ModelVerdict } from "@/lib/verification/parseVerificationJson";
 import { resolveClaimVerificationOrigin, type ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
@@ -612,7 +613,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       originSnapshot: null,
     });
   } catch (err: any) {
-    logger.error("[POST /api/workspaces/[workspaceId]/verifications] Unexpected error", { error: err?.message, stack: err?.stack });
+    logger.error("[POST /api/workspaces/[workspaceId]/verifications] Unexpected error", { ...contentFreeError(err) }); // privacy (PR #329 R3): a body SyntaxError quotes the claim
     return NextResponse.json(
       { ok: false, errorCode: "internal_error", message: "Server error. Please try again." },
       { status: 500 }

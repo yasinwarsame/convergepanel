@@ -38,6 +38,7 @@ import {
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import { stripJsonFences, withTimeout } from "./util";
 import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
@@ -453,7 +454,7 @@ Gate: ${gate.status}`;
         // first-attempt text, not propagate up and lose the whole narrative
         // call's otherwise-good output (whyModelsDisagree, narrativeSections, etc).
         logger.warn("[adaptiveSchema] Regenerate call threw/timed out, sanitizing original text instead", {
-          error: err?.message,
+          ...contentFreeError(err), // privacy (PR #329 R3): a SyntaxError message quotes the model's text
         });
       }
 
@@ -529,7 +530,7 @@ Gate: ${gate.status}`;
     };
   } catch (err: any) {
     logger.warn("[adaptiveSchema] Synthesis narrative call threw/timed out, using template report", {
-      error: err?.message,
+      ...contentFreeError(err), // privacy (PR #329 R3): a SyntaxError message quotes the model's text
     });
     return baseReport;
   }

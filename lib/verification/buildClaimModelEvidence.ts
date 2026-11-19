@@ -95,9 +95,12 @@ export function buildClaimModelEvidence(modelResults: ModelResult[]): StoredVeri
         d = parsedModelVerificationFromObject(obj);
         logger.debug(`[verify-claim] Repaired truncated JSON for ${modelId}`);
       } catch {
+        // Privacy remediation (2026-11-17 audit, L2): previously logged the
+        // first 100 characters of the model's output (which restates the
+        // user's claim). Lengths only.
         logger.error(
           `[verify-claim] JSON parse failed even after repair for ${modelId}`,
-          { cleanedPreview: cleaned.substring(0, 100) }
+          { rawLength: rawText.length, cleanedLength: cleaned.length }
         );
         return {
           modelId,

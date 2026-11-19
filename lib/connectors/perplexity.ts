@@ -29,6 +29,7 @@ import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { PERPLEXITY_API_KEY } from "@/lib/env";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import {
   PERPLEXITY_AGENT_ENDPOINT,
   agentOutcome,
@@ -120,7 +121,14 @@ export async function callPerplexity(
       if (!response.ok) {
         const latencyMs = Date.now() - startTime;
         const errorJson = await response.json().catch(() => null);
-        logger.error("[Perplexity connector] Perplexity API error", { status: response.status, error: errorJson });
+        // Privacy remediation (2026-11-17 audit, L4): never log the raw provider
+        // error body (it can echo request content). Status + error code/type
+        // only; the provider's message still reaches the ModelResult below.
+        logger.error("[Perplexity connector] Perplexity API error", {
+          status: response.status,
+          code: typeof errorJson?.error?.code === "string" || typeof errorJson?.error?.code === "number" ? errorJson.error.code : undefined,
+          type: typeof errorJson?.error?.type === "string" ? errorJson.error.type : undefined,
+        });
 
         // Perplexity returns: { error: { message, type, code, param? } }
         const errorMessage =
@@ -238,7 +246,7 @@ export async function callPerplexity(
         };
       }
 
-      logger.error("[Perplexity connector] Request failed", { error: err?.message });
+      logger.error("[Perplexity connector] Request failed", { ...contentFreeError(err) }); // privacy (PR #329 R3)
 
       // Re-throw to be caught by outer catch block for other error types
       throw new Error(err?.message || "Perplexity request failed. Please try again.");
@@ -247,7 +255,7 @@ export async function callPerplexity(
     // Never throw from here; return a structured error so the UI can render it safely.
     const latencyMs = Date.now() - startTime;
 
-    logger.error("[Perplexity connector] Request failed", { error: error?.message });
+    logger.error("[Perplexity connector] Request failed", { ...contentFreeError(error) }); // privacy (PR #329 R3)
 
     const errorMessage = error?.message || "Perplexity request failed. Please try again.";
 

@@ -34,6 +34,7 @@ import { saveClaimVerification, type ClaimVerificationFirestoreDoc, type StoredV
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { incrementUserTokenUsage } from "@/lib/firestore/userTokens";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import { adminDb } from "@/lib/firebase/admin";
 import type { UserProfile } from "@/lib/types";
 import { applyTeamGovernancePipeline, mergeGovernanceIntoBody } from "@/lib/governance/teamGovernancePipeline";
@@ -609,7 +610,7 @@ export async function POST(req: NextRequest) {
       context: { origin: null, projectId: null, evidenceSources: null },
     });
   } catch (err: any) {
-    logger.error("[verify-claim] Unexpected error", { error: err?.message, stack: err?.stack });
+    logger.error("[verify-claim] Unexpected error", { ...contentFreeError(err) }); // privacy (PR #329 R3): no message / stack
     return NextResponse.json(
       {
         ok: false,

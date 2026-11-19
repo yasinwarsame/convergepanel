@@ -104,6 +104,7 @@ import { listTeamVideoVerifications } from "@/lib/workspaces/listTeamVideoVerifi
 import { VIDEO_VERIFICATION_DISCLAIMER } from "@/lib/legal/videoVerificationDisclaimer";
 import { storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -695,7 +696,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       projectId: gate2.projectId,
     });
   } catch (err: any) {
-    logger.error("[POST /api/workspaces/[workspaceId]/video-verifications] Unexpected error", { error: err?.message, stack: err?.stack });
+    logger.error("[POST /api/workspaces/[workspaceId]/video-verifications] Unexpected error", { ...contentFreeError(err) }); // privacy (PR #329 R3): a body SyntaxError quotes the claim
     const { status, body: errBody } = internalErrorResponse();
     return NextResponse.json(errBody, { status });
   }

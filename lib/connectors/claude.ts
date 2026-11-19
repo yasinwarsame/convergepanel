@@ -144,7 +144,7 @@ export async function callClaude(
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
     console.error("Claude API error:", {
-      message: error?.message,
+      messageLength: typeof error?.message === "string" ? error.message.length : 0, // privacy: provider messages can echo content
       status: error?.status,
       name: error?.name,
     });

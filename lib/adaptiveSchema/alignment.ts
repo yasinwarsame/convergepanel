@@ -34,6 +34,7 @@ import { ModelId } from "@/lib/types";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import { AlignedClaim, AlignedClaimCell, Claim, ClaimCellStance, ClaimFieldClass, ClaimStance } from "./types";
 import { stripJsonFences, withTimeout } from "./util";
 import { slugsMatch, normalizeSlug, UnionFind } from "./textSimilarity";
@@ -278,7 +279,7 @@ Every input key must appear exactly once across all clusters. No prose, no markd
     return output;
   } catch (err: any) {
     logger.warn("[adaptiveSchema] Claim cluster call threw/timed out, keeping pass-1 groups unmerged", {
-      error: err?.message,
+      ...contentFreeError(err), // privacy (PR #329 R3): a SyntaxError message quotes the model's text
     });
     return null;
   }
@@ -405,7 +406,7 @@ Every question key must appear exactly once. No prose, no markdown fences.`;
     return out;
   } catch (err: any) {
     logger.warn("[adaptiveSchema] Stance backfill call threw/timed out, leaving cells null", {
-      error: err?.message,
+      ...contentFreeError(err), // privacy (PR #329 R3): a SyntaxError message quotes the model's text
     });
     return null;
   }

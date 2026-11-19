@@ -248,7 +248,10 @@ export default function LoginPage() {
         return;
       }
 
-      posthog.identify(user.uid, { email: user.email ?? undefined });
+      // Privacy remediation (2026-11-17 audit): uid only — no email person
+      // property. Nothing in the codebase reads it back; re-adding it is an
+      // owner decision (see PR body).
+      posthog.identify(user.uid);
       posthog.capture("user_logged_in", { method: "email" });
 
       // Redirect to the page user was trying to access (or home) — deferred

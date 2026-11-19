@@ -23,6 +23,7 @@ import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { createRun } from "@/lib/firestore/runs";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import {
   ADAPTIVE_SCHEMAS_ENABLED,
   ADAPTIVE_SCHEMAS_CANARY_UIDS,
@@ -524,8 +525,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     // Log the error on the server for debugging.
     logger.error("[/api/run-panel] Unexpected error", {
-      error: err?.message,
-      stack: err?.stack,
+      ...contentFreeError(err), // privacy (PR #329 R3): no message / stack (can quote content)
     });
 
     // Build a safe, generic response for the client

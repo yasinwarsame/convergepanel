@@ -27,13 +27,13 @@ const mockedInit = jest.fn((config: any) => {
 const mockedAddEventProcessor = jest.fn((processor: (event: any) => any) => {
   capturedProcessor = processor;
 });
-const mockedReplayIntegration = jest.fn(() => ({ name: "Replay" }));
+const mockedReplayIntegration = jest.fn((_options?: any) => ({ name: "Replay" }));
 const mockedCaptureRouterTransitionStart = jest.fn();
 
 jest.mock("@sentry/nextjs", () => ({
   init: (config: any) => mockedInit(config),
   addEventProcessor: (processor: any) => mockedAddEventProcessor(processor),
-  replayIntegration: () => mockedReplayIntegration(),
+  replayIntegration: (options: any) => mockedReplayIntegration(options),
   captureRouterTransitionStart: mockedCaptureRouterTransitionStart,
 }));
 
