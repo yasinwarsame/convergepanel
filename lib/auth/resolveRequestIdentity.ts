@@ -58,7 +58,8 @@ export type RequestIdentityUnauthenticatedReason =
  * R4o C1 / R5 C — END-TO-END deadline for credential verification, per
  * request, covering every presented credential (cookie and bearer are
  * verified concurrently, so one deadline bounds both), plus the per-instance
- * cap on verifications abandoned at that deadline. Both live in
+ * HARD cap on upstream verification calls in flight (start to settle, shared
+ * with the session mint), with its rate-limited saturation signal. Both live in
  * `./authVerificationDeadline` (shared with the session mint, POST
  * /api/auth/session); the rationale for 10 s and for the cap is there.
  * Re-exported here for existing importers.

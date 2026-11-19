@@ -160,7 +160,8 @@ export async function POST(request: NextRequest) {
 /**
  * The deadline / cap answer: the route's existing verifier-outage 503 (same
  * body and telemetry category). The cut-off itself is logged by the deadline
- * module (`[auth-verification] deadline_exceeded` / `in_flight_cap_refused`).
+ * module (`[auth-verification] deadline_exceeded`; cap refusals are counted and
+ * reported by the rate-limited `[auth-verification] saturated` signal).
  */
 function verificationUnavailable(step: string, cause: Exclude<VerificationOutcome<unknown>["kind"], "fulfilled" | "rejected">): NextResponse {
   logger.error(`[auth-session] POST failed: ${step}`, { cause });

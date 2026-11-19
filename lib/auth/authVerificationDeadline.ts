@@ -1,6 +1,7 @@
 /**
  * The END-TO-END deadline on Firebase credential verification, and the
- * per-instance cap on verifications ABANDONED at that deadline. Shared by
+ * per-instance HARD cap on upstream verification calls IN FLIGHT (started and
+ * not yet settled, including those abandoned at the deadline). Shared by
  * `resolveRequestIdentity()` (every request-identity route) and the session
  * mint (`POST /api/auth/session`).
  *
@@ -12,7 +13,8 @@
  * and a 503 carrying `Retry-After` can stretch each wait to 60 s. The SDK
  * exposes no per-call AbortSignal and no Auth retry/timeout option
  * (AuthHttpClient is built with defaultRetryConfig and the hard-coded
- * FIREBASE_AUTH_TIMEOUT; `httpAgent` cannot change either), so each
+ * FIREBASE_AUTH_TIMEOUT; `httpAgent` cannot change either — an agent can only
+ * end a request from outside, see "Known limit" below), so each
  * verification is RACED against this deadline. A call still pending when it
  * fires is ABANDONED: its result is never read — the decision is final when the
  * deadline fires.
@@ -74,10 +76,47 @@
  * abandoned work. A counter refuses before any work is created, touches only
  * auth verification, and needs no change to Firebase app initialization.
  *
- * Known limit: an upstream that never lets an abandoned call settle (endless
- * drip) keeps the instance at the cap, so auth on that instance fails fast with
- * 503 until those calls settle or the instance is recycled. That fails closed,
- * and is preferable to descriptor exhaustion, which fails everything.
+ * Known limit — PERMANENT saturation (R6, owner Order C). A slot is released
+ * only when its SDK call settles; nothing here ever releases a slot whose call
+ * is still running, and nothing resets the count (not the deadline, not elapsed
+ * time). Measured against a local hanging HTTP server with firebase-admin
+ * 12.7.0's own HttpClient (PR #332 R6 notes), two upstream behaviours never let
+ * a call settle on their own:
+ *   - an Identity Toolkit call (getUser / createSessionCookie) whose server
+ *     drips bytes: the SDK's 25 s timeout is an IDLE timeout, re-armed by every
+ *     byte, so the request never times out;
+ *   - the Google public-key fetch (verifyIdToken / verifySessionCookie
+ *     signature check, UrlKeyFetcher): the SDK sets NO timeout on it at all, so
+ *     even a silent server holds it until the OS drops the connection (by
+ *     code reading, the service-account access-token fetch likewise sets none).
+ * Calls answered with errors, or a server that goes silent on an Identity
+ * Toolkit call, are bounded by the SDK itself (5 attempts × 25 s + backoff ≈
+ * 132 s; with 503 Retry-After at most ≈ 4 × 60 s + 125 s ≈ 365 s). So if the
+ * upstream hangs forever in one of the two ways above, those slots stay held
+ * and auth on that instance fails closed (auth_unavailable / 503) until the
+ * calls settle or the instance is recycled. That is preferable to descriptor
+ * exhaustion, which fails everything, and it never fails open.
+ *
+ * Recovery model: slots return one by one as the hung calls settle (upstream
+ * recovers, or the OS/peer closes the socket); otherwise only an instance
+ * recycle (new deployment, platform recycling of the Fluid instance) clears
+ * them. The `[auth-verification] saturated` signal below is what an operator
+ * alert keys on. A transport-level bound that genuinely ENDS the request
+ * (an `http.Agent` with a per-request absolute lifetime in AppOptions.httpAgent)
+ * and controlled self-termination of a saturated instance are documented as
+ * separate owner decisions (docs/technical-documentation.md, Authentication) —
+ * neither is implemented here.
+ *
+ * Saturation signal (health monitoring): `[auth-verification] saturated`
+ * (logger.error) is emitted at most once per SATURATION_SIGNAL_INTERVAL_MS per
+ * instance, when an upstream verification is refused at the cap
+ * (trigger `cap_refused`) or when an admitted verification finds a call in
+ * flight longer than STUCK_IN_FLIGHT_MS (trigger `stuck_in_flight`). It carries
+ * counts only (no credential, token or uid). `[auth-verification]
+ * saturation_recovered` (logger.info) follows at most once per emitted
+ * `saturated`, at the first admission with nothing stuck. Every refusal is also
+ * counted in authVerificationRefusalsTotal(). There is deliberately no
+ * per-refusal log line: under saturation that would be one line per request.
  */
 
 import "server-only";
@@ -87,6 +126,16 @@ export const AUTH_VERIFICATION_DEADLINE_MS = 10_000;
 
 /** Per-instance HARD bound on upstream verification calls in flight (started, not yet settled). See above. */
 export const MAX_INFLIGHT_AUTH_VERIFICATIONS = 256;
+
+/** At most one `[auth-verification] saturated` line per this interval, per instance. */
+export const SATURATION_SIGNAL_INTERVAL_MS = 60_000;
+
+/**
+ * A call still in flight after this long is "stuck": beyond firebase-admin's own
+ * finite worst case for an answered or silent Auth call (≈ 365 s, see above), so
+ * the SDK will not end it by itself. 60 × the deadline = 600 s.
+ */
+export const STUCK_IN_FLIGHT_MS = 60 * AUTH_VERIFICATION_DEADLINE_MS;
 
 /** Where a verification runs — a log label only (no credential, token or uid is ever logged here). */
 export type VerificationSite = "request_identity" | "session_mint";
@@ -102,10 +151,22 @@ export type VerificationOutcome<T> =
 const DEADLINE_OUTCOME: { readonly kind: "deadline" } = Object.freeze({ kind: "deadline" as const });
 const CAPPED_OUTCOME: { readonly kind: "capped" } = Object.freeze({ kind: "capped" as const });
 
+type Task = { abandoned: boolean; readonly startedAt: number };
+
 /** Module state, per server instance: upstream verification calls started and not yet settled (the capped quantity). */
 let inFlight = 0;
 /** The subset of `inFlight` that was cut off at its deadline (reported in logs; not the cap). */
 let abandonedInFlight = 0;
+/** The same calls as `inFlight`, in start order (a Set iterates in insertion order: the first is the oldest). Ages only. */
+const inFlightTasks = new Set<Task>();
+/** Upstream verifications refused at the cap since this instance started (monotonic). */
+let refusedTotal = 0;
+/** Refusals not yet reported by a `saturated` line. */
+let refusedSinceSignal = 0;
+/** When the last `saturated` line was emitted (null: never). */
+let lastSignalAt: number | null = null;
+/** A `saturated` line was emitted and no `saturation_recovered` has followed it yet. */
+let saturationSignalled = false;
 
 export function authVerificationsInFlight(): number {
   return inFlight;
@@ -113,6 +174,68 @@ export function authVerificationsInFlight(): number {
 
 export function abandonedAuthVerificationsInFlight(): number {
   return abandonedInFlight;
+}
+
+/** Upstream verifications refused at the cap since this instance started (a monotonic counter). */
+export function authVerificationRefusalsTotal(): number {
+  return refusedTotal;
+}
+
+/** Age of the oldest upstream verification still in flight (0 when none). */
+export function oldestAuthVerificationInFlightMs(now: number = Date.now()): number {
+  for (const task of inFlightTasks) return Math.max(0, now - task.startedAt);
+  return 0;
+}
+
+function stuckInFlightCount(now: number): number {
+  let stuck = 0;
+  for (const task of inFlightTasks) {
+    if (now - task.startedAt <= STUCK_IN_FLIGHT_MS) break; // start order: every later task is younger
+    stuck += 1;
+  }
+  return stuck;
+}
+
+/**
+ * The rate-limited health signal, evaluated on every upstream admission
+ * decision (refused or admitted). Counts only — never a credential.
+ */
+function reportSaturation(site: VerificationSite, refused: boolean): void {
+  const now = Date.now();
+  if (refused) {
+    refusedTotal += 1;
+    refusedSinceSignal += 1;
+  }
+  const stuck = stuckInFlightCount(now);
+  if (!refused && stuck === 0) {
+    if (saturationSignalled) {
+      saturationSignalled = false;
+      logger.info("[auth-verification] saturation_recovered", {
+        site,
+        inFlight,
+        abandonedInFlight,
+        cap: MAX_INFLIGHT_AUTH_VERIFICATIONS,
+      });
+    }
+    return;
+  }
+  // `now < lastSignalAt`: the wall clock stepped back — do not stay silent for the gap.
+  if (lastSignalAt !== null && now >= lastSignalAt && now - lastSignalAt < SATURATION_SIGNAL_INTERVAL_MS) return;
+  lastSignalAt = now;
+  saturationSignalled = true;
+  logger.error("[auth-verification] saturated", {
+    site,
+    trigger: refused ? "cap_refused" : "stuck_in_flight",
+    inFlight,
+    abandonedInFlight,
+    cap: MAX_INFLIGHT_AUTH_VERIFICATIONS,
+    refusedSinceLastSignal: refusedSinceSignal,
+    refusedTotal,
+    stuckInFlight: stuck,
+    oldestInFlightMs: oldestAuthVerificationInFlightMs(now),
+    stuckThresholdMs: STUCK_IN_FLIGHT_MS,
+  });
+  refusedSinceSignal = 0;
 }
 
 export interface VerificationDeadline {
@@ -126,8 +249,6 @@ export interface VerificationDeadline {
   /** Clears the timer. Call once every `run` has been awaited. */
   dispose(): void;
 }
-
-type Task = { abandoned: boolean };
 
 /** Starts ONE deadline (AUTH_VERIFICATION_DEADLINE_MS from now) shared by every `run` on it. */
 export function startVerificationDeadline(site: VerificationSite): VerificationDeadline {
@@ -165,19 +286,17 @@ export function startVerificationDeadline(site: VerificationSite): VerificationD
       const upstream = opts?.upstream ?? true;
       if (expired) return Promise.resolve(DEADLINE_OUTCOME);
       if (upstream && inFlight >= MAX_INFLIGHT_AUTH_VERIFICATIONS) {
-        logger.warn("[auth-verification] in_flight_cap_refused", {
-          site,
-          inFlight,
-          abandonedInFlight,
-          cap: MAX_INFLIGHT_AUTH_VERIFICATIONS,
-        });
+        // Refused BEFORE start(): no Firebase call is made for this verification.
+        reportSaturation(site, true);
         return Promise.resolve(CAPPED_OUTCOME);
       }
-      const task: Task = { abandoned: false };
+      if (upstream) reportSaturation(site, false);
+      const task: Task = { abandoned: false, startedAt: Date.now() };
       // Counted BEFORE the call starts (so a synchronous re-entry cannot overshoot),
-      // released exactly once in `settle`.
+      // released exactly once in `settle` — when the call itself settles, never earlier.
       if (upstream) {
         inFlight += 1;
+        inFlightTasks.add(task);
         pending.add(task);
       }
       let call: Promise<T>;
@@ -193,6 +312,7 @@ export function startVerificationDeadline(site: VerificationSite): VerificationD
         pending.delete(task);
         if (!upstream) return;
         inFlight -= 1;
+        inFlightTasks.delete(task);
         if (task.abandoned) {
           task.abandoned = false;
           abandonedInFlight -= 1;

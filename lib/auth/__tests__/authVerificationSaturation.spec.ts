@@ -245,7 +245,7 @@ it("recovery after total saturation: slots return one per settled call; the firs
 
   for (const h of hung.splice(0)) h.resolve("late");
   await jest.advanceTimersByTimeAsync(0);
-  expect(await admitted).toBe("deadline");
+  expect(await admitted).toBe("fulfilled"); // settled inside its own deadline
   expect(mod.authVerificationsInFlight()).toBe(0);
   for (let i = 0; i < 5; i++) expect(await verify(async () => "ok")).toBe("fulfilled");
   // At most one `saturation_recovered` per emitted `saturated`: the refusal inside the 60 s window
