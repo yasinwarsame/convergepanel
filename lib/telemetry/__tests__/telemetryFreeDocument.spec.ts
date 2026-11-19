@@ -1,0 +1,69 @@
+/**
+ * Private advisory GHSA-655j-5f43-92pw — the per-document telemetry decision.
+ * Each test loads a fresh module (one decision per document).
+ */
+type Win = Parameters<typeof import("../telemetryFreeDocument").isTelemetryFreeDocument>[0];
+
+function fresh(): typeof import("../telemetryFreeDocument") {
+  let mod: typeof import("../telemetryFreeDocument");
+  jest.isolateModules(() => {
+    mod = require("../telemetryFreeDocument");
+  });
+  return mod!;
+}
+
+const ACCEPT_URL = "https://convergepanel.com/workspace-invitations/accept#invitationId=i&token=t";
+const nav = (name: string | null) => ({ getEntriesByType: (t: string) => (t === "navigation" && name !== null ? [{ name }] : []) });
+
+describe("isTelemetryFreeDocument", () => {
+  it("decides from the navigation entry, not the current address bar (already scrubbed or navigated away)", () => {
+    const { isTelemetryFreeDocument } = fresh();
+    const win: Win = { location: { pathname: "/workspace/team/ws-1" }, performance: nav(ACCEPT_URL) };
+    expect(isTelemetryFreeDocument(win)).toBe(true);
+  });
+
+  it("a document loaded elsewhere is not telemetry-free even if it is currently on the acceptance path", () => {
+    const { isTelemetryFreeDocument } = fresh();
+    const win: Win = { location: { pathname: "/workspace-invitations/accept" }, performance: nav("https://convergepanel.com/workspace") };
+    expect(isTelemetryFreeDocument(win)).toBe(false);
+  });
+
+  it("is decided once per document: a later pathname change cannot flip it (no navigation entry available)", () => {
+    const { isTelemetryFreeDocument } = fresh();
+    const loc = { pathname: "/workspace-invitations/accept" };
+    const win: Win = { location: loc, performance: nav(null) };
+    expect(isTelemetryFreeDocument(win)).toBe(true);
+    loc.pathname = "/pricing";
+    expect(isTelemetryFreeDocument(win)).toBe(true);
+
+    const second = fresh();
+    const loc2 = { pathname: "/pricing" };
+    const win2: Win = { location: loc2, performance: nav(null) };
+    expect(second.isTelemetryFreeDocument(win2)).toBe(false);
+    loc2.pathname = "/workspace-invitations/accept";
+    expect(second.isTelemetryFreeDocument(win2)).toBe(false);
+  });
+
+  it("fails closed when neither the navigation entry nor the location can be read", () => {
+    const { isTelemetryFreeDocument } = fresh();
+    const win = {
+      get location(): { pathname: string } {
+        throw new Error("blocked");
+      },
+      performance: {
+        getEntriesByType: () => {
+          throw new Error("blocked");
+        },
+      },
+    } as unknown as Win;
+    expect(isTelemetryFreeDocument(win)).toBe(true);
+  });
+
+  it("covers the trailing-slash acceptance URL and no other path; no window → false (server render)", () => {
+    expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations/accept/#x=1") })).toBe(true);
+    expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations/acceptance") })).toBe(false);
+    expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations") })).toBe(false);
+    const { isTelemetryFreeDocument } = fresh();
+    expect(isTelemetryFreeDocument(undefined)).toBe(false);
+  });
+});
