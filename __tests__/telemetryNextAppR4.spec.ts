@@ -305,6 +305,68 @@ d("real Next.js production build (contained)", () => {
     }
   }
 
+  // GHSA-655j-5f43-92pw — the workspace invitation acceptance credential. Real build: real instrumentation-client
+  // ordering, real hydration, real AcceptInvitationClient, real posthog-js persistence, Sentry Replay forced on.
+  const INV_TOKEN = "ZQX7INVITETOKENSENTINEL";
+  const INV_ID = "inv_ZQX7SYNTHETIC";
+  const ACCEPT = "/workspace-invitations/accept";
+  const browserState = (page: Page) =>
+    page.evaluate(() => {
+      const dumpStore = (s: Storage) => {
+        let out = "";
+        for (let i = 0; i < s.length; i++) out += `${s.key(i)}=${s.getItem(s.key(i)!)};`;
+        return out;
+      };
+      let session = "";
+      try {
+        session = dumpStore(window.sessionStorage);
+      } catch {
+        session = "<blocked>";
+      }
+      return { href: location.href, cookie: document.cookie, local: dumpStore(window.localStorage), session, historyState: JSON.stringify(history.state), referrer: document.referrer };
+    });
+  for (const mode of ["normal", "session-getter-throws"] as StorageMode[]) {
+    it(`invitation acceptance link (${mode}): credential gone before any SDK initializes; in no request, cookie, localStorage, history entry or telemetry payload`, async () => {
+      const run = await open(`${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`, mode);
+      try {
+        const atLoad = await browserState(run.page);
+        expect(atLoad.href).toBe(`${BASE}${ACCEPT}`);
+        // Signed out (no Firebase in the harness): the page must still have RECEIVED the credential (positive control:
+        // on the pre-existing continuity path it lands in the existing sessionStorage envelope), then go to the static login URL.
+        await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+        const afterRedirect = await browserState(run.page);
+        expect(afterRedirect.href).toBe(`${BASE}/login?redirect=${enc(ACCEPT)}`);
+        if (mode === "normal") {
+          expect(afterRedirect.session).toContain("convergepanel.invitationAcceptance.v1=");
+          expect(afterRedirect.session).toContain(INV_TOKEN);
+          // The ONLY place it may exist: that pre-existing, tab-scoped envelope.
+          expect(afterRedirect.session.replace(/convergepanel\.invitationAcceptance\.v1=[^;]*;/, "")).not.toContain(INV_TOKEN);
+        }
+        // Back navigation returns to the acceptance URL WITHOUT the credential (the entry was replaced, never pushed).
+        await run.page.goBack();
+        await run.page.waitForTimeout(1_500);
+        const back = await browserState(run.page);
+        expect(back.href).not.toContain(INV_TOKEN);
+        for (const s of [atLoad, afterRedirect, back]) {
+          expect(s.cookie).not.toContain(INV_TOKEN);
+          expect(s.local).not.toContain(INV_TOKEN); // includes posthog-js persistence ($initial_person_info, session props)
+          expect(s.historyState).not.toContain(INV_TOKEN);
+          expect(s.referrer).not.toContain(INV_TOKEN);
+        }
+        await run.page.waitForTimeout(6_000);
+        await run.save();
+        const all = await assertContained(run);
+        expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(true);
+        // Every request at both layers — URL, every header (Cookie, Referer, Next-Router-State-Tree) and decoded body,
+        // telemetry or first-party — is free of the credential. The document request never carries a fragment.
+        expect(leakList(requestsContaining(all, INV_TOKEN))).toEqual([]);
+        expect(leakList(requestsContaining(all, INV_ID))).toEqual([]);
+      } finally {
+        await run.close();
+      }
+    });
+  }
+
   it("positive control: Sentry traffic went through the /monitoring tunnel and was answered locally; the server guard log is empty", () => {
     const tunnel = allObserved.filter((r) => r.decision === "sentry-tunnel");
     expect(tunnel.length).toBeGreaterThan(0);

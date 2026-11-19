@@ -39,7 +39,6 @@ import {
   MAX_QUERY_PAIRS,
   NESTED_PATH_SEGMENT,
   PLAIN_ANCHOR,
-  ROUTING_FRAGMENT_KEYS,
   isNestedTargetParam,
   isRoutingParamValue,
   isSafeParamValue,
@@ -177,8 +176,6 @@ function scrubFragment(path: string, fragment: string, captures: ContentCapture[
   if (!fragment) return "";
   if (!nested && PLAIN_ANCHOR.test(fragment)) return fragment;
   const pairs = fragment.split("&").filter((p) => p !== "").map(splitPair);
-  const routingKeys = ROUTING_FRAGMENT_KEYS.get(normalizePath(path));
-  if (!nested && routingKeys && pairs.length > 0 && pairs.every((p) => routingKeys.includes(decodeComponent(p.rawName) ?? ""))) return fragment;
   for (const { rawName, rawValue } of pairs) {
     const name = decodeComponent(rawName);
     if (name === null) continue;

@@ -5,10 +5,14 @@
  * entry point. Frozen by the Phase 8D.3.0/8D.3.0.1 audits:
  *
  * - The credential (`invitationId`/`token`) arrives ONLY via a URL fragment
- *   (`#invitationId=...&token=...`), which never reaches the server, and is
- *   captured/scrubbed from the address bar in a `useLayoutEffect` before
- *   paint. It is kept in a ref, not React state, for the ordinary
- *   already-signed-in path — no need to round-trip it through a render.
+ *   (`#invitationId=...&token=...`), which never reaches the server.
+ *   GHSA-655j-5f43-92pw: on a full page load it is captured into memory and
+ *   removed from the address bar by `scrubUrlBeforeTelemetry()` BEFORE Sentry
+ *   or PostHog initialize (instrumentation-client.ts); this page takes it once
+ *   via `takeCapturedInvitationCredential()`. If a fragment is somehow still
+ *   present (that scrub did not run first), it is captured/scrubbed here in a
+ *   `useLayoutEffect` before paint, as before. It is kept in a ref, not React
+ *   state, for the ordinary already-signed-in path.
  * - `user !== null` is NOT sufficient to call the acceptance API — only
  *   `syncState === "authenticated"` (`canMutate`) proves the client
  *   Firebase uid and the server `__session` cookie agree. See
@@ -41,6 +45,7 @@ import {
   restoreInvitationAcceptance,
   scrubInvitationAcceptanceHistory,
   storeInvitationAcceptance,
+  takeCapturedInvitationCredential,
   INVITATION_ACCEPTANCE_ROUTE_PATH,
   type InvitationAcceptanceCredential,
 } from "@/lib/client/invitationAcceptance";
@@ -100,12 +105,17 @@ export default function AcceptInvitationClient() {
     setViewState("capturing");
     if (typeof window === "undefined") return;
 
+    // GHSA-655j-5f43-92pw: on a full page load the pre-telemetry scrub (instrumentation-client.ts, before either SDK
+    // initializes) has already captured the credential into memory and removed the fragment. Take it exactly once.
+    const captured = takeCapturedInvitationCredential();
     const rawHash = window.location.hash;
     const hasHash = rawHash.length > 1; // more than a bare "#"
+    // Defence in depth: a fragment still in the address bar (that scrub did not run first, e.g. `next dev`, where the
+    // instrumentation file is appended rather than prepended) is captured and scrubbed here exactly as before.
+    const parsed = hasHash ? parseInvitationFragment(rawHash) : captured;
 
-    if (hasHash) {
-      const parsed = parseInvitationFragment(rawHash);
-      scrubInvitationAcceptanceHistory(window.history, INVITATION_ACCEPTANCE_ROUTE_PATH);
+    if (parsed) {
+      if (hasHash) scrubInvitationAcceptanceHistory(window.history, INVITATION_ACCEPTANCE_ROUTE_PATH);
 
       if (parsed.kind === "valid") {
         // The fragment is authoritative for this navigation — never

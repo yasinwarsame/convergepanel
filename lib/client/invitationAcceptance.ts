@@ -151,6 +151,49 @@ export interface ScrubbableHistory {
 }
 
 /**
+ * GHSA-655j-5f43-92pw — the one-time, in-memory hand-off of the acceptance
+ * credential from the pre-telemetry URL scrub to the acceptance page.
+ *
+ * `scrubUrlBeforeTelemetry()` (first statement of `instrumentation-client.ts`,
+ * prepended to the `main-app` entry in production builds, and again just before
+ * `posthog.init`) calls `captureInvitationCredentialFromLocation()` and then
+ * drops the fragment from the address bar, so neither SDK observes the
+ * credential at initialization. The page takes it with
+ * `takeCapturedInvitationCredential()`.
+ *
+ * Held ONLY in this module's closure: never in sessionStorage / localStorage /
+ * cookies / `history.state` / a window global. It does not survive a reload:
+ * a reload of the already-scrubbed URL behaves exactly as before (the existing
+ * sessionStorage continuity envelope, written only on the signed-out /
+ * verification / re-auth paths, or `invalid_or_expired`). Taken at most once.
+ * A credential-shaped fragment on any other path is never captured.
+ */
+let capturedCredential: ParsedInvitationFragment | null = null;
+
+function isAcceptancePath(pathname: string): boolean {
+  return pathname === INVITATION_ACCEPTANCE_ROUTE_PATH || pathname === `${INVITATION_ACCEPTANCE_ROUTE_PATH}/`;
+}
+
+/** Captures the acceptance page's credential fragment into memory. Never throws, never logs, never stores. */
+export function captureInvitationCredentialFromLocation(location: { pathname: string; hash: string } | null | undefined): void {
+  try {
+    if (!location || !isAcceptancePath(String(location.pathname))) return;
+    const rawHash = String(location.hash ?? "");
+    if (rawHash.length <= 1) return; // no fragment or a bare "#": nothing to capture, and an earlier capture is kept
+    capturedCredential = parseInvitationFragment(rawHash);
+  } catch {
+    capturedCredential = { kind: "invalid" };
+  }
+}
+
+/** Returns the captured credential (valid or invalid) and forgets it; `null` when nothing was captured. */
+export function takeCapturedInvitationCredential(): ParsedInvitationFragment | null {
+  const taken = capturedCredential;
+  capturedCredential = null;
+  return taken;
+}
+
+/**
  * Rewrites the current history entry to strip the credential-bearing
  * fragment, preserving whatever `history.state` Next.js's router already
  * placed there. Never `null` (would blow away router state) and never

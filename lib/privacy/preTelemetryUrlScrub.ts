@@ -32,6 +32,7 @@
  * scripts ran. Dependency-light (no React, no Firebase). Never throws, never logs.
  */
 import { migrateContentFromUrl } from "@/lib/client/verifyPrefill";
+import { captureInvitationCredentialFromLocation } from "@/lib/client/invitationAcceptance";
 import { sanitizeUrl } from "@/lib/privacy/sanitizeUrl";
 
 type ScrubWindow = {
@@ -69,6 +70,9 @@ function sanitizeReferrer(doc: { referrer?: string }): void {
 
 export function scrubUrlBeforeTelemetry(win: ScrubWindow | undefined = typeof window !== "undefined" ? window : undefined): void {
   if (!win || !win.location) return;
+  // GHSA-655j-5f43-92pw: hand the invitation acceptance credential to the page in memory FIRST; the scrub below then
+  // drops that fragment like every other key=value fragment (no routing-fragment exception remains).
+  captureInvitationCredentialFromLocation(win.location);
   try {
     migrateContentFromUrl({ location: win.location, history: win.history ?? null, storage: storageOf(win), currentUid: null });
   } catch {

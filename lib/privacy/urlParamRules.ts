@@ -131,11 +131,10 @@ export const CONTENT_HANDOFFS: readonly ContentHandoffRule[] = [
   { path: "/", param: "q", fragment: false, tab: "research", kind: "research" },
 ];
 
-/** Fragments a page legitimately routes on (kept byte-for-byte), keyed by path. Every other key=value fragment is dropped. */
-export const ROUTING_FRAGMENT_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
-  // Pre-existing routing fragment, kept unchanged (out of scope for this PR).
-  ["/workspace-invitations/accept", ["invitationId", "token"]],
-]);
+// GHSA-655j-5f43-92pw: no key=value fragment is kept on any path. The former routing-fragment exception (the workspace
+// invitation acceptance credential `#invitationId=…&token=…`) is gone: that credential is captured into memory by
+// scrubUrlBeforeTelemetry() (lib/client/invitationAcceptance.ts) and then dropped from the address bar before any SDK
+// initializes.
 /** A plain in-page anchor (`#faq`): kept. */
 export const PLAIN_ANCHOR = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
