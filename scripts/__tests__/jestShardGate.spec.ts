@@ -9,7 +9,9 @@
  *   2. the aggregate checker's decision function, with a positive control and
  *      one case per way a sharded run can be incomplete or wrong.
  */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { evaluateShards, toRepoPath } = require("../ci/check-jest-shards");
@@ -43,13 +45,18 @@ describe("workflow wiring: the required Quality Gate aggregates every Jest shard
     expect(J.jest).not.toMatch(/name: Quality Gate/);
   });
 
-  it("the required job waits for the shards and still RUNS (then fails) when one fails", () => {
+  it("the required job waits for the shards and always RUNS (then fails) when one fails or the run is cancelled", () => {
     const head = J.quality.slice(0, J.quality.indexOf("steps:"));
     expect(head).toMatch(/\n {4}needs: jest\n/);
-    expect(head).toMatch(/\n {4}if: \$\{\{ !cancelled\(\) \}\}\n/);
-    // `always()` would also run on cancellation; the default would SKIP, and a
-    // skipped required check counts as passing.
-    expect(WF).not.toMatch(/always\(\)/);
+    // Not the default `success()` and not `!cancelled()`: either one SKIPS the
+    // job in some case (a failed shard / a cancelled run), and a skipped
+    // required check counts as passing.
+    expect(head).toMatch(/\n {4}if: \$\{\{ always\(\) \}\}\n/);
+    expect(WF).not.toMatch(/!cancelled\(\) \}\}\n {4}runs-on/);
+  });
+
+  it("the required job checks out with depth 2 itself (its exact-head check needs HEAD^2)", () => {
+    expect(J.quality).toMatch(/\n {10}fetch-depth: 2\n/);
   });
 
   it("the required job's last step is the aggregate checker, fed the shards' combined result", () => {
@@ -58,7 +65,9 @@ describe("workflow wiring: the required Quality Gate aggregates every Jest shard
     expect(last).toMatch(/^ {6}- name: Test\n/);
     expect(last).toMatch(/JEST_SHARDS_RESULT: \$\{\{ needs\.jest\.result \}\}/);
     expect(last).toMatch(/run: node scripts\/ci\/check-jest-shards\.js --total 3 --dir jest-shards --needs-result "\$JEST_SHARDS_RESULT"/);
-    expect(last).not.toMatch(/\n\s+if:/);
+    // The checker step itself must run even after an earlier step was skipped
+    // or the run was cancelled; it then FAILS on any result but "success".
+    expect(last).toMatch(/\n {8}if: \$\{\{ always\(\) \}\}\n/);
   });
 
   it("the shard matrix is 1..3, matching --total, runs every shard to completion, and is bounded", () => {
@@ -83,6 +92,7 @@ describe("workflow wiring: the required Quality Gate aggregates every Jest shard
     const upload = J.jest.slice(J.jest.indexOf("- name: Upload shard result"));
     expect(upload).toMatch(/if: \$\{\{ !cancelled\(\) \}\}/);
     expect(upload).toMatch(/if-no-files-found: error/);
+    expect(upload).toMatch(/overwrite: true/);
     expect(upload).toMatch(/name: jest-shard-\$\{\{ matrix\.shard \}\}/);
   });
 
@@ -209,4 +219,45 @@ describe("aggregate checker decision (evaluateShards)", () => {
     expect(toRepoPath(ROOT, "/w/other/y.spec.ts")).toBeNull();
     expect(toRepoPath(ROOT, ROOT)).toBeNull();
   });
+});
+
+describe("the checker CLI's exit code is the gate (a printed FAIL is not enough)", () => {
+  const CLI = "scripts/ci/check-jest-shards.js";
+  const cli = (dir: string, needs = "success") =>
+    spawnSync("node", [CLI, "--total", "3", "--dir", dir, "--needs-result", needs], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const plan = (i: number) =>
+    spawnSync("npx", ["jest", "--listTests", `--shard=${i}/3`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+      .stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  /** Synthetic all-passing results for exactly this repo's real --shard plans. */
+  const passingDir = () => {
+    const dir = mkdtempSync(join(tmpdir(), "jest-shards-"));
+    for (const i of [1, 2, 3]) {
+      const names = plan(i);
+      expect(names.length).toBeGreaterThan(0);
+      writeFileSync(join(dir, `jest-shard-${i}.json`), JSON.stringify({
+        success: true, wasInterrupted: false, numFailedTestSuites: 0, numFailedTests: 0, numRuntimeErrorTestSuites: 0,
+        numTotalTests: names.length, testResults: names.map((name) => ({ name, status: "passed" })),
+      }));
+    }
+    return dir;
+  };
+
+  it("POSITIVE CONTROL: complete passing results exit 0 and say PASS", () => {
+    const r = cli(passingDir());
+    expect(r.stdout).toMatch(/; PASS\n/);
+    expect(r.status).toBe(0);
+  }, 180_000);
+
+  it("the same results with a non-success combined result exit NONZERO", () => {
+    const r = cli(passingDir(), "cancelled");
+    expect(r.stdout).toMatch(/FAIL/);
+    expect(r.status).toBe(1);
+  }, 180_000);
+
+  it("an empty results directory exits NONZERO", () => {
+    const r = cli(mkdtempSync(join(tmpdir(), "jest-shards-empty-")));
+    expect(r.stderr).toMatch(/shard 1\/3: no readable result/);
+    expect(r.status).toBe(1);
+  }, 180_000);
 });
