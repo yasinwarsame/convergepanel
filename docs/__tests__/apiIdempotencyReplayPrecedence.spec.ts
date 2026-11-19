@@ -2687,7 +2687,11 @@ describe("Addendum 10 (Q3): a worker that has lost its lease is fenced; controll
     runToEnd(expireLease(sys, id));
     expect(fmt(runToEnd(workerRetryStep(sys, id)))).toBe("200 undefined");
     const w2 = currentLease(sys, id);
-    expect(fmt(runToEnd(workerRetryStep(sys, id)))).toBe("200 undefined"); // a redelivered retry takes the lease
+    // W2's lease expires too, and the step is retried again before the sweeper has recorded that
+    // expiry: the lease transaction that replaces it records the expiry itself (jobs §4.1 step 8).
+    // (A queue redelivery while W2's lease is live is a no-op, jobs §4.4; it is not this case.)
+    expect(fmt(runToEnd(workerRetryStep(sys, id, { recordsExpiry: true })))).toBe("200 undefined");
+    expect(jobOf(sys, id).leaseExpiries).toBe(2);
     const w3 = currentLease(sys, id);
     expect(w3).not.toBe(w2);
     expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w2)))).toBe("409 lease_lost");
@@ -2695,6 +2699,67 @@ describe("Addendum 10 (Q3): a worker that has lost its lease is fenced; controll
     expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w3)))).toBe("200 undefined");
     expect(fmt(runToEnd(finishJob(sys, id, "completed", undefined, undefined, { lease: w3 })))).toBe("200 undefined");
     expect(settleOf(sys, id).charged).toBe(2);
+  });
+
+  // R6 MAJOR-1: a resumed attempt re-issues an unrecorded call under the SAME call key (jobs §4.4).
+  // The cost entry and dispatch record must be per attempt, or the two attempts collide.
+  it.each(["recovery first", "re-issue first"] as const)("a crash before the call record commits, then a re-issue of the same call key under a new lease (%s): both attempts keep their own cost entry, and the re-issued call commits (Q1, Q2)", (order) => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["ok", "ok"]);
+    const g = workerProviderCall(sys, id, "ok", 0.3); // W1, call key "3"
+    g.next();
+    g.next(); // the provider returned; W1 dies before the record commits
+    runToEnd(expireLease(sys, id));
+    expect(fmt(runToEnd(workerRetryStep(sys, id)))).toBe("200 undefined");
+    const w2 = currentLease(sys, id);
+    if (order === "recovery first") runToEnd(sweep(sys)); // W1's estimate recovered before W2 re-issues
+    expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w2, "3")))).toBe("200 undefined");
+    runToEnd(sweep(sys));
+    expect([sys.store.keys(`calls/${id}/`).length, jobOf(sys, id).callsMade]).toEqual([3, 3]);
+    const costs = costsOf(sys, id);
+    expect(costs.map((c) => c.source).sort()).toEqual(["call_record", "call_record", "call_record", "dispatch_record"]);
+    expect(usdOf(costs)).toBe(0.33);
+    expect(sys.store.keys(`dispatch/${id}/`).length).toBe(4); // one per attempt: W1's record is never overwritten
+    expect(fmt(runToEnd(finishJob(sys, id, "partial", undefined, { s: 1 }, { lease: w2 })))).toBe("200 undefined");
+    expect(settleOf(sys, id).charged).toBe(3);
+    expect(creditsOf(sys)).toBe(before - 3);
+  });
+
+  it.each(["refused first", "new holder first"] as const)("a fenced result and the new holder's re-issue of the same call key (%s): one cost entry each, the new holder's call commits", (order) => {
+    const sys = world();
+    const id = runningJob(sys, ["ok"]);
+    const g = workerProviderCall(sys, id, "ok", 0.05); // W1, call key "2", in flight
+    g.next();
+    runToEnd(expireLease(sys, id));
+    runToEnd(workerRetryStep(sys, id));
+    const w2 = currentLease(sys, id);
+    if (order === "refused first") expect(fmt(runToEnd(g))).toBe("409 lease_lost");
+    expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w2, "2")))).toBe("200 undefined");
+    if (order === "new holder first") expect(fmt(runToEnd(g))).toBe("409 lease_lost");
+    expect(jobOf(sys, id).callsMade).toBe(2);
+    const costs = costsOf(sys, id);
+    expect(costs.map((c) => c.source).sort()).toEqual(["call_record", "call_record", "refused_result"]);
+    expect(usdOf(costs)).toBe(0.07);
+  });
+
+  // R6 MINOR-3: the retried step's own stop is fenced too.
+  it("a retried step's stop is fenced: a revocation committed between its grant and its stop refuses the stop; a later retry settles once", () => {
+    for (const pending of ["cancel", "DELETE"] as const) {
+      const r = a9Setup("running", pending, 2, 0);
+      runToEnd(expireLease(r.sys, r.id));
+      const g = workerRetryStep(r.sys, r.id);
+      g.next(); // the lease transaction has read the job
+      g.next(); // the grant has committed; the stop transaction has read the job and is open
+      expect(fmt(runToEnd(expireLease(r.sys, r.id)))).toBe("200 undefined"); // the new lease is revoked
+      expect({ pending, stop: fmt(runToEnd(g)) }).toEqual({ pending, stop: "409 lease_lost" });
+      expect(r.sys.store.get(`ledger/settle_${r.id}`)).toBeUndefined();
+      expect(jobOf(r.sys, r.id).state).toBe(r.stateBefore);
+      runToEnd(workerRetryStep(r.sys, r.id));
+      const e = settleOf(r.sys, r.id);
+      expect({ pending, state: jobOf(r.sys, r.id).state, charged: e.charged }).toEqual({ pending, state: "canceled", charged: 2 });
+      expect(r.sys.settlements.filter((x) => x === r.id).length).toBe(1);
+    }
   });
 
   it("a revoked worker's stop is refused whatever is pending, and the settlement is the one recovery writes (none, cancel, DELETE)", () => {
@@ -2975,6 +3040,31 @@ describe("Addendum 10: the owner decisions are stated in the normative documents
     expect(para).toMatch(/written before the request is sent/);
     expect(para).toMatch(/exactly one cost entry per call attempt/);
     expect(para).toMatch(/never an input to a customer charge/);
+  });
+
+  it("R6 MAJOR-1: the cost-entry and dispatch-record ID is per call attempt in every document that defines it; the call record stays per call", () => {
+    const ledger = fs.readFileSync(LEDGER, "utf8");
+    const prd = fs.readFileSync(path.join(ROOT, "docs/product/api-platform-prd.md"), "utf8");
+    const jobs = fs.readFileSync(JOBS, "utf8");
+    const perAttempt = "{verId}:{step}:{callKey}:{leaseEpoch}";
+    for (const [doc, md] of [["ledger", ledger], ["prd", prd], ["jobs", jobs]] as const) {
+      expect({ doc, perCallOnly: /\{verId\}:\{step\}:\{callKey\}`/.test(md) }).toEqual({ doc, perCallOnly: false });
+      expect({ doc, perAttempt: md.includes(perAttempt) }).toEqual({ doc, perAttempt: true });
+    }
+    expect(jobs).toContain("`steps/{step}/calls/{callKey}` with `tx.create()`");
+    expect(ledger).toMatch(/`apiCostDispatch\/\{entryId\}` \(same `entryId` as the cost entry/);
+  });
+
+  it("R6 MINOR-1/2: the open questions are marked where the current text applies them", () => {
+    const jobs = fs.readFileSync(JOBS, "utf8");
+    const sec = sectionOf(jobs, "### 4.2 Step-start checks", "### 4.3");
+    for (const check of ["Org `status = suspended`", "Platform daily API spend ceiling reached"]) {
+      const row = sec.split("\n").find((l) => l.startsWith(`| ${check}`)) ?? "";
+      expect({ check, marked: row.includes("open: Addendum 10 §7 OQ-B") }).toEqual({ check, marked: true });
+    }
+    const ledger = fs.readFileSync(LEDGER, "utf8");
+    const para = /\*\*Dispatch record and cost recovery \(Addendum 10\)\.\*\*([^\n]+)/.exec(ledger)?.[1] ?? "";
+    expect(para).toMatch(/pending Addendum 10 §7 OQ-C/);
   });
 
   it("ledger §2.5: committed usable work, fencing and the crash rule (Q1) are stated together", () => {

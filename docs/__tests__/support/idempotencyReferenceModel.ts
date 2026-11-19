@@ -839,7 +839,7 @@ export function* handleDelete(sys: System, keyId: string, id: string): Generator
  * Addendum 10: a worker whose lease was revoked makes no call (Q3), and every call writes a durable
  * dispatch record before it is sent, so its cost is recoverable if the worker dies (Q2).
  */
-export function* workerProviderCall(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01, lease?: string): Generator<void, ApiResponse, void> {
+export function* workerProviderCall(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01, lease?: string, callKey?: string): Generator<void, ApiResponse, void> {
   const before = sys.store.get<JobDoc>(`jobs/${id}`);
   if (!before || before.deleted || TERMINAL.has(before.state)) return { status: 409, code: "late_write_refused" };
   const held = lease ?? leaseToken(before);
@@ -848,19 +848,36 @@ export function* workerProviderCall(sys: System, id: string, outcome: CallOutcom
   // Addendum 10 (Q2): the dispatch record (class c, no content) is written before the request is
   // sent. It is the durable evidence from which the cost of a call whose result never commits is
   // recovered (`recoverDispatchCosts`). It is never an input to a customer charge.
-  const key = sys.newCallKey();
+  // The call key is deterministic (jobs §4.4): the next call of the step, so a resumed attempt that
+  // re-issues an unrecorded call uses the SAME call key. A recorded call is replayed, never re-called.
+  const ck = callKey ?? String((before.callsMade ?? 0) + (before.failedCalls ?? 0) + 1);
+  if (sys.store.get(`calls/${id}/${ck}`) !== undefined) return { status: 200, code: "replayed" };
+  const key = costEntryKey(ck, held);
   sys.store.put(dispatchPath(id, key), { usdEstimate: usd, lease: held, at: sys.dynamic.now } satisfies DispatchDoc);
   yield; // the provider call is in flight; it cannot be recalled
-  return yield* recordCallResult(sys, id, outcome, usd, { key, lease: held });
+  return yield* recordCallResult(sys, id, outcome, usd, { key, lease: held, callKey: ck });
 }
 
 export type CallOutcome = "ok" | "error";
 
 export interface CallResultOptions {
-  /** The call attempt's key (its dispatch record). A fresh key when absent. */
+  /** The call attempt's cost-entry key (its dispatch record, `costEntryKey`). A fresh key when absent. */
   key?: string;
+  /** The deterministic call key (the per-call record `calls/{id}/{callKey}`). The next sequence number when absent. */
+  callKey?: string;
   /** The fencing token of the worker that made the call (Addendum 10). The current one when absent. */
   lease?: string;
+}
+
+/**
+ * The internal cost entry (and dispatch record) key of ONE call attempt: `ledger-and-billing.md` §3.1
+ * `entryId`. The call key alone repeats when a resumed attempt re-issues an unrecorded call, so the
+ * attempt must be part of the key.
+ */
+export function costEntryKey(callKey: string, lease: string): string {
+  // FAILING-FIRST SCAFFOLD: the documents as they stand define entryId = {verId}:{step}:{callKey}.
+  void lease;
+  return callKey;
 }
 
 /** Records a cost entry exactly once per call attempt (deterministic path; create-once semantics). */
@@ -892,7 +909,7 @@ export function* recordCallResult(sys: System, id: string, outcome: CallOutcome 
       return { status: 409, code: "lease_lost" };
     }
     const n = (job.callsMade ?? 0) + (job.failedCalls ?? 0) + 1;
-    tx.set(`calls/${id}/${n}`, { text: "raw model text", outcome }); // class (a), purged at deletion
+    tx.set(`calls/${id}/${opts.callKey ?? n}`, { text: "raw model text", outcome }); // class (a), purged at deletion
     // Internal cost entry (class c, no content), created with the per-call record whatever the
     // outcome and whatever the customer is later charged (ledger-and-billing.md §3.1).
     tx.create(costPath(id, key), { usd, outcome, source: "call_record" } satisfies CostDoc);
@@ -930,16 +947,18 @@ export function* expireLease(sys: System, id: string): Generator<void, ApiRespon
  * job whose earlier lease expired fewer than three times; the step-start check then stops a job
  * with a cancellation pending, settling its committed usable work (owner decision Q1, T18).
  */
-export function* workerRetryStep(sys: System, id: string): Generator<void, ApiResponse, void> {
+export function* workerRetryStep(sys: System, id: string, opts: { recordsExpiry?: boolean } = {}): Generator<void, ApiResponse, void> {
   for (;;) {
     const tx = sys.store.begin();
     const job = tx.read<JobDoc>(`jobs/${id}`);
-    if (!job || TERMINAL.has(job.state) || (job.state !== "running" && job.state !== "synthesizing") || (job.leaseExpiries ?? 0) >= LEASE_EXPIRY_LIMIT) {
+    if (!job || TERMINAL.has(job.state) || (job.state !== "running" && job.state !== "synthesizing") || (job.leaseExpiries ?? 0) + (opts.recordsExpiry ? 1 : 0) >= LEASE_EXPIRY_LIMIT) {
       tx.abort();
-      return { status: 409, code: "not_started" };
+      return { status: 409, code: "not_started" }; // at the bound the sweeper ends the job instead
     }
     yield;
-    const next: JobDoc = { ...job, leaseEpoch: (job.leaseEpoch ?? 0) + 1 };
+    // jobs §4.1 step 8: the lease transaction that replaces an expired lease the sweeper has not yet
+    // recorded records that expiry itself (`recordsExpiry`), in the same transaction as the grant.
+    const next: JobDoc = { ...job, leaseEpoch: (job.leaseEpoch ?? 0) + 1, ...(opts.recordsExpiry ? { leaseExpiries: (job.leaseExpiries ?? 0) + 1 } : {}) };
     tx.set(`jobs/${id}`, next);
     if (tx.commit() === "conflict") {
       yield;
