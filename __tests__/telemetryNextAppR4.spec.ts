@@ -317,14 +317,22 @@ d("real Next.js production build (contained)", () => {
         for (let i = 0; i < s.length; i++) out += `${s.key(i)}=${s.getItem(s.key(i)!)};`;
         return out;
       };
-      let session = "";
-      try {
-        session = dumpStore(window.sessionStorage);
-      } catch {
-        session = "<blocked>";
-      }
-      return { href: location.href, cookie: document.cookie, local: dumpStore(window.localStorage), session, historyState: JSON.stringify(history.state), referrer: document.referrer };
-    });
+      const safe = (f: () => string) => {
+        try {
+          return f();
+        } catch (e) {
+          return `<blocked:${(e as Error).name}>`;
+        }
+      };
+      return {
+        href: location.href,
+        origin: location.origin,
+        local: safe(() => dumpStore(window.localStorage)),
+        session: safe(() => dumpStore(window.sessionStorage)),
+        historyState: safe(() => JSON.stringify(history.state)),
+        referrer: document.referrer,
+      };
+    }).then(async (s) => ({ ...s, cookie: JSON.stringify(await page.context().cookies()) })); // every cookie, incl. HttpOnly
   for (const mode of ["normal", "session-getter-throws"] as StorageMode[]) {
     it(`invitation acceptance link (${mode}): credential gone before any SDK initializes; in no request, cookie, localStorage, history entry or telemetry payload`, async () => {
       const run = await open(`${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`, mode);
@@ -333,26 +341,38 @@ d("real Next.js production build (contained)", () => {
         expect(atLoad.href).toBe(`${BASE}${ACCEPT}`);
         // Signed out (no Firebase in the harness): the page must still have RECEIVED the credential (positive control:
         // on the pre-existing continuity path it lands in the existing sessionStorage envelope), then go to the static login URL.
-        await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+        if (mode === "normal") await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+        else await run.page.waitForTimeout(6_000); // PRE-EXISTING: the page reads window.sessionStorage directly and cannot proceed when site data is blocked
         const afterRedirect = await browserState(run.page);
-        expect(afterRedirect.href).toBe(`${BASE}/login?redirect=${enc(ACCEPT)}`);
         if (mode === "normal") {
+          expect(afterRedirect.href).toBe(`${BASE}/login?redirect=${enc(ACCEPT)}`);
           expect(afterRedirect.session).toContain("convergepanel.invitationAcceptance.v1=");
           expect(afterRedirect.session).toContain(INV_TOKEN);
           // The ONLY place it may exist: that pre-existing, tab-scoped envelope.
           expect(afterRedirect.session.replace(/convergepanel\.invitationAcceptance\.v1=[^;]*;/, "")).not.toContain(INV_TOKEN);
         }
-        // Back navigation returns to the acceptance URL WITHOUT the credential (the entry was replaced, never pushed).
+        // Back/forward: the credential-bearing entry no longer exists (replaced before any SDK initialized; the redirect to
+        // /login is itself a replace). Back leaves the app (about:blank, the context's first entry); forward returns to a
+        // clean URL — never to the credential-bearing one.
         await run.page.goBack();
-        await run.page.waitForTimeout(1_500);
-        const back = await browserState(run.page);
-        expect(back.href).not.toContain(INV_TOKEN);
-        for (const s of [atLoad, afterRedirect, back]) {
+        await run.page.waitForTimeout(1_000);
+        const back = await run.page.evaluate(() => location.href);
+        expect(back).toBe("about:blank");
+        await run.page.goForward();
+        await run.page.waitForTimeout(2_000);
+        const forward = await browserState(run.page);
+        expect(forward.href).toBe(mode === "normal" ? `${BASE}/login?redirect=${enc(ACCEPT)}` : `${BASE}${ACCEPT}`);
+        for (const s of [atLoad, afterRedirect, forward]) {
+          expect(s.origin).toBe(BASE); // every storage read below is a real read of the app origin, never a blocked stub
+          expect(s.local).not.toMatch(/^<blocked/);
+          expect(s.href).not.toContain(INV_TOKEN);
           expect(s.cookie).not.toContain(INV_TOKEN);
           expect(s.local).not.toContain(INV_TOKEN); // includes posthog-js persistence ($initial_person_info, session props)
           expect(s.historyState).not.toContain(INV_TOKEN);
           expect(s.referrer).not.toContain(INV_TOKEN);
         }
+        // PostHog persistence exists and was examined (positive control for the localStorage check).
+        expect(afterRedirect.local).toMatch(/ph_phc_synthetic_posthog|__ph_opt_in_out|ph_/);
         await run.page.waitForTimeout(6_000);
         await run.save();
         const all = await assertContained(run);
