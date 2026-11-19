@@ -139,7 +139,7 @@ beforeEach(() => {
 });
 
 describe("governance Audit Log — claim score badge on the shared claim score basis (R5)", () => {
-  it("global list: collapsed slots → qualified; one substitute only → withheld; own models → plain; research/video untouched", async () => {
+  it("global list: collapsed slots → qualified; one substitute only / missing provenance → number retained with its qualifier (R6 B2); own models → plain; research/video untouched", async () => {
     claimParent("v-mix", MIX);
     claimParent("v-ds", ALL_DS);
     claimParent("v-own", OWN_TWO);
@@ -179,7 +179,7 @@ describe("governance Audit Log — claim score badge on the shared claim score b
     expect(card(by.e02)).toContain(">92/100</span>");
   });
 
-  it("global list: the claim-row read fails → every claim score withheld as unverified (fail closed)", async () => {
+  it("global list: the claim-row read fails → every claim score unverified (fail closed; R6 B2: number kept, qualified)", async () => {
     claimParent("v-mix", MIX);
     auditRows = [event("e06", "verifications", "v-mix")];
     failClaimRowReads = true;
