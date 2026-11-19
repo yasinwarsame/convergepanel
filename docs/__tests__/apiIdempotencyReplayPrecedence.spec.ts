@@ -2200,6 +2200,12 @@ describe("Addendum 9: settlement state transitions (jobs-and-idempotency.md §6.
     const both = transitionTable().filter((r) => /safe boundary|stop transaction|third lease expiry|sweeper's terminal transaction|retried panel step|lease was revoked reaches/.test(r.event) && r.pending !== "none");
     expect(both.map((r) => r.id)).toEqual(["T10", "T11", "T12", "T13", "T15", "T16", "T17", "T18", "T26"]);
     for (const r of both) expect({ row: r.id, names: (PENDING_VOCAB[r.pending] ?? []).filter((p) => p !== "none").sort() }).toEqual({ row: r.id, names: ["DELETE", "cancel"] });
+    // The crash rule holds "whatever is pending" in every state the sweeper ends: per From state,
+    // the third-expiry rows together name none, cancel and DELETE (a row losing "none" fails here).
+    for (const from of ["running", "synthesizing"]) {
+      const names = new Set(transitionTable().filter((r) => r.event === "third lease expiry, sweeper" && r.from === from).flatMap((r) => PENDING_VOCAB[r.pending] ?? []));
+      expect({ from, names: Array.from(names).sort() }).toEqual({ from, names: ["DELETE", "cancel", "none"] });
+    }
   });
 
   it("every row, for every pending request it names, 0–3 committed usable calls and 0–1 failed calls (executed)", () => {
