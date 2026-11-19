@@ -273,8 +273,11 @@ describe("CB-06 / CB-07 / CB-09: the claim result view", () => {
     const out = html(createElement(ClaimVerificationResultView, { data: p }));
     expect(out).toContain("This claim is supported by 3/3 models");
     expect(out).not.toMatch(/supported by \d+\/5/);
-    expect(out).toContain("2 of 5 models could not verify this claim.");
-    expect(out).toContain("3 models (ChatGPT, Claude, and Grok) rated it as accurate.");
+    // R4 (and review MINOR 3): a failed / malformed slot returned no verdict — it is not a model that "could not verify";
+    // with unanswered slots the rows are listed as panel slots, not as models.
+    expect(out).toContain("2 of 5 panel slots returned no usable verdict.");
+    expect(out).not.toContain("could not verify this claim");
+    expect(out).toContain("3 panel slots (ChatGPT, Claude, and Grok) rated it as accurate.");
   });
 
   it("a split IND claim: supporters are counted among independent models only", () => {
@@ -317,7 +320,9 @@ describe("CB-06 / CB-07 / CB-09: the claim result view", () => {
     expect(p.modelIndependence).toBe("insufficient");
     const out = html(createElement(ClaimVerificationResultView, { data: p }));
     expect(out).toContain(NO_CONSENSUS);
-    expect(out).toContain("4 of 5 panel slots could not verify this claim.");
+    // R4 (review MINOR 3): the four non-answering slots returned no verdict; they did not "fail to verify" the claim.
+    expect(out).toContain("4 of 5 panel slots returned no usable verdict.");
+    expect(out).not.toContain("could not verify this claim");
     expect(out).toContain("1 panel slot (ChatGPT) rated it as accurate.");
     expect(out).toContain("These counts are of panel slots (1 independent executing model answered 1 panel slot), not of agreeing models.");
   });
@@ -356,11 +361,16 @@ describe("CB-10 / CB-11: the claim memo states K independent models, never slot 
     expect(memo).not.toMatch(/\b5 AI models\b|\b5 large language models\b/);
   });
 
-  it("genuine 5/5: byte-identical to the memo without gate counts (K = M = rows)", async () => {
+  it("genuine 5/5: the established models wording (K = M = rows, one identified own model per slot)", async () => {
     const input = await exportedMemoInput(payloadOf(CLAIM_FIXTURES[0].rows, FIVE));
-    const { claimExecution: _drop, ...legacy } = input;
+    const memo = memoOf(input);
+    expect(memo).toContain("5 AI models evaluated this claim independently. The models largely supported the claim, with meaningful alignment on the core statement.");
+    expect(memo).toContain("This claim was independently evaluated by 5 large language models (ChatGPT, Claude, Grok, Gemini, Perplexity) via ConvergePanel.");
+    // R4 fail closed: without the gate counts / statement basis the memo states no number of models.
+    const { claimExecution: _drop, claimCrossModel: _basis, ...legacy } = input;
     void _drop;
-    expect(memoOf(input)).toBe(memoOf(legacy));
+    void _basis;
+    expect(memoOf(legacy)).not.toMatch(/AI models evaluated this claim independently|largely supported/);
   });
 
   it.each(CLAIM_FIXTURES.filter((f) => f.independence === "unverified" && f.rows))("unverified ($name): no score, no claimExecution", async ({ rows, selected }) => {

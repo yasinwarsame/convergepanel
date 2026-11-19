@@ -204,8 +204,11 @@ describe("Layer B checker on synthetic build directories (fails closed)", () => 
 
 describe("the required Quality Gate runs the real build and the boundary gate on every PR (workflow pin)", () => {
   const wf = readFileSync(join(REPO, ".github/workflows/quality-gate.yml"), "utf8");
-  // Parse the steps of the required job by name, in order.
-  const job = wf.slice(wf.indexOf("name: Quality Gate"));
+  // Parse the steps of the required job by name, in order. The job ends at the
+  // next top-level job key (the Jest shard job follows it in the same file).
+  const jobStart = wf.indexOf("name: Quality Gate");
+  const nextJob = wf.slice(jobStart).search(/\n {2}[a-z][a-z0-9_-]*:\n/);
+  const job = nextJob === -1 ? wf.slice(jobStart) : wf.slice(jobStart, jobStart + nextJob);
   const steps = job
     .split(/\n(?= {6}- name: )/)
     .filter((chunk) => /^ {6}- name: /.test(chunk))
@@ -213,7 +216,7 @@ describe("the required Quality Gate runs the real build and the boundary gate on
   const idx = (n: string) => steps.findIndex((s) => s.name === n);
 
   it("the step parser sees every step of the job (positive control)", () => {
-    expect(steps.map((x) => x.name)).toEqual(["Checkout", "Verify the build is of the exact PR head", "Set up Node", "Install dependencies", "Type check", "Lint", "Build", "Build boundary gate", "Security-test falsifiability pre-flight", "Test"]);
+    expect(steps.map((x) => x.name)).toEqual(["Checkout", "Verify the build is of the exact PR head", "Set up Node", "Install dependencies", "Type check", "Lint", "Build", "Build boundary gate", "Security-test falsifiability pre-flight", "Download Jest shard results", "Test"]);
   });
 
   it("the job is the required 'Quality Gate' job and triggers on pull requests to main", () => {

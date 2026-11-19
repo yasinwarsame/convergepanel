@@ -138,12 +138,15 @@ describe.each(CLASSES)("one independence across every surface — $name", (c) =>
     const view = html(createElement(ClaimVerificationResultView, { data: payload }));
     const summary = toTeamClaimVerificationSummary({ verificationId: "vcl-x", data: { ...claimDoc, workspaceId: "w" }, workspaceId: "w", projectId: null, project: null })!;
     const teamRow = html(createElement("ul", null, createElement(TeamClaimListRow, { workspaceId: "w", item: summary as never, showProject: false })));
-    const historyLine = claimHistoryConsensusSuffix({ consensusScore: summary.consensusScore, modelIndependence: c.expected });
+    // R6: the server history row carries its explicit basis marker (lib/verification/claimStatementBasisSources.ts).
+    const historyLine = claimHistoryConsensusSuffix({ consensusScore: summary.consensusScore, modelIndependence: c.expected, consensusBasis: require("@/lib/verification/claimStatementBasisSources").storedClaimScoreBasis(claimDoc) });
     const memo = generateVerificationMemo({ type: "claim", claim: "c", verdict: "confirmed", consensusScore: 88, confidenceLabel: "High", evidenceQuality: "strong", verificationId: "v", modelEvidence: payload.modelEvidence, claimModelIndependence: c.expected });
     if (c.expected === "independent") {
       expect(view).toContain(">88</p>");
       expect(teamRow).toContain("88/100 consensus");
-      expect(historyLine).toBe(" · 88 consensus");
+      // R6: with the server's basis marker the history line states what the Team row states — a substitute answering
+      // several slots ("genuine 2+3") is a score over slot responses (the R4 qualifier); own models only stay bare.
+      expect(historyLine).toBe(c.slots.includes("ds") ? " · 88 consensus (computed over panel slot responses, not independent corroboration)" : " · 88 consensus");
       expect(memo).toContain("CONSENSUS SCORE: 88/100");
     } else {
       const withheld = CONSENSUS_WITHHELD_TEXT[consensusScoreWithheldReason(c.expected)!];

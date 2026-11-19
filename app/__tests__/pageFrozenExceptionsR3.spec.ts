@@ -10,6 +10,12 @@
  *     tab-scoped hand-off, so new links never put claim text in a URL.
  *     Exactly one import line and two reader lines.
  *
+ * PR #330 (doc 14 PR-1, owner R4 rulings + R6 decision B3, reconciled onto
+ * main c308d888 on 2026-11-19) adds a third, separately authorized class:
+ *   - PR1 (history basis): exactly two added lines — the Personal history row
+ *     mapper spreads the server's additive `consensusBasis`, and the claim
+ *     `HistoryItem` variant declares that field. No provenance code.
+ *
  * This test reverses EXACTLY those listed edits on the current file and
  * requires the result to be byte-identical to the original blob
  * (8d97e6296c16b9b0a41c30a8311a88e61de9c9a5, main at cabbdbb8). Any other
@@ -42,6 +48,12 @@ const R3_READER: Array<[string, string]> = [
   ['      const q = params.get("q") || consumeAppHandoff("research", user.uid); // privacy (PR #329 R3): new links carry no question', '      const q = params.get("q");'],
 ];
 
+/** PR #330 (doc 14 PR-1): the two added history-basis lines, each removed whole (with its newline). */
+const PR1_HISTORY_BASIS: Array<[string, string]> = [
+  ["    ...(row.consensusBasis !== undefined ? { consensusBasis: row.consensusBasis } : {}),\n", ""],
+  ['      consensusBasis?: Extract<PanelHistoryItem, { type: "verification" }>["consensusBasis"];\n', ""],
+];
+
 function reverse(src: string, edits: Array<[string, string]>): string {
   let out = src;
   for (const [cur, orig] of edits) {
@@ -53,8 +65,14 @@ function reverse(src: string, edits: Array<[string, string]>): string {
 }
 
 describe("app/page.tsx — only the authorized privacy edits differ from the original", () => {
-  it("reversing exactly the R2 logging edits and R3 reader edits restores the original blob byte-for-byte", () => {
-    expect(gitBlob(reverse(PAGE, [...R2_LOGGING, ...R3_READER]))).toBe(ORIGINAL_BLOB);
+  it("reversing exactly the R2 logging edits, R3 reader edits and the PR #330 history-basis lines restores the original blob byte-for-byte", () => {
+    expect(gitBlob(reverse(PAGE, [...R2_LOGGING, ...R3_READER, ...PR1_HISTORY_BASIS]))).toBe(ORIGINAL_BLOB);
+  });
+
+  it("each authorized class is individually necessary (omitting any one leaves a difference)", () => {
+    expect(gitBlob(reverse(PAGE, [...R2_LOGGING, ...R3_READER]))).not.toBe(ORIGINAL_BLOB);
+    expect(gitBlob(reverse(PAGE, [...R2_LOGGING, ...PR1_HISTORY_BASIS]))).not.toBe(ORIGINAL_BLOB);
+    expect(gitBlob(reverse(PAGE, [...R3_READER, ...PR1_HISTORY_BASIS]))).not.toBe(ORIGINAL_BLOB);
   });
 
   it("the legacy ?claim= / ?q= reader is still FIRST (bookmarked links keep working), the hand-off is the fallback", () => {

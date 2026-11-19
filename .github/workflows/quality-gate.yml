@@ -27,8 +27,20 @@ permissions:
   contents: read
 
 jobs:
+  # The required check. It keeps every static step (type check, lint, the real
+  # build, the build boundary gate, the falsifiability pre-flight) and waits for
+  # the Jest shards below. Its last step FAILS unless every shard passed AND
+  # the shards together ran exactly the full suite inventory, each suite once.
   quality:
     name: Quality Gate
+    needs: jest
+    # `always()`: this job must RUN and decide in every case, including a
+    # failed, timed-out or cancelled shard and a cancelled run. A required check
+    # whose job is skipped (the default `success()`, or `!cancelled()` in a
+    # cancelled run) is reported as passing by branch protection. The final
+    # Test step also runs under `always()` and fails unless the shards' combined
+    # result is exactly "success".
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -95,5 +107,79 @@ jobs:
           npm run security:preflight -- --self-test
           npm run security:preflight -- --all
 
+      - name: Download Jest shard results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: jest-shard-*
+          path: jest-shards
+
       - name: Test
-        run: npx jest --runInBand
+        # Aggregate gate over the shards. Fails closed on: any shard not
+        # successful, a missing or unreadable shard result, any failed or
+        # errored suite, a suite run twice, a suite of the full `--listTests`
+        # inventory that no shard ran, a suite outside it, or a shard whose
+        # executed set differs from its deterministic `--shard` plan.
+        if: ${{ always() }}
+        env:
+          JEST_SHARDS_RESULT: ${{ needs.jest.result }}
+        run: node scripts/ci/check-jest-shards.js --total 3 --dir jest-shards --needs-result "$JEST_SHARDS_RESULT"
+
+  # The full Jest suite in deterministic shards (`jest --shard`), run in
+  # parallel. One unsharded run reached the 30-minute job limit on slower
+  # runners; splitting it keeps each job well inside the same limit without
+  # raising it. Every shard runs the same test files, config and flags as the
+  # former single unsharded Jest step; only the partition differs.
+  jest:
+    name: Jest shard ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Let every shard finish, so one failure does not hide another.
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify the tests are of the exact PR head
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD^2)" = "$PR_HEAD_SHA" || { echo "merge commit's PR parent $(git rev-parse HEAD^2) != PR head $PR_HEAD_SHA"; exit 1; }
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare build-generated test inputs
+        # The unsharded suite ran after `npm run build`. These are the two
+        # build pre-steps whose outputs a test can observe (the materialized
+        # pdf.js worker and the generated Prisma client). `next build` itself
+        # is not needed: no suite reads the build output (.next).
+        run: |
+          node scripts/pdfjs-worker/materialize.js
+          npx prisma generate
+
+      - name: Test (shard ${{ matrix.shard }}/3)
+        run: npx jest --runInBand --shard=${{ matrix.shard }}/3 --json --outputFile=jest-shard-${{ matrix.shard }}.json
+
+      - name: Upload shard result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-shard-${{ matrix.shard }}
+          path: jest-shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          # "Re-run failed jobs" re-uploads the same artifact name.
+          overwrite: true
+          retention-days: 7

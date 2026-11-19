@@ -284,7 +284,7 @@ async function executeAndPersistTeamClaimVerification(args: {
   });
 
   const digest = buildAgreementDisagreementDigest(
-    modelEvidence.map((m) => ({ modelId: m.modelId, correctParts: m.correctParts, incorrectParts: m.incorrectParts }))
+    modelEvidence.map((m) => ({ modelId: m.modelId, correctParts: m.correctParts, incorrectParts: m.incorrectParts, verdict: m.status === "ok" ? m.verdict : m.status }))
   );
 
   const aggregateSummary = {

@@ -190,6 +190,7 @@ function panelApiItemToHistoryItem(row: PanelHistoryItem): HistoryItem {
     verdict: row.verdict,
     consensusScore: row.consensusScore,
     modelIndependence: claimModelIndependence(row.modelIndependence),
+    ...(row.consensusBasis !== undefined ? { consensusBasis: row.consensusBasis } : {}),
     governanceStatus: row.governanceStatus,
   };
 }
@@ -264,6 +265,7 @@ type HistoryItem =
       consensusScore?: number | null;
       /** Presented as "N consensus" only when "independent"; absent → unverified (claimConsensusPresentation). */
       modelIndependence?: StoredConsensusIndependence;
+      consensusBasis?: Extract<PanelHistoryItem, { type: "verification" }>["consensusBasis"];
       payload?: ClaimVerificationClientPayload | null;
       governanceStatus?: PanelHistoryGovernanceStatus;
     }

@@ -223,6 +223,7 @@ async function executeAndPersistPersonalClaimVerification(args: {
       modelId: m.modelId,
       correctParts: m.correctParts,
       incorrectParts: m.incorrectParts,
+      verdict: m.status === "ok" ? m.verdict : m.status,
     }))
   );
 

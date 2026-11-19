@@ -125,8 +125,11 @@ const SCENARIOS: Array<[string, ClaimVerificationFirestoreDoc, Expect]> = [
 
 const html = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(el).replace(/<!-- -->/g, "").replace(/&#x27;/g, "'");
 
-describe.each(SCENARIOS)("claim surfaces — %s", (_label, stored, expected) => {
+describe.each(SCENARIOS)("claim surfaces — %s", (label, stored, expected) => {
   const payload = mapStoredVerificationToClientPayload(stored, "vcl-1");
+  // Doc 14 PR-1: a stored confidence label over SPLIT answers (supporting vs inaccurate) is shown with the split; the
+  // only split scenario here is the genuine 1A/2I disagreement. Score and label are unchanged.
+  const split = label === "genuine disagreement between independent models" ? "; verdicts split: 1 accurate, 2 inaccurate" : "";
 
   it("server mapper carries the stored independence; the stored score is unchanged", () => {
     expect(payload.modelIndependence).toBe(expected);
@@ -162,7 +165,8 @@ describe.each(SCENARIOS)("claim surfaces — %s", (_label, stored, expected) => 
 
   it("copied verdict", () => {
     const text = buildClaimVerdictClipboardText(payload);
-    if (expected === "independent") expect(text).toContain("Consensus score: 93 (High confidence)");
+    // Doc 14 PR-1: before PR-1 every independent scenario pinned "Consensus score: 93 (High confidence)".
+    if (expected === "independent") expect(text).toContain(`Consensus score: 93 (High confidence${split})`);
     else {
       expect(text).not.toContain("Consensus score: 93");
       expect(text).toContain(`Consensus score: ${expected === "insufficient" ? NO_CONSENSUS : WITHHELD}`);
@@ -186,7 +190,8 @@ describe.each(SCENARIOS)("claim surfaces — %s", (_label, stored, expected) => 
     expect(input.claimModelIndependence).toBe(expected);
     const memo: string = realMemo(input);
     if (expected === "independent") {
-      expect(memo).toContain("CONSENSUS SCORE: 93/100 (High confidence)");
+      // Doc 14 PR-1: before PR-1 every independent scenario pinned "CONSENSUS SCORE: 93/100 (High confidence)".
+      expect(memo).toContain(`CONSENSUS SCORE: 93/100 (High confidence${split})`);
     } else {
       expect(memo).not.toContain("CONSENSUS SCORE: 93");
       expect(memo).toContain(expected === "insufficient" ? "CONSENSUS SCORE: none (fewer than two independent models answered" : "CONSENSUS SCORE: withheld (model independence not recorded)");
@@ -218,8 +223,9 @@ describe.each(SCENARIOS)("claim surfaces — %s", (_label, stored, expected) => 
   });
 
   it("Personal history line (client suffix over the server item and over a live result)", () => {
-    const serverItem = { consensusScore: expected === "independent" ? 93 : null, modelIndependence: expected };
-    const live = { consensusScore: 93, modelIndependence: claimModelIndependence(payload.modelIndependence) };
+    // R6: a server item carries its explicit basis marker; a live item carries its payload (app/page.tsx).
+    const serverItem = { consensusScore: expected === "independent" ? 93 : null, modelIndependence: expected, consensusBasis: require("@/lib/verification/claimStatementBasisSources").storedClaimScoreBasis(stored) };
+    const live = { consensusScore: 93, modelIndependence: claimModelIndependence(payload.modelIndependence), payload };
     for (const item of [serverItem, live]) {
       const line = `Confirmed${claimHistoryConsensusSuffix(item)}`;
       if (expected === "independent") expect(line).toBe("Confirmed · 93 consensus");
@@ -244,8 +250,48 @@ describe("fail closed + wiring", () => {
     expect(src.match(/modelIndependence: claimModelIndependence\(data\.modelIndependence\)/g)?.length).toBe(2);
     expect(src.match(/modelIndependence: payload\.modelIndependence/g)?.length).toBe(2);
     expect(src).toContain("modelIndependence: claimModelIndependence(row.modelIndependence)");
+    // R6 B3: the history mapper carries the server's basis marker whatever its value (not only "slot_responses").
+    expect(src).toContain("...(row.consensusBasis !== undefined ? { consensusBasis: row.consensusBasis } : {}),");
+    expect(src).not.toContain('row.consensusBasis === "slot_responses"');
     // The claim branch no longer formats a bare stored score (video keeps its own line).
     const claimBranch = src.slice(src.indexOf("formatHistoryVerdictLabel(item.verdict)}`"), src.indexOf("<GovernanceChip status={item.governanceStatus} />"));
     expect(claimBranch).not.toContain("consensus`");
+  });
+});
+
+describe("doc 14 PR-1 R3 — Personal wrapper memo wiring by identified executing models", () => {
+  const exportMemo = async (stored: ClaimVerificationFirestoreDoc) => {
+    mockedGenerateMemo.mockClear();
+    let tr!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      tr = TestRenderer.create(createElement(ClaimVerificationResult, { data: mapStoredVerificationToClientPayload(stored, "vcl-r3"), onVerifyAnother: () => {} }));
+    });
+    await act(async () => {
+      tr.root.findByType(VerificationActions).props.onExportMemo();
+    });
+    const input = mockedGenerateMemo.mock.calls[0][0] as Record<string, unknown>;
+    return { input, memo: realMemo(input) as string };
+  };
+  const LONG_A = "The completion year stated in the claim is wrong by twelve years";
+  const LONG_B = "Construction concluded during March of eighteen eighty-nine instead";
+
+  it("one substitute answering both sides (chatgpt=A, claude=I via DeepSeek; gemini=U): no 'Models diverged', no 'WHERE MODELS DISAGREE'", async () => {
+    const { input, memo } = await exportMemo(
+      doc([r("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }), r("claude", "ok", "inaccurate", { ...DS, incorrectParts: [LONG_B] }), r("gemini", "ok", "unverifiable")], ["chatgpt", "claude", "gemini"], "disputed")
+    );
+    expect(input.claimCrossModel).toMatchObject({ disagreement: false, oneModelPerSlot: false, supportMajority: false, disagreementPointsBetweenModels: [] });
+    expect(memo).not.toContain("Models diverged");
+    expect(memo).toContain("The panel slot responses differ, but the opposing responses did not come from two reliably identified executing models");
+    expect(memo).not.toContain("WHERE MODELS DISAGREE");
+    expect(memo).toContain("POINTS THAT DIFFER ACROSS RESPONSES (NOT A DISAGREEMENT BETWEEN INDEPENDENT MODELS)");
+  });
+
+  it("[CONTROL] genuine independent models on opposite sides keep 'Models diverged' and 'WHERE MODELS DISAGREE'", async () => {
+    const { input, memo } = await exportMemo(
+      doc([r("chatgpt", "ok", "partially_accurate", { incorrectParts: [LONG_A] }), r("claude", "ok", "inaccurate", { incorrectParts: [LONG_B] }), r("grok", "ok", "inaccurate")], ["chatgpt", "claude", "grok"], "disputed")
+    );
+    expect((input.claimCrossModel as { disagreement: boolean }).disagreement).toBe(true);
+    expect(memo).toContain("Models diverged on important aspects of this claim");
+    expect(memo).toContain("WHERE MODELS DISAGREE\n- Conflicting assessments: (chatgpt) vs (claude)");
   });
 });
