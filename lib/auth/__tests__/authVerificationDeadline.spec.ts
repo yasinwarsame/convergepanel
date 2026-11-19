@@ -29,6 +29,7 @@ import {
   MAX_INFLIGHT_AUTH_VERIFICATIONS,
   authVerificationsInFlight,
   abandonedAuthVerificationsInFlight,
+  authVerificationRefusalsTotal,
   startVerificationDeadline,
   type VerificationOutcome,
 } from "@/lib/auth/authVerificationDeadline";
@@ -271,19 +272,15 @@ describe("log lines (no credential, token or uid)", () => {
     });
   });
 
-  it("a cap refusal logs `in_flight_cap_refused`, distinct from a deadline cut-off", async () => {
+  it("a cap refusal is counted (refusals metric), distinct from a deadline cut-off, with no per-refusal warn (R6: rate-limited `saturated` signal instead)", async () => {
     await fillToCap();
     mockWarn.mockReset();
+    const before = authVerificationRefusalsTotal();
     const d = startVerificationDeadline("session_mint");
-    await d.run(async () => "x");
+    expect((await d.run(async () => "x")).kind).toBe("capped");
     d.dispose();
-    expect(mockWarn).toHaveBeenCalledTimes(1);
-    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] in_flight_cap_refused", {
-      site: "session_mint",
-      inFlight: CAP,
-      abandonedInFlight: CAP,
-      cap: CAP,
-    });
+    expect(authVerificationRefusalsTotal()).toBe(before + 1);
+    expect(mockWarn).not.toHaveBeenCalled();
   });
 
   it("a fast answer — valid OR a fast outage error — logs nothing here (the caller's own outage log covers it)", async () => {
@@ -407,13 +404,10 @@ describe("hard bound on in-flight upstream verifications (review overshoot scena
     const d = startVerificationDeadline("session_mint");
     for (let i = 0; i < HARD_CAP; i++) void d.run(() => hang());
     mockWarn.mockReset();
-    await d.run(async () => "x");
-    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] in_flight_cap_refused", {
-      site: "session_mint",
-      inFlight: HARD_CAP,
-      abandonedInFlight: 0,
-      cap: HARD_CAP,
-    });
+    const before = authVerificationRefusalsTotal();
+    expect((await d.run(async () => "x")).kind).toBe("capped");
+    expect(authVerificationRefusalsTotal()).toBe(before + 1);
+    expect(inFlight()).toBe(HARD_CAP);
     d.dispose();
   });
 });

@@ -25,7 +25,7 @@ jest.mock("@/lib/authTelemetry", () => ({ logAuthSessionEvent: jest.fn() }));
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/auth/session/route";
 import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
-import { MAX_INFLIGHT_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight } from "@/lib/auth/authVerificationDeadline";
+import { MAX_INFLIGHT_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight, authVerificationRefusalsTotal } from "@/lib/auth/authVerificationDeadline";
 
 const DEADLINE = 10_000;
 const post = () =>
@@ -58,6 +58,7 @@ it("logins whose verification hangs are abandoned (counted); at the cap the next
   mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
   mockCreateSessionCookie.mockResolvedValue("cookie");
   mockLoggerWarn.mockReset();
+  const refusedBefore = authVerificationRefusalsTotal();
   const res = await post();
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: "Authentication service unavailable" });
@@ -65,7 +66,9 @@ it("logins whose verification hangs are abandoned (counted); at the cap the next
   expect(mockVerifyIdToken).not.toHaveBeenCalled();
   expect(mockCreateSessionCookie).not.toHaveBeenCalled();
   expect(jest.getTimerCount()).toBe(0);
-  expect(mockLoggerWarn).toHaveBeenCalledWith("[auth-verification] in_flight_cap_refused", { site: "session_mint", inFlight: MAX_INFLIGHT_AUTH_VERIFICATIONS, abandonedInFlight: MAX_INFLIGHT_AUTH_VERIFICATIONS, cap: MAX_INFLIGHT_AUTH_VERIFICATIONS });
+  // R6: counted (metric) and reported by the rate-limited `saturated` signal — no per-refusal warn.
+  expect(authVerificationRefusalsTotal()).toBe(refusedBefore + 1);
+  expect(mockLoggerWarn).not.toHaveBeenCalled();
 
   // The abandoned verifications settle (late VALID) → the count drains and the next login mints normally.
   for (const r of releasers.splice(0)) r({ uid: "late" });

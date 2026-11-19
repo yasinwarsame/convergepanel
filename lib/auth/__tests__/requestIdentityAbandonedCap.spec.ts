@@ -25,7 +25,7 @@ jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: (...a: unkn
 
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
-import { MAX_INFLIGHT_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight, authVerificationsInFlight } from "@/lib/auth/authVerificationDeadline";
+import { MAX_INFLIGHT_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight, authVerificationsInFlight, authVerificationRefusalsTotal } from "@/lib/auth/authVerificationDeadline";
 
 const DEADLINE = 10_000;
 const UNAVAILABLE = { status: "unauthenticated", reason: "auth_unavailable" };
@@ -71,16 +71,15 @@ afterEach(async () => {
 it("at the cap, a bearer request fails fast (no deadline wait) and the verifier is NEVER called", async () => {
   await fillCapWithHungRequests();
   mockVerifyIdToken.mockResolvedValue({ uid: "would-be-valid" });
+  const refusedBefore = authVerificationRefusalsTotal();
   const r = await resolveRequestIdentity(req({ bearer: "fresh" }));
   expect(r).toEqual(UNAVAILABLE);
   expect(mockVerifyIdToken).not.toHaveBeenCalled();
   expect(jest.getTimerCount()).toBe(0);
-  expect(mockWarn).toHaveBeenCalledWith("[auth-verification] in_flight_cap_refused", {
-    site: "request_identity",
-    inFlight: MAX_INFLIGHT_AUTH_VERIFICATIONS,
-    abandonedInFlight: MAX_INFLIGHT_AUTH_VERIFICATIONS,
-    cap: MAX_INFLIGHT_AUTH_VERIFICATIONS,
-  });
+  // R6: the refusal is COUNTED (metric) and reported by the rate-limited `saturated` signal
+  // (authVerificationSaturation.spec.ts) — no per-refusal warn line.
+  expect(authVerificationRefusalsTotal()).toBe(refusedBefore + 1);
+  expect(mockWarn).not.toHaveBeenCalled();
   expect(JSON.stringify(mockWarn.mock.calls)).not.toContain("fresh");
 });
 
