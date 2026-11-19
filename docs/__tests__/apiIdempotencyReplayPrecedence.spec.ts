@@ -2726,6 +2726,19 @@ describe("Addendum 10 (Q3): a worker that has lost its lease is fenced; controll
     expect(creditsOf(sys)).toBe(before - 3);
   });
 
+  it("a resumed attempt never re-calls a recorded call key: it replays it (no dispatch, no cost entry, no extra charge; jobs §4.4)", () => {
+    const sys = world();
+    const id = runningJob(sys, ["ok", "ok"]);
+    runToEnd(expireLease(sys, id));
+    runToEnd(workerRetryStep(sys, id));
+    const w2 = currentLease(sys, id);
+    const [dispatches, costs] = [sys.store.keys(`dispatch/${id}/`).length, costsOf(sys, id).length];
+    for (const key of ["1", "2"]) expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.5, w2, key)))).toBe("200 replayed");
+    expect([sys.store.keys(`dispatch/${id}/`).length, costsOf(sys, id).length, jobOf(sys, id).callsMade]).toEqual([dispatches, costs, 2]);
+    runToEnd(finishJob(sys, id, "completed", undefined, undefined, { lease: w2 }));
+    expect(settleOf(sys, id).charged).toBe(2);
+  });
+
   it.each(["refused first", "new holder first"] as const)("a fenced result and the new holder's re-issue of the same call key (%s): one cost entry each, the new holder's call commits", (order) => {
     const sys = world();
     const id = runningJob(sys, ["ok"]);
