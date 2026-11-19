@@ -112,7 +112,15 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // legacy-panel synthesis-eligibility sites (L03 sites 3–4) are restored to the 35933c8 slot rule
   // (`okResults.length < 2` pre-flight; `filter(isUsableResult).length >= 2` history auto-synthesis) and the now-unused
   // meetsIndependentSynthesisMinimum import is removed; no provenance code. Was 70023e0b7a51822698b062dc8c0120bf8bf9aa81.
-  "app/page.tsx": "8d97e6296c16b9b0a41c30a8311a88e61de9c9a5",
+  // Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18, review B2): ONLY nine client
+  // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
+  // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no provenance code.
+  // Was 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5.
+  // Re-pinned (owner-authorized PR #329 R3, 2026-11-18, D5 frozen-file reader exception): ONLY one import line and
+  // the two hand-off reader lines (`params.get("claim") || consumeAppHandoff("verify", user.uid)` and the `q` twin);
+  // the legacy param is still read first. app/__tests__/pageFrozenExceptionsR3.spec.ts reverses exactly the R2 and
+  // R3 edits and requires the original 8d97e629 blob. f880b0562d904897d6bb6a6110a4f1371cd5e372 → 05d515b6170522b2f30d0497a212b8c780be527b.
+  "app/page.tsx": "05d515b6170522b2f30d0497a212b8c780be527b",
   // Re-pinned (owner-authorized SEC-2 / S4 provider-key boundary, 2026-11-09): `isAdminClaim()` and the
   // `appConfig/modelKeys` admin-claim grant removed, replaced by a deny-only `match /appConfig/{doc=**}`; no other
   // rule and no provenance code. 2fb80a11bfa6c55fe94e0438a980a3b0794aeafd → 747ccef5fc43f83bb08a986fadb49d5ca5d68e06.

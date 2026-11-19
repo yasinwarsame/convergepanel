@@ -17,6 +17,7 @@ import { z } from "zod";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import {
   QueryClassification,
   QueryClassificationFallbackReason,
@@ -389,7 +390,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
     logger.warn("[adaptiveSchema] Classifier threw/timed out, falling back to generic", {
       queryHash,
       latencyMs,
-      error: err?.message,
+      ...contentFreeError(err), // privacy (PR #329 R3): a SyntaxError message quotes the model's text
     });
     // Never cache transient failures — a later call might succeed.
     return fallbackAfterFailure("timeout", trimmedQuery);

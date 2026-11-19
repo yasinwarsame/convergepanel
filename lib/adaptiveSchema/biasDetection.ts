@@ -27,6 +27,7 @@ import { AdaptiveBiasFinding, BiasEmptyReason, QueryType } from "./types";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import { stripJsonFences, withTimeout } from "./util";
 import { MAX_BIAS_FINDINGS, BIAS_EVIDENCE_EXCERPT_MAX_CHARS } from "./config";
 
@@ -148,7 +149,7 @@ No markdown fences, no commentary outside the JSON.`;
     return { findings, emptyReason: findings.length > 0 ? null : "below_threshold" };
   } catch (err: any) {
     logger.warn("[adaptiveSchema] Bias detection call threw/timed out, returning no findings", {
-      error: err?.message,
+      ...contentFreeError(err), // privacy (PR #329 R3): a SyntaxError message quotes the model's text
     });
     return { findings: [], emptyReason: "call_failed" };
   }

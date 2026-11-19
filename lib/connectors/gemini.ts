@@ -297,7 +297,7 @@ export async function callGemini(
             console.error(`[Gemini connector] 400 Bad Request - Invalid contents:`, {
               runId,
               provider: "gemini",
-              errorMessage: fetchError?.message,
+              errorMessageLength: String(fetchError?.message ?? "").length /* privacy: can echo request content */,
               requestShape: {
                 contentsType: typeof requestContents,
                 isContentsArray: Array.isArray(requestContents),
@@ -573,7 +573,7 @@ export async function callGemini(
         console.error("[Gemini connector] API error:", {
           runId,
           provider: "gemini",
-          message: error?.message,
+          messageLength: String(error?.message ?? "").length, // privacy: provider messages can echo content
           status: error?.status,
           name: error?.name,
           attempt: attempt + 1,
@@ -618,7 +618,7 @@ export async function callGemini(
             runId,
             provider: "gemini",
             errorStatus: error?.status,
-            errorMessage: error?.message,
+            errorMessageLength: String(error?.message ?? "").length, // privacy: provider messages can echo content
             keyPresent: true, // Key was present but invalid
           });
         }

@@ -3,40 +3,114 @@
 /**
  * /verify — Standalone verification page for the Chrome extension.
  *
- * Reads "text" and "source" from URL search params, prefills a textarea,
- * and shows the selected text to ALL visitors. Unauthenticated users see a
- * signup CTA; authenticated users get the action buttons.
+ * Shows the text the extension selected (or the user typed), a signup CTA to
+ * signed-out visitors and the action buttons to signed-in users.
+ *
+ * Privacy remediation PR #329:
+ *   - R2: the text lives in a bounded, expiring, identity-bound pending input
+ *     in this tab's sessionStorage (lib/client/verifyPrefill.ts), never in the
+ *     address bar; the signup/login `redirect=` carries `source` only.
+ *   - R3 (review MAJOR-2): what the textarea DISPLAYS is derived from storage
+ *     and the current identity on every render (no React copy), the page body
+ *     is keyed by identity (nothing survives an identity change), and nothing
+ *     is shown until auth is ready. The layout's ContentHandoffMigrator
+ *     captures `#text=` (current extension) / `?text=` (legacy) before any
+ *     effect runs. Run / Deep Research hand the text to the main app through
+ *     the one-time tab-scoped hand-off — no claim text in the URL.
+ *   - R4 (owner ruling): the text is removed from the URL before any telemetry
+ *     initializes, also when sessionStorage is blocked (then it is held in this
+ *     page's memory only and a paste-manually notice is shown); typing is bound
+ *     to the current viewer, never to a previous account's record.
  */
 
-import { useState, useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
+import {
+  appHandoffHref,
+  consumePendingVerifyInput,
+  isTabStorageUsable,
+  pendingVerifyInputExpiresAt,
+  readVisiblePendingVerifyInput,
+  subscribeTabHandoffs,
+  sweepTabHandoffs,
+  tabStorage,
+  updatePendingVerifyInput,
+  verifyReturnPath,
+} from "@/lib/client/verifyPrefill";
+
+/** Identity key for the page body: `unknown` until auth is ready, then `anon` or `uid:<uid>`. */
+function verifyIdentityKey(authReady: boolean, uid: string | null | undefined): string {
+  if (!authReady) return "unknown";
+  return uid ? `uid:${uid}` : "anon";
+}
 
 export default function VerifyPage() {
+  const { user, authReady } = useAuth();
+  const viewer = authReady ? user?.uid ?? null : undefined;
+  return <VerifyPageBody key={verifyIdentityKey(authReady, user?.uid)} viewer={viewer} />;
+}
+
+/**
+ * `viewer`: undefined = identity not yet known; null = anonymous; else the
+ * signed-in uid. Keyed by identity in VerifyPage, so a new identity always
+ * mounts a fresh body.
+ */
+function VerifyPageBody({ viewer }: { viewer: string | null | undefined }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, authReady } = useAuth();
-
-  const rawText = searchParams.get("text") || "";
   const source = searchParams.get("source") || "";
 
-  // Initialize synchronously so the textarea and char count render immediately.
-  // searchParams.get() already URL-decodes, so no further decoding is needed.
-  // The effect keeps claim in sync if the URL changes (e.g. post-signup redirect).
-  const [claim, setClaim] = useState(rawText);
-  useEffect(() => { setClaim(rawText); }, [rawText]);
+  // DERIVED, never copied: re-read from storage for THIS viewer on every render and every hand-off change.
+  const claim = useSyncExternalStore(
+    subscribeTabHandoffs,
+    () => readVisiblePendingVerifyInput(tabStorage(), viewer),
+    () => ""
+  );
 
-  const handleClaimVerification = () => {
-    router.push(`/?tab=verify&claim=${encodeURIComponent(claim)}`);
+  // Expired / malformed records are removed from storage on mount (never during render).
+  useEffect(() => {
+    sweepTabHandoffs(tabStorage());
+  }, []);
+
+  // An abandoned pending input disappears from the screen at its expiry, not only on the next interaction.
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const at = pendingVerifyInputExpiresAt(tabStorage());
+    if (at === null) return;
+    const t = setTimeout(() => rerender((n) => n + 1), Math.max(0, at - Date.now()) + 5);
+    return () => clearTimeout(t);
+  }, [claim]);
+
+  const identityKnown = viewer !== undefined;
+
+  // R4 (owner ruling): with sessionStorage blocked the text is never kept in the URL — only in this page's
+  // memory — so a reload or new tab loses it. Say so plainly and ask for a manual paste.
+  const storageUsable = useSyncExternalStore(subscribeTabHandoffs, () => isTabStorageUsable(), () => true);
+
+  const handleClaimChange = (value: string) => {
+    if (!identityKnown) return;
+    updatePendingVerifyInput(tabStorage(), value, viewer ?? null);
   };
 
-  const handleDeepResearch = () => {
-    router.push(`/?tab=research&q=${encodeURIComponent(claim)}`);
+  const handleDiscard = () => {
+    consumePendingVerifyInput(tabStorage());
   };
 
-  const signupHref = `/signup?redirect=${encodeURIComponent(`/verify${window?.location?.search ?? ""}`)}`;
-  const loginHref  = `/login?redirect=${encodeURIComponent(`/verify${window?.location?.search ?? ""}`)}`;
+  const handOff = (kind: "verify" | "research") => {
+    if (typeof viewer !== "string" || !claim.trim()) return;
+    // `/?tab=<kind>` with the text in the one-time hand-off (this page's memory if sessionStorage is blocked).
+    const href = appHandoffHref(kind, claim, viewer);
+    consumePendingVerifyInput(tabStorage());
+    router.push(href);
+  };
+  const handleClaimVerification = () => handOff("verify");
+  const handleDeepResearch = () => handOff("research");
+
+  const returnPath = verifyReturnPath(source);
+  const signupHref = `/signup?redirect=${encodeURIComponent(returnPath)}`;
+  const loginHref  = `/login?redirect=${encodeURIComponent(returnPath)}`;
 
   return (
     <main className="min-h-screen bg-cp-bg px-4 py-12 text-cp-text">
@@ -64,25 +138,41 @@ export default function VerifyPage() {
           <textarea
             id="verify-text"
             value={claim}
-            onChange={(e) => setClaim(e.target.value)}
+            onChange={(e) => handleClaimChange(e.target.value)}
+            disabled={!identityKnown}
             rows={6}
             className="w-full resize-y rounded-xl border border-cp-border bg-cp-raised px-4 py-3 text-sm text-cp-text placeholder:text-cp-faint focus:border-cp-accent focus:outline-none focus:ring-2 focus:ring-cp-primary-soft"
             placeholder="Paste a claim, quote, or statement to verify…"
           />
-          {claim && (
-            <p className="mt-2 text-xs text-cp-faint">
-              {claim.length} character{claim.length !== 1 ? "s" : ""}
+          {!storageUsable && (
+            <p role="status" className="mt-2 text-xs text-cp-muted">
+              This browser is blocking temporary storage for this site, so the text can&apos;t be kept if the page
+              reloads or you open a new tab. If the box is empty, paste the claim manually.
             </p>
+          )}
+          {claim && (
+            <div className="mt-2 flex items-center justify-between text-xs text-cp-faint">
+              <p>
+                {claim.length} character{claim.length !== 1 ? "s" : ""}
+              </p>
+              <button
+                type="button"
+                onClick={handleDiscard}
+                className="font-semibold text-cp-muted underline-offset-2 hover:text-cp-text hover:underline"
+              >
+                Discard text
+              </button>
+            </div>
           )}
         </div>
 
         {/* Actions — differ by auth state */}
-        {!authReady ? (
+        {!identityKnown ? (
           /* Tiny spinner while auth resolves — text is already visible above */
           <div className="mt-6 flex justify-center">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-cp-border border-t-cp-accent" />
           </div>
-        ) : user ? (
+        ) : typeof viewer === "string" ? (
           /* Authenticated: action buttons */
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <button
@@ -101,6 +191,7 @@ export default function VerifyPage() {
             </button>
             <Link
               href="/"
+              onClick={() => consumePendingVerifyInput(tabStorage())}
               className="flex-1 rounded-[11px] border border-cp-border bg-cp-surface px-5 py-3 text-center text-sm font-semibold text-cp-text shadow-sm transition hover:border-cp-faint hover:bg-cp-raised"
             >
               Open Main App

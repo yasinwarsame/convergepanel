@@ -72,6 +72,7 @@ import type { PersistedAdaptiveOutput, PersistedLegacyAdaptiveOutputV1 } from "@
 import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { adaptPersistedOutputToPanelPayload, adaptPersistedLegacyOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
+import { consumeAppHandoff } from "@/lib/client/verifyPrefill"; // privacy (PR #329 R3): tab-scoped /verify hand-off
 
 // Lazy load heavy components - defer until after first paint
 const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
@@ -1055,7 +1056,7 @@ export default function Home() {
           status: response.status,
           statusText: response.statusText,
           contentType,
-          responseText: responseText.substring(0, 500),
+          responseTextLength: responseText.length, // privacy (2026-11-18): no response body excerpt
         });
         setError(
           `Server error (${response.status}). The server returned an unexpected response. Please try again or contact support.`
@@ -1070,13 +1071,13 @@ export default function Home() {
       // If parsing fails, handle gracefully without throwing
       let data: RunPanelApiResponse;
       try {
-        console.log("[panel] Raw API response (first 500 chars):", responseText.substring(0, 500)); // Log for debugging
+        console.log("[panel] API response received:", { length: responseText.length }); // privacy (2026-11-18): no model-output excerpt
         data = JSON.parse(responseText);
       } catch (jsonError: any) {
         // JSON parsing failed - log the raw response for debugging
         console.error("[panel] Failed to parse JSON response:", {
-          error: jsonError,
-          responseText: responseText.substring(0, 1000), // First 1000 chars
+          errorName: jsonError?.name, // privacy (2026-11-18): a SyntaxError message quotes the body
+          responseTextLength: responseText.length, // privacy (2026-11-18): no model-output excerpt
           status: response.status,
           statusText: response.statusText,
         });
@@ -1101,14 +1102,14 @@ export default function Home() {
             errorCode: data.errorCode,
             message: data.message,
             devDetails: (data as any).devDetails,
-            fullResponse: data,
+            responseKeys: Object.keys(data), // privacy (2026-11-18): was the full response
           });
         } else {
           // Even if no devDetails, log the error for debugging
           console.error("[panel] ERROR from /api/run-panel (no devDetails):", {
             errorCode: data.errorCode,
             message: data.message,
-            fullResponse: data,
+            responseKeys: Object.keys(data), // privacy (2026-11-18): was the full response
           });
         }
         
@@ -1157,7 +1158,7 @@ export default function Home() {
 
       // Validate response structure (should have results array)
       if (!data.results || !Array.isArray(data.results)) {
-        console.error("Invalid response structure:", data);
+        console.error("Invalid response structure:", { keys: data && typeof data === "object" ? Object.keys(data) : typeof data }); // privacy (2026-11-18)
         setError("Invalid response format from server. Please try again.");
         setRunStatus("error");
         return;
@@ -1165,7 +1166,7 @@ export default function Home() {
       
       // TEMPORARY DEBUG LOG: Log the raw results from API to verify all models are present
       // This helps diagnose why some models might not appear in the UI
-      console.log("[panel] Raw results from API:", data.results);
+      console.log("[panel] Results received from API"); // privacy (2026-11-18): was data.results (every model's rawText)
       console.log("[panel] Results count:", data.results.length);
       console.log("[panel] Results model IDs:", data.results.map((r: ModelResult) => r.modelId));
       console.log("[panel] Results statuses:", data.results.map((r: ModelResult) => ({ modelId: r.modelId, status: r.status })));
@@ -1197,7 +1198,7 @@ export default function Home() {
           if (result && result.modelId && result.status) {
         finalStatuses[result.modelId] = coerceStatus(result.status);
           } else {
-            console.warn("[panel] Skipping malformed result:", result);
+            console.warn("[panel] Skipping malformed result:", { modelId: result?.modelId, status: result?.status }); // privacy (2026-11-18)
           }
       });
       } catch (statusError: any) {
@@ -2376,7 +2377,7 @@ export default function Home() {
        * `personalResearchVerifyClaimHref`) and no double-encoded protocol exists,
        * so a second decode has nothing to undo and can only corrupt content.
        */
-      const claim = params.get("claim");
+      const claim = params.get("claim") || consumeAppHandoff("verify", user.uid); // privacy (PR #329 R3): new links carry no claim
       if (claim) setClaimInput(claim);
       router.replace("/", { scroll: false });
     } else if (tab === "research") {
@@ -2388,7 +2389,7 @@ export default function Home() {
       supersedeRunningResearch();
       setPanelTab("research");
       // C2 §B — already decoded by `URLSearchParams`; see the `claim` site above.
-      const q = params.get("q");
+      const q = params.get("q") || consumeAppHandoff("research", user.uid); // privacy (PR #329 R3): new links carry no question
       if (q) setQuestion(q);
       router.replace("/", { scroll: false });
     }

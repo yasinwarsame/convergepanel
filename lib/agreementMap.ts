@@ -320,14 +320,13 @@ export function extractClaimsFromResponse(
 
   // Debug logging: Log claims count by model to verify extraction
   if (isDebugEnabled()) {
-    const sanitizedPreview = markdown.substring(0, 200).replace(/\n/g, " ");
+    // Privacy (2026-11-18): counts and lengths only — no text preview, no sample claim text.
     console.log(`[extractClaimsFromResponse] ${modelId}:`, {
       textLength: markdown.length,
       hasText: markdown.trim().length > 0,
-      preview: sanitizedPreview,
       claimsCount: claims.length,
       keyClaimsFound,
-      sampleClaims: claims.slice(0, 3).map(c => ({ text: c.text.substring(0, 80), section: c.section })),
+      sampleClaimSections: claims.slice(0, 3).map(c => c.section),
     });
   }
 
@@ -686,18 +685,17 @@ export function buildAgreementMap(results: ModelResult[]): ClaimCluster[] {
   // Includes Gemini, Perplexity, and all other models as full panel members in clustering / agreement analysis.
   const allClaims: Claim[] = [];
   // Track claim extraction for debug assertion (only used if debug is enabled)
-  const claimExtractionLog: Array<{ modelId: ModelId; extractedClaimsCount: number; textLength: number; preview: string }> = [];
+  const claimExtractionLog: Array<{ modelId: ModelId; extractedClaimsCount: number; textLength: number }> = [];
   for (const result of successfulResults) {
     const modelText = getModelText(result);
     if (modelText.trim().length > 0) {
       const claims = extractClaimsFromResponse(result.modelId, modelText);
       allClaims.push(...claims);
-      const preview = modelText.substring(0, 200).replace(/\n/g, " ");
+      // Privacy (2026-11-18): no text preview is kept or logged (was the first 200 chars of model output).
       claimExtractionLog.push({ 
         modelId: result.modelId, 
         extractedClaimsCount: claims.length,
         textLength: modelText.length,
-        preview,
       });
       // Debug log: Verify claims are extracted for all models including Gemini, Perplexity
       console.log(`[buildAgreementMap] Extracted ${claims.length} claims from ${result.modelId} (text length: ${modelText.length})`);
@@ -715,10 +713,7 @@ export function buildAgreementMap(results: ModelResult[]): ClaimCluster[] {
       acc[log.modelId] = log.textLength;
       return acc;
     }, {} as Record<string, number>),
-    previewsByModel: claimExtractionLog.reduce((acc, log) => {
-      acc[log.modelId] = log.preview;
-      return acc;
-    }, {} as Record<string, string>),
+    // privacy (2026-11-18): previewsByModel (first 200 chars of each model's output) removed
   });
 
   // Debug log: Verify all model IDs are represented in claims
@@ -781,7 +776,7 @@ export function buildAgreementMap(results: ModelResult[]): ClaimCluster[] {
         const modelClaims = allClaims.filter(c => c.modelId === modelId);
         console.error(`[buildAgreementMap] Model ${modelId} details:`, {
           extractedClaimsCount: log?.extractedClaimsCount,
-          claims: modelClaims.slice(0, 5).map(c => ({ id: c.id, text: c.text.substring(0, 100), section: c.section })),
+          claims: modelClaims.slice(0, 5).map(c => ({ id: c.id, textLength: c.text.length, section: c.section })), // privacy: no claim text
         });
       }
     } else if (isDebugEnabled()) {
