@@ -364,3 +364,365 @@ describe("R5 review mutant pins", () => {
     expect(beyond.captures).toEqual([]);
   });
 });
+
+// ---- R6 (review MINORs Y10 / Y11): the claim-id grammar, position by position ----------------------------------
+//
+// Y10: an index segment that accepted whitespace survived (the earlier absolute check inserted characters at one
+// position only, inside the fingerprint). Y11: a fingerprint alphabet that accepted `.` or `~` survived (the earlier
+// list omitted unreserved punctuation). Every positive value below is issued by the real builder; every negative is
+// derived from one, and each negative is checked next to its own builder-issued control through the same flows
+// (personal hand-off, Team hand-off, reload, shared link), so rejecting a malformed id can never hide a real one.
+
+describe("R6: originClaimId grammar is exactly the builder's, at every position", () => {
+  const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const INDICES = [0, 1, 2, 9, 10, 11, 99, 100, 101, 999_999, 2 ** 31 - 1, 2 ** 31, 2 ** 32, 10 ** 15, Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER];
+  const SECTIONS = ["findings", "lowConfidenceFindings"] as const;
+  /** Real-shaped finding ids, including versioned / punctuated / non-ASCII ones: the builder hashes them, never embeds them. */
+  const RAW_FINDING_IDS = () => [`f-${randomUUID()}`, "finding_3", "v2:finding:7", "f/1?x=y#z", "f 1", "étude-1", "x".repeat(500)];
+
+  const parts = (id: string) => {
+    const [version, section, index, fingerprint] = id.split(":");
+    return { version, section, index, fingerprint };
+  };
+  const withIndex = (id: string, index: string) => {
+    const p = parts(id);
+    return `${p.version}:${p.section}:${index}:${p.fingerprint}`;
+  };
+  const withFingerprint = (id: string, fingerprint: string) => {
+    const p = parts(id);
+    return `${p.version}:${p.section}:${p.index}:${fingerprint}`;
+  };
+
+  /** A builder-issued corpus that covers both sections, every boundary index, both run-id generators and every fingerprint character class. */
+  function builderCorpus(): string[] {
+    const out: string[] = [];
+    for (const run of [runId(), legacyRunId()]) {
+      for (const section of SECTIONS) {
+        for (const index of INDICES) {
+          for (const rawId of RAW_FINDING_IDS()) {
+            const id = buildDeepResearchClaimId({ runId: run, section, index, finding: { id: rawId, summary: `a finding about tides ${index}` } });
+            if (id === null) throw new Error("builder refused a valid finding");
+            out.push(id);
+          }
+        }
+      }
+    }
+    // Keep issuing until `-` and `_` have each been seen as the first, a middle and the last-but-one fingerprint character.
+    const need = new Set(["-@0", "_@0", "-@mid", "_@mid", "-@41", "_@41"]);
+    for (let i = 0; need.size > 0 && i < 20_000; i++) {
+      const id = buildDeepResearchClaimId({ runId: runId(), section: SECTIONS[i % 2], index: i, finding: finding(`coverage ${i}`) })!;
+      const fp = parts(id).fingerprint;
+      const before = need.size;
+      for (const ch of ["-", "_"]) {
+        need.delete(fp[0] === ch ? `${ch}@0` : "");
+        need.delete(fp.slice(1, 41).includes(ch) ? `${ch}@mid` : "");
+        need.delete(fp[41] === ch ? `${ch}@41` : "");
+      }
+      if (need.size < before) out.push(id);
+    }
+    if (need.size > 0) throw new Error(`corpus did not cover ${[...need].join(", ")}`);
+    return out;
+  }
+  const CORPUS = builderCorpus();
+  const [findingsId] = CORPUS;
+  const longestId = buildDeepResearchClaimId({ runId: runId(), section: "lowConfidenceFindings", index: Number.MAX_SAFE_INTEGER, finding: finding("longest") })!;
+  /** A builder id whose index has several digits, so there are interior index positions. */
+  const multiDigitId = CORPUS.find((id) => parts(id).index === String(Number.MAX_SAFE_INTEGER))!;
+
+  // ---- the flows (each returns what the reading page would see) ----
+
+  const personalFlows = (claimId: string) => {
+    const run = runId();
+    const url = `/?tab=verify&originRunId=${enc(run)}&originClaimId=${enc(claimId)}`;
+    return { run, url, results: [hardLoad(url), softNavigate(url), hardLoad(softNavigate(url))] };
+  };
+  const teamFlows = (claimId: string) => {
+    const ws = firestoreAutoId();
+    const run = runId();
+    const url = teamClaimOriginHandoffHref({ workspaceId: ws, runId: run, claimId });
+    const addressBar = softNavigate(url); // first arrival by router.push
+    return { ws, run, url, addressBar, reloaded: hardLoad(addressBar), shared: hardLoad(url) };
+  };
+
+  function expectKept(claimId: string) {
+    expect(rules.isRoutingParamValue("originClaimId", claimId)).toBe(true);
+    const p = personalFlows(claimId);
+    for (const after of p.results) {
+      expect(after).toBe(p.url);
+      const params = new URLSearchParams(after.slice(after.indexOf("?")));
+      expect(params.get("tab")).toBe("verify");
+      expect(params.get("originRunId")?.trim()).toBe(p.run);
+      expect(params.get("originClaimId")?.trim()).toBe(claimId);
+    }
+    const t = teamFlows(claimId);
+    for (const after of [t.addressBar, t.reloaded, t.shared]) {
+      expect(after).toBe(t.url);
+      expect(parseTeamClaimOriginQuery(nextSearchParams(after))).toEqual({ kind: "origin", target: { runId: t.run, claimId } });
+    }
+  }
+
+  /** `value` is malformed: dropped by every flow (the rest of the URL intact). Its builder-issued `control` is then re-checked through the same flows when the test ends. */
+  function expectDropped(value: string, control: string) {
+    expect(rules.isRoutingParamValue("originClaimId", value)).toBe(false);
+    expect(parseDeepResearchClaimId(value)).toBeNull(); // the server parser agrees: one grammar
+    const p = personalFlows(value);
+    for (const after of p.results) {
+      expect(after).toBe(`/?tab=verify&originRunId=${enc(p.run)}`);
+    }
+    const t = teamFlows(value);
+    for (const after of [t.addressBar, t.reloaded, t.shared]) {
+      const q = new URLSearchParams(after.slice(after.indexOf("?")));
+      expect(q.get("originClaimId")).toBeNull();
+      expect(q.get("originRunId")).toBe(t.run);
+      expect(parseTeamClaimOriginQuery(nextSearchParams(after))).toEqual({ kind: "invalid" });
+    }
+    controls.add(control);
+  }
+  /** Each test's builder-issued controls, re-checked through the same flows after its negatives. */
+  const controls = new Set<string>();
+  afterEach(() => {
+    for (const control of controls) expectKept(control);
+    controls.clear();
+  });
+
+  /** The cheap form for exhaustive position sweeps: the shared rule, the server parser and the address-bar scrub. */
+  function expectRejected(value: string) {
+    expect(rules.isRoutingParamValue("originClaimId", value)).toBe(false);
+    expect(parseDeepResearchClaimId(value)).toBeNull();
+    expect(scrubUrlParts({ pathname: "/", search: `?tab=verify&originClaimId=${enc(value)}`, hash: "" }).search).toBe("?tab=verify");
+  }
+  /** Fingerprint positions run through the full flows (first, second, middle, last-but-one, last, one past the end); every other position gets `expectRejected`. */
+  const FULL_FLOW_FP_POSITIONS = new Set([0, 1, 21, 41, 42, 43]);
+
+  // ---- positives ----
+
+  it("every builder-issued id (both sections, boundary indices, both run-id forms, odd finding ids) survives every flow", () => {
+    expect(CORPUS.length).toBeGreaterThan(400);
+    for (const id of CORPUS) expectKept(id);
+  });
+
+  it("the builder never emits a leading zero, a sign or whitespace in the index, and only base64url in the fingerprint", () => {
+    for (const id of CORPUS) {
+      const p = parts(id);
+      expect(p.version).toBe("v1");
+      expect(SECTIONS as readonly string[]).toContain(p.section);
+      expect(p.index).toBe(String(Number(p.index)));
+      expect(/^[0-9]+$/.test(p.index)).toBe(true);
+      expect(p.fingerprint).toHaveLength(43);
+      for (const ch of p.fingerprint) expect(BASE64URL).toContain(ch);
+    }
+  });
+
+  it("length: the longest id the builder can issue is exactly 85 characters and is kept; every 86-character neighbour is dropped", () => {
+    expect(longestId).toHaveLength(85);
+    expectKept(longestId);
+    const fp = parts(longestId).fingerprint;
+    const neighbours = [
+      withIndex(longestId, "10000000000000000"), // 17 digits
+      withIndex(longestId, String(Number.MAX_SAFE_INTEGER) + "0"),
+      withFingerprint(longestId, fp + "A"),
+      `${longestId}A`,
+      `A${longestId}`,
+      `${longestId} `,
+      longestId.replace("v1:", "v1::"),
+    ];
+    for (const v of neighbours) {
+      expect(v).toHaveLength(86);
+      expectDropped(v, longestId);
+    }
+    // And one shorter than any builder id for its section: a 42-character fingerprint.
+    expectDropped(withFingerprint(findingsId, parts(findingsId).fingerprint.slice(0, 42)), findingsId);
+  });
+
+  it("index bounds: 0 and MAX_SAFE_INTEGER are kept; MAX_SAFE_INTEGER + 1 (which the builder refuses) and beyond are dropped", () => {
+    const zero = CORPUS.find((id) => parts(id).index === "0")!;
+    expectKept(zero);
+    expectKept(multiDigitId);
+    expect(buildDeepResearchClaimId({ runId: runId(), section: "findings", index: Number.MAX_SAFE_INTEGER + 1, finding: finding("x") })).toBeNull();
+    expect(buildDeepResearchClaimId({ runId: runId(), section: "findings", index: -1, finding: finding("x") })).toBeNull();
+    for (const index of ["9007199254740992", "9007199254740993", "9999999999999999", "10000000000000000", "9".repeat(60)]) {
+      expectDropped(withIndex(multiDigitId, index), multiDigitId);
+    }
+  });
+
+  // ---- Y10: the index segment ----
+
+  const WHITESPACE = [" ", "\t", "\n", "\r", "\v", "\f", " ", " ", " ", " ", " ", " ", " ", " ", "　", "﻿", "​"];
+  const UNICODE_DIGITS = ["١", "۳", "५", "߁", "໑", "１", "\u{1d7cf}", "²", "Ⅰ"];
+  const NUMERIC_PUNCTUATION = ["+", "-", ".", ",", "_", "e", "E", "x", "n", "'", "%", "/", "=", "~"];
+
+  it("Y10: whitespace at EVERY index position (before, between and after each digit, and alone) is dropped", () => {
+    for (const control of [findingsId, multiDigitId, longestId]) {
+      const index = parts(control).index;
+      for (const ws of WHITESPACE) {
+        for (let at = 0; at <= index.length; at++) {
+          expectDropped(withIndex(control, index.slice(0, at) + ws + index.slice(at)), control);
+        }
+        for (let at = 0; at < index.length; at++) {
+          expectDropped(withIndex(control, index.slice(0, at) + ws + index.slice(at + 1)), control); // a digit replaced
+        }
+        expectDropped(withIndex(control, ws), control);
+        expectDropped(withIndex(control, ws + ws), control);
+      }
+    }
+  });
+
+  it("Y10: signs, numeric punctuation and unicode digits at every index position are dropped", () => {
+    for (const control of [findingsId, multiDigitId]) {
+      const index = parts(control).index;
+      for (const ch of [...NUMERIC_PUNCTUATION, ...UNICODE_DIGITS]) {
+        for (let at = 0; at <= index.length; at++) {
+          expectDropped(withIndex(control, index.slice(0, at) + ch + index.slice(at)), control);
+        }
+        for (let at = 0; at < index.length; at++) {
+          expectDropped(withIndex(control, index.slice(0, at) + ch + index.slice(at + 1)), control);
+        }
+      }
+    }
+  });
+
+  it("Y10: number spellings the builder never emits (leading zeros, signed zero, exponent, hex, decimals) are dropped", () => {
+    const spellings = [
+      "", "00", "01", "007", `0${Number.MAX_SAFE_INTEGER}`, "-0", "+0", "-1", "+1", "1e3", "1E3", "0x1", "0X1", "0b1", "0o7",
+      "1.0", "1.", ".5", "Infinity", "-Infinity", "NaN", "1n", "1_000", "1,000", ...UNICODE_DIGITS, ...UNICODE_DIGITS.map((d) => `1${d}`),
+    ];
+    for (const index of spellings) expectDropped(withIndex(findingsId, index), findingsId);
+  });
+
+  // ---- Y11: the fingerprint segment ----
+
+  /** Every printable and control ASCII character outside base64url, and non-ASCII lookalikes. */
+  const NOT_BASE64URL = [
+    ...Array.from({ length: 128 }, (_, c) => String.fromCharCode(c)).filter((ch) => !BASE64URL.includes(ch)),
+    " ", "​", "﻿", "é", "ａ", "А", "ı", "́", "\u{1f600}", "−", "‐",
+  ];
+
+  it("Y11: the punctuation list names every unreserved and reserved URL character, including . ~ + / = %", () => {
+    for (const ch of [".", "~", "+", "/", "=", "%", "!", "*", "'", "(", ")", ":", ";", "@", "&", "$", ",", "?", "#", "[", "]", " "]) {
+      expect(NOT_BASE64URL).toContain(ch);
+    }
+    // `-` and `_` ARE base64url: the builder emits them, so they are positive controls, not negatives.
+    expect(NOT_BASE64URL).not.toContain("-");
+    expect(NOT_BASE64URL).not.toContain("_");
+  });
+
+  it("Y11: any non-base64url character at EVERY fingerprint position (replaced or inserted) is dropped", () => {
+    for (const control of [findingsId, longestId]) {
+      const fp = parts(control).fingerprint;
+      for (const ch of NOT_BASE64URL) {
+        for (let at = 0; at <= 43; at++) {
+          const check = FULL_FLOW_FP_POSITIONS.has(at) ? (v: string) => expectDropped(v, control) : expectRejected;
+          if (at < 43) check(withFingerprint(control, fp.slice(0, at) + ch + fp.slice(at + 1))); // same length
+          check(withFingerprint(control, fp.slice(0, at) + ch + fp.slice(at))); // one longer
+        }
+      }
+    }
+  });
+
+  it("Y11: . and ~ arrive unescaped in a URL (encodeURIComponent leaves them) and are still dropped; %2E / %7E too", () => {
+    const fp = parts(findingsId).fingerprint;
+    for (const [raw, escaped] of [[".", "%2E"], ["~", "%7E"], ["+", "%2B"], ["/", "%2F"], ["=", "%3D"], ["%", "%25"]]) {
+      for (const at of [0, 21, 42]) {
+        const value = withFingerprint(findingsId, fp.slice(0, at) + raw + fp.slice(at + 1));
+        expectDropped(value, findingsId);
+        const literal = `/?tab=verify&originClaimId=${enc(findingsId).replace(enc(fp), enc(fp.slice(0, at)) + escaped + enc(fp.slice(at + 1)))}`;
+        expect(new URLSearchParams(literal.slice(1)).get("originClaimId")).toBe(value);
+        expect(hardLoad(literal)).toBe("/?tab=verify");
+      }
+    }
+    // A raw `+` in a query is a space after decoding: also dropped.
+    const plus = `/?tab=verify&originClaimId=${enc(withFingerprint(findingsId, fp.slice(0, 21))).replace(/$/, "+" + fp.slice(22))}`;
+    expect(hardLoad(plus)).toBe("/?tab=verify");
+  });
+
+  it("Y11 positive control: - and _ at every fingerprint position a builder id holds them are kept", () => {
+    const withDash = CORPUS.filter((id) => /[-_]/.test(parts(id).fingerprint));
+    expect(withDash.length).toBeGreaterThan(0);
+    const seen = new Set<string>();
+    for (const id of withDash) {
+      const fp = parts(id).fingerprint;
+      for (let at = 0; at < 43; at++) if (fp[at] === "-" || fp[at] === "_") seen.add(`${fp[at]}@${at === 0 ? "0" : at === 41 ? "41" : "mid"}`);
+      expectKept(id);
+    }
+    expect([...seen].sort()).toEqual(["-@0", "-@41", "-@mid", "_@0", "_@41", "_@mid"]);
+  });
+
+  // ---- the whole id: every position, every separator ----
+
+  it("a character outside [A-Za-z0-9_:-] anywhere in the id (replaced or inserted) is dropped", () => {
+    const foreign = NOT_BASE64URL.filter((ch) => ch !== ":");
+    for (const control of [findingsId, longestId]) {
+      expectKept(control);
+      for (let at = 0; at <= control.length; at++) {
+        for (const ch of foreign) {
+          if (at < control.length) expectRejected(control.slice(0, at) + ch + control.slice(at + 1));
+          expectRejected(control.slice(0, at) + ch + control.slice(at));
+        }
+      }
+    }
+  });
+
+  it("versions, sections and separators the builder never emits are dropped", () => {
+    const { section, index, fingerprint } = parts(findingsId);
+    const variants = [
+      `v0:${section}:${index}:${fingerprint}`, `v2:${section}:${index}:${fingerprint}`, `v10:${section}:${index}:${fingerprint}`,
+      `V1:${section}:${index}:${fingerprint}`, `v01:${section}:${index}:${fingerprint}`, `1:${section}:${index}:${fingerprint}`,
+      `:${section}:${index}:${fingerprint}`, `v1:Findings:${index}:${fingerprint}`, `v1:finding:${index}:${fingerprint}`,
+      `v1:summary:${index}:${fingerprint}`, `v1:lowconfidencefindings:${index}:${fingerprint}`, `v1::${index}:${fingerprint}`,
+      `v1:${section}::${fingerprint}`, `v1:${section}:${index}:`, `v1:${section}:${index}`, `v1:${section}:${index}::${fingerprint}`,
+      `v1:${section}:${index}:${fingerprint}:`, `v1:${section}:${index}:${fingerprint}:${fingerprint}`, `v1-${section}-${index}-${fingerprint}`,
+      `v1:${section}:${fingerprint}`, `${fingerprint}`,
+    ];
+    for (const v of variants) expectDropped(v, findingsId);
+  });
+
+  it("a double-encoded id (%253A) is dropped; the single encoding every producer writes (%3A) is kept", () => {
+    const once = enc(findingsId);
+    expect(once).toContain("%3A");
+    expect(hardLoad(`/?tab=verify&originClaimId=${once}`)).toBe(`/?tab=verify&originClaimId=${once}`);
+    expect(hardLoad(`/?tab=verify&originClaimId=${enc(once)}`)).toBe("/?tab=verify");
+  });
+
+  it("dropping a malformed id leaves no state behind: the next real hand-off, in the same session, is kept", async () => {
+    const ws = firestoreAutoId();
+    for (const bad of [withIndex(findingsId, ` ${parts(findingsId).index}`), withFingerprint(findingsId, `.${parts(findingsId).fingerprint.slice(1)}`)]) {
+      const run = runId();
+      expect(softNavigate(teamClaimOriginHandoffHref({ workspaceId: ws, runId: run, claimId: bad }))).not.toContain("originClaimId");
+      const goodUrl = teamClaimOriginHandoffHref({ workspaceId: ws, runId: run, claimId: findingsId });
+      const reloaded = hardLoad(softNavigate(goodUrl));
+      expect(reloaded).toBe(goodUrl);
+      const el = (await TeamUnfiledClaimCreatePage({ params: { workspaceId: ws }, searchParams: nextSearchParams(reloaded) })) as unknown as {
+        props: { originTarget: unknown };
+      };
+      expect(el.props.originTarget).toEqual({ runId: run, claimId: findingsId });
+    }
+  });
+
+  it("the Team page: a malformed id after reload is the not-found 'invalid hand-off', its builder control renders origin mode", async () => {
+    const fp = parts(findingsId).fingerprint;
+    const malformed = [
+      withIndex(findingsId, ` ${parts(findingsId).index}`),
+      withIndex(findingsId, `${parts(findingsId).index} `),
+      withIndex(findingsId, `+${parts(findingsId).index}`),
+      withFingerprint(findingsId, `${fp.slice(0, 42)}.`),
+      withFingerprint(findingsId, `~${fp.slice(1)}`),
+      withIndex(longestId, "9007199254740992"),
+    ];
+    for (const bad of malformed) {
+      const ws = firestoreAutoId();
+      const t = teamFlows(bad);
+      let caught: unknown;
+      try {
+        await TeamUnfiledClaimCreatePage({ params: { workspaceId: ws }, searchParams: nextSearchParams(t.reloaded) });
+      } catch (e) {
+        caught = e;
+      }
+      expect((caught as { digest?: string } | undefined)?.digest).toBe("NEXT_NOT_FOUND");
+      const control = teamFlows(findingsId);
+      const el = (await TeamUnfiledClaimCreatePage({ params: { workspaceId: ws }, searchParams: nextSearchParams(control.reloaded) })) as unknown as {
+        props: { originTarget: unknown };
+      };
+      expect(el.props.originTarget).toEqual({ runId: control.run, claimId: findingsId });
+    }
+  });
+});
