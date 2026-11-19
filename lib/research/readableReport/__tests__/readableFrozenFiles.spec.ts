@@ -56,7 +56,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
   "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
   "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
-  "app/page.tsx": "a3e49156e031b51cf4020b8a94f2061f14f30ead",
+  "app/page.tsx": "b3d6ad98ab9b6689a32618018b853ced496c83ed",
 };
 
 /**
@@ -221,10 +221,16 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * app/page.tsx`). dsProvenanceUiBoundaries.spec.ts da95909b… → 60b66ab8… (its app/page.tsx pin, the same
  * record). vocabularyManifest.json f2a47e13… → 90136844… (1 claim-memo entry re-keyed, none added or removed: the
  * CONSENSUS SCORE literal gains the `basisQ` score-basis qualifier; its rule extended accordingly). Same 32-file pinned set.
+ *
+ * Re-pinned (doc 14 PR-1, R6 owner decision B3 2026-11-19 — Personal history cache marker; same 2-line exception):
+ * app/page.tsx a3e49156… → b3d6ad98… — ONLY the same two lines re-worded: `panelApiItemToHistoryItem` spreads any
+ * server `consensusBasis` value (the explicit basis marker every R6 claim history item carries), and the claim
+ * `HistoryItem` field's type is the server item's. Still exactly 2 added lines vs cabbdbb (`git diff cabbdbb --
+ * app/page.tsx`). dsProvenanceUiBoundaries.spec.ts 60b66ab8… → 27bbd798… (its app/page.tsx pin, the same record).
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "60b66ab8bfd872fca9a09b7ab561efad7eb71ba2",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "27bbd79805e6eab60b4423016cc88ca3c67e00f4",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };

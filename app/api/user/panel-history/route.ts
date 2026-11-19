@@ -14,7 +14,7 @@ import type { ModelId } from "@/lib/types";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { consensusScoreWithheldReason, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
 import { storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
-import { storedClaimHistoryScoreFields } from "@/lib/verification/claimStatementBasisSources";
+import { storedClaimHistoryRowFields } from "@/lib/verification/claimStatementBasisSources";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -179,8 +179,9 @@ export async function GET(req: NextRequest) {
       // A claim's stored score is a cross-model figure: listed only when the stored rows prove >= 2 independent
       // executing models with a usable answer (lib/panel/storedVerificationIndependence.ts); otherwise withheld with
       // the reason. R4: a presented score over slots that are not each a distinct identified model carries the basis
-      // marker (lib/verification/claimStatementBasisSources.ts). Stored data is unchanged.
-      const scoreFields = storedClaimHistoryScoreFields(data as Record<string, unknown>);
+      // marker (lib/verification/claimStatementBasisSources.ts). R6 (owner decision B3): every claim item carries the
+      // explicit `consensusBasis`, so the client recognises an item cached before it. Stored data is unchanged.
+      const scoreFields = storedClaimHistoryRowFields(data as Record<string, unknown>);
       merged.push({
         sortKey,
         item: {
@@ -192,7 +193,7 @@ export async function GET(req: NextRequest) {
           consensusScore: scoreFields.consensusScore,
           ...(scoreFields.consensusWithheld ? { consensusWithheld: scoreFields.consensusWithheld } : {}),
           modelIndependence: scoreFields.modelIndependence,
-          ...(scoreFields.consensusBasis ? { consensusBasis: scoreFields.consensusBasis } : {}),
+          consensusBasis: scoreFields.consensusBasis,
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
         },
       });

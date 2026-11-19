@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveLegacyReadDomain, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
-import { storedClaimHistoryScoreFields } from "@/lib/verification/claimStatementBasisSources";
+import { storedClaimScoreBasis, type ClaimScoreBasis } from "@/lib/verification/claimStatementBasisSources";
 import { logger } from "@/lib/logger";
 import {
   getRequestUid,
@@ -27,23 +27,25 @@ function tsMillis(t: unknown): number {
 /**
  * R5 (review record 16 F, MINOR-1) — the basis of a CLAIM row's exported consensus score, from the linked
  * `verifications/{verificationId}` persisted rows on the shared claim statement basis
- * (lib/verification/claimStatementBasisSources.ts). Exported as the APPENDED `consensusBasis` column / JSON field; the
- * stored `consensusScore` column is unchanged (still the number), so every established column keeps its position and
- * format. Values:
+ * (lib/verification/claimStatementBasisSources.ts `storedClaimScoreBasis`, the same enum the Personal history marker
+ * uses — R6). Exported as the APPENDED `consensusBasis` column / JSON field; the stored `consensusScore` column is
+ * unchanged (still the number, also for a withheld claim), so every established column keeps its position and format.
+ * Values:
  *   "independent_models"              >= 2 independent executing models, one distinct identified model per slot
  *   "slot_responses"                  computed over panel slot responses, not independent corroboration
  *   "insufficient_independent_models" fewer than two independent executing models — not a consensus
- *   "independence_unverified"         the executing models could not be established (missing/unreadable: fail closed)
- *   ""                                not a claim row (the research score basis is outside this change)
+ *   "independence_unverified"         the executing models could not be established — no rows, rows without a recorded
+ *                                     provider, a requested model without a row, the document absent, or the read
+ *                                     failed (explicit unknown; fail closed, never inferred as independent)
+ *   ""                                not a claim row (a research row: the research score basis is outside this column)
+ * No version marker exists (the JSON body is a bare array, the CSV a header row); the change is additive and consumers
+ * address columns by header name, so no version bump (R6, owner decision B1).
  */
-type ExportConsensusBasis = "independent_models" | "slot_responses" | "insufficient_independent_models" | "independence_unverified" | "";
+type ExportConsensusBasis = ClaimScoreBasis | "";
 const CLAIM_BASIS_CHUNK = 100;
 
-function claimExportBasis(data: Record<string, unknown> | null): Exclude<ExportConsensusBasis, ""> {
-  if (!data) return "independence_unverified";
-  const f = storedClaimHistoryScoreFields(data);
-  if (f.consensusWithheld) return f.consensusWithheld;
-  return f.consensusBasis === "slot_responses" ? "slot_responses" : "independent_models";
+function claimExportBasis(data: Record<string, unknown> | null): ClaimScoreBasis {
+  return storedClaimScoreBasis(data);
 }
 
 /** The claim rows' linked verification ids (a classic row names a run OR a verification). */
@@ -54,8 +56,8 @@ function claimVerificationIdOf(x: Record<string, unknown>): string | null {
 }
 
 /** One batched, field-masked read per chunk of the claim rows being exported. Never throws (a failed chunk → unverified). */
-async function readClaimExportBases(ids: string[]): Promise<Map<string, Exclude<ExportConsensusBasis, "">>> {
-  const out = new Map<string, Exclude<ExportConsensusBasis, "">>();
+async function readClaimExportBases(ids: string[]): Promise<Map<string, ClaimScoreBasis>> {
+  const out = new Map<string, ClaimScoreBasis>();
   const db = adminDb;
   if (!db) return out;
   const unique = [...new Set(ids)];

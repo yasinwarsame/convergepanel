@@ -31,9 +31,13 @@ type AdminRunRow = {
   createdAt: string;
 };
 
-/** R5: the list's Consensus cell — claim rows on the shared claim score basis (withheld reason / slot qualifier). */
+/**
+ * R5: the list's Consensus cell — claim rows on the shared claim score basis. R6 owner decision B2: a valid stored number
+ * is RETAINED; a score that is not a multi-model consensus carries its qualifier (fewer than two independent models /
+ * unverified / slot responses), never shown bare and never withheld here.
+ */
 export function adminRunConsensusText(r: Pick<AdminRunRow, "consensusScore" | "consensusWithheld" | "consensusBasis">): string {
-  return claimScoreText(r, (n) => String(n), "—");
+  return claimScoreText(r, (n) => String(n), "—", { notIndependent: "qualify" });
 }
 
 /**
@@ -44,7 +48,7 @@ export function adminRunDetailConsensusText(r: Pick<AdminRunRow, "runType">, det
   const score = typeof detail.consensusScore === "number" ? detail.consensusScore : null;
   if (r.runType !== "claim") return score != null ? String(score) : "—";
   const f = storedClaimHistoryScoreFields(detail);
-  return claimScoreText({ consensusScore: score, consensusWithheld: f.consensusWithheld, consensusBasis: f.consensusBasis }, (n) => String(n), "—");
+  return claimScoreText({ consensusScore: score, consensusWithheld: f.consensusWithheld, consensusBasis: f.consensusBasis }, (n) => String(n), "—", { notIndependent: "qualify" });
 }
 
 function formatRelativeTime(iso: string): string {

@@ -115,7 +115,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Doc 14 PR-1, R4 owner rulings (2026-11-18; claim score qualifier on the Personal history suffix): ONLY the history
   // row mapper carrying the server's additive `consensusBasis` and its `HistoryItem` field (2 added lines; the suffix
   // itself is claimHistoryConsensusSuffix); no provenance code. Was 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5.
-  "app/page.tsx": "a3e49156e031b51cf4020b8a94f2061f14f30ead",
+  // Doc 14 PR-1, R6 owner decision B3 (2026-11-19; Personal history cache marker): ONLY the same two lines re-worded —
+  // the mapper carries any server `consensusBasis` value (not only "slot_responses") and the field's type is the
+  // server item's; still 2 added lines vs cabbdbb; no provenance code. Was a3e49156e031b51cf4020b8a94f2061f14f30ead.
+  "app/page.tsx": "b3d6ad98ab9b6689a32618018b853ced496c83ed",
   // Re-pinned (owner-authorized SEC-2 / S4 provider-key boundary, 2026-11-09): `isAdminClaim()` and the
   // `appConfig/modelKeys` admin-claim grant removed, replaced by a deny-only `match /appConfig/{doc=**}`; no other
   // rule and no provenance code. 2fb80a11bfa6c55fe94e0438a980a3b0794aeafd → 747ccef5fc43f83bb08a986fadb49d5ca5d68e06.

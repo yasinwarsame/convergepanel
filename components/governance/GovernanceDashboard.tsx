@@ -477,13 +477,18 @@ export function AuditLogEventCard(props: {
           {rt ? (
             <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${rt.cls}`}>{rt.label}</span>
           ) : null}
-          {ev.consensusWithheld ? (
-            <span className="text-xs font-medium text-cp-muted">{claimScoreText(ev, () => "", "")}</span>
-          ) : score != null ? (
+          {score != null ? (
+            // R6 owner decision B2: a claim score that is not a multi-model consensus keeps its recorded number with a
+            // qualifier (not independent corroboration / unverified), in a neutral colour; its visible text is its
+            // accessible name (no separate aria-label / title).
             <span
-              className={`text-sm font-bold tabular-nums ${auditConsensusDisplayClass(score)}`}
+              className={
+                ev.consensusWithheld
+                  ? "text-xs font-medium text-cp-muted"
+                  : `text-sm font-bold tabular-nums ${auditConsensusDisplayClass(score)}`
+              }
             >
-              {claimScoreText(ev, (n) => `${Math.round(n)}/100`, "")}
+              {claimScoreText(ev, (n) => `${Math.round(n)}/100`, "", { notIndependent: "qualify" })}
             </span>
           ) : null}
           <time

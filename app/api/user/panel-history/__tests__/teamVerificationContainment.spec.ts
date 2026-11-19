@@ -78,12 +78,13 @@ beforeEach(() => {
 });
 
 describe("Claim history containment", () => {
+  // R6 (owner decision B3): the DTO carries the explicit basis marker on every claim item.
   it("a Personal Claim appears with its exact Personal DTO", async () => {
     claimRows = [claim("vcl-personal", 1)];
     const { status, body } = await history();
     expect(status).toBe(200);
     expect(body.items).toEqual([
-      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, modelIndependence: "independent", governanceStatus: "approved" },
+      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, modelIndependence: "independent", consensusBasis: "independent_models", governanceStatus: "approved" },
     ]);
   });
 

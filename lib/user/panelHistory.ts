@@ -5,6 +5,7 @@
 import type { ModelId } from "@/lib/types";
 import type { ConsensusScoreWithheldReason, StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import type { QueryType } from "@/lib/adaptiveSchema/types";
+import type { ClaimScoreBasis } from "@/lib/verification/claimStatementBasisSources";
 
 /** Stored on run / verification docs when org governance evaluation ran. */
 export type PanelHistoryGovernanceStatus = "approved" | "needs_review" | "blocked";
@@ -51,8 +52,10 @@ export type PanelHistoryVerificationItem = {
   /**
    * R4 owner ruling, additive: "slot_responses" when the presented score's answering slots are not each a distinct
    * identified executing model — the history suffix then qualifies it (lib/verification/claimStatementBasisSources.ts).
+   * R6 (owner decision B3): the server sends the explicit basis on EVERY claim item (`storedClaimScoreBasis`), so a
+   * client item without it is one cached before the marker existed (shown as a historical, unverified score).
    */
-  consensusBasis?: "slot_responses";
+  consensusBasis?: ClaimScoreBasis;
   governanceStatus?: PanelHistoryGovernanceStatus;
 };
 
