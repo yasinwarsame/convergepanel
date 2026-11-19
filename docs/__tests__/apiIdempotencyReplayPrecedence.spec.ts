@@ -2457,8 +2457,8 @@ describe("Addendum 9 (R4 MINOR-1): the acceptance identity comes only from a CSP
   });
 
   it("newAcceptanceId() with no argument draws exactly once from crypto.randomBytes, and the ID is those bytes (R5 NIT-1)", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const nodeCrypto = require("crypto") as { randomBytes: Rng };
+    // The module object itself (the model imports node:crypto, the same object), so the spy sees its calls.
+    const nodeCrypto = jest.requireActual<{ randomBytes: Rng }>("crypto");
     const spy = jest.spyOn(nodeCrypto, "randomBytes");
     try {
       const id = model.newAcceptanceId();

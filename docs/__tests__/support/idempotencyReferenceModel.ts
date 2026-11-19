@@ -630,10 +630,7 @@ export function* finishJob(sys: System, id: string, to: JobState, failureCode?: 
  * to another worker holds a token that no longer matches the job.
  */
 export function leaseToken(job: JobDoc): string {
-  // FAILING-FIRST SCAFFOLD: the documents as they stand (Addendum 9 §7 Q3) specify no fencing, so
-  // every worker's token matches. Replaced by the fix commit.
-  void job;
-  return "";
+  return `${job.leaseEpoch ?? 0}/${job.leaseExpiries ?? 0}`;
 }
 
 /** The job's current fencing token (what a worker holding the lease right now carries). */
@@ -1052,10 +1049,7 @@ export function* sweep(sys: System): Generator<void, ApiResponse, void> {
  * no charge.
  */
 export function recoverDispatchCosts(sys: System): number {
-  // FAILING-FIRST SCAFFOLD: the documents as they stand (Addendum 9 §7 Q2) record no cost for an
-  // uncommitted call. Replaced by the fix commit.
   let recovered = 0;
-  if (recovered === 0) return recovered;
   for (const p of sys.store.keys("dispatch/")) {
     const [, id, key] = p.split("/");
     if (sys.store.get(costPath(id, key)) !== undefined) continue;
@@ -1201,7 +1195,7 @@ export function failureControls(sys: System, orgId: string): FailureControls {
   const blockedFingerprints = new Set(Array.from(byFingerprint).filter(([, ts]) => blockedBy(ts, now)).map(([f]) => f));
   return {
     count1h, count24h, jobs24h, ratio, releasedCostUsd24h,
-    soft: jobs24h >= FAILED_RATIO_MIN_JOBS && ratio > FAILED_RATIO_SOFT,
+    soft: jobs24h >= FAILED_RATIO_MIN_JOBS && count24h * 100 > FAILED_RATIO_SOFT_PERCENT * jobs24h,
     hard: count1h >= FAILED_COUNT_HARD_1H || count24h >= FAILED_COUNT_HARD_24H || releasedCostUsd24h > FAILED_COST_HARD_USD_24H,
     blockedFingerprints,
   };

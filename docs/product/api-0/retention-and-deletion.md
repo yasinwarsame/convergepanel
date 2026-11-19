@@ -17,7 +17,7 @@
 - **Full model text:** stored only if the job was created with `retain_model_responses: true` while org model-response access was enabled; otherwise never persisted beyond the worker step (it stays in class (a) and is purged at terminal state). Disabling org access purges stored full text for all jobs within 24 h.
 
 ### (c) Minimal billing records
-- **Contents:** customer ledger entries, period counters, internal cost ledger entries (OD-8), Stripe event dedup records. Keys: `orgId`, `verificationId`, credits, token counts, cost, `rateCardVersion`, timestamps.
+- **Contents:** customer ledger entries, period counters, internal cost ledger entries (OD-8), provider-call dispatch records (*Addendum 10*, `ledger-and-billing.md` §3.1), Stripe event dedup records. Keys: `orgId`, `verificationId`, credits, token counts, cost, `rateCardVersion`, timestamps.
 - **Never contains:** input text, model text, result content, fingerprints.
 - **Retention:** 7 years placeholder (finance and tax; counsel to confirm). Not customer-configurable. Not removed by `DELETE` (it has no content to remove).
 
