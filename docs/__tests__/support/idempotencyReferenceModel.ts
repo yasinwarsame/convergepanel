@@ -266,6 +266,12 @@ export class System {
 
   readonly settlements: string[] = [];
   readonly releases: string[] = [];
+  private callSeq = 0;
+  /** A fresh provider-call attempt key (stands in for `{step}:{callKey}:{attempt}`, jobs §4.4). */
+  newCallKey(): string {
+    this.callSeq += 1;
+    return `k${this.callSeq}`;
+  }
   /**
    * Addendum 9 (R4 MINOR-1): the acceptance-identity generator, injectable so tests can control it.
    * The default is the CSPRNG `crypto.randomBytes`; T-create draws from it and nothing else.
@@ -526,6 +532,11 @@ export interface JobDoc {
   settledReleased?: number;
   queuedAt?: number;
   leaseExpiries?: number;
+  /**
+   * Addendum 10 (owner decision Q3): incremented by every lease grant. With `leaseExpiries` (every
+   * recorded expiry revokes the lease) it forms the fencing token of `leaseToken`.
+   */
+  leaseEpoch?: number;
   failureCode?: string;
   /**
    * Committed provider calls that returned usable output (the model's chargeable work). A call counts
@@ -549,7 +560,16 @@ export interface JobDoc {
  * audit/alert event is written, and the count is left for an audited repair.
  * `releaseCredits` is the unsettled remainder returned to the organization (billing, separate).
  */
-export function* finishJob(sys: System, id: string, to: JobState, failureCode?: string, result?: unknown): Generator<void, ApiResponse, void> {
+export interface FinishOptions {
+  /**
+   * Addendum 10 (Q3): the fencing token of the worker's lease. A worker's terminal transition passes
+   * it and commits only while the job's current token still equals it. Controlled recovery (the
+   * sweeper) and API transactions (cancel and DELETE of a queued job) hold no lease and pass none.
+   */
+  lease?: string;
+}
+
+export function* finishJob(sys: System, id: string, to: JobState, failureCode?: string, result?: unknown, opts: FinishOptions = {}): Generator<void, ApiResponse, void> {
   if (!TERMINAL.has(to)) throw new Error(`not a terminal state: ${to}`);
   for (let attempt = 1; ; attempt++) {
     const tx = sys.store.begin();
@@ -559,6 +579,13 @@ export function* finishJob(sys: System, id: string, to: JobState, failureCode?: 
     if (!job || TERMINAL.has(job.state)) {
       tx.abort();
       return { status: 200 }; // idempotent: the first terminal transition already released it
+    }
+    // Lease fencing (Addendum 10, Q3): a worker that has lost its lease commits no terminal
+    // transition and no charge. The read is version-checked, so a revocation that commits while
+    // this transaction is open aborts it, and the retry is refused here.
+    if (opts.lease !== undefined && leaseToken(job) !== opts.lease) {
+      tx.abort();
+      return { status: 409, code: "lease_lost" };
     }
     const orgId = job.orgId as string;
     const org = tx.read<OrgDoc>(`orgs/${orgId}`) as OrgDoc;
@@ -595,6 +622,24 @@ export function* finishJob(sys: System, id: string, to: JobState, failureCode?: 
     if (attempt >= MAX_TX_ATTEMPTS * 10) throw new Error("finishJob contention");
     yield;
   }
+}
+
+/**
+ * Addendum 10 (Q3): the lease fencing token. It changes on every lease grant (`leaseEpoch`) and on
+ * every recorded lease expiry (`leaseExpiries`), so a worker whose lease expired or was re-granted
+ * to another worker holds a token that no longer matches the job.
+ */
+export function leaseToken(job: JobDoc): string {
+  // FAILING-FIRST SCAFFOLD: the documents as they stand (Addendum 9 §7 Q3) specify no fencing, so
+  // every worker's token matches. Replaced by the fix commit.
+  void job;
+  return "";
+}
+
+/** The job's current fencing token (what a worker holding the lease right now carries). */
+export function currentLease(sys: System, id: string): string {
+  const job = sys.store.get<JobDoc>(`jobs/${id}`);
+  return job ? leaseToken(job) : "";
 }
 
 /**
@@ -794,40 +839,117 @@ export function* handleDelete(sys: System, keyId: string, id: string): Generator
  * A worker's provider call. Safe boundary: before the call, a job with cancellation requested (or
  * deletion requested) stops; a call already in flight completes and its record is written while the
  * job is still non-terminal. Late-write barrier: no record is written for a terminal or purged job.
+ * Addendum 10: a worker whose lease was revoked makes no call (Q3), and every call writes a durable
+ * dispatch record before it is sent, so its cost is recoverable if the worker dies (Q2).
  */
-export function* workerProviderCall(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01): Generator<void, ApiResponse, void> {
+export function* workerProviderCall(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01, lease?: string): Generator<void, ApiResponse, void> {
   const before = sys.store.get<JobDoc>(`jobs/${id}`);
   if (!before || before.deleted || TERMINAL.has(before.state)) return { status: 409, code: "late_write_refused" };
+  const held = lease ?? leaseToken(before);
+  if (leaseToken(before) !== held) return { status: 409, code: "lease_lost" };
   if (before.cancelRequested) return { status: 409, code: "stopped_at_boundary" };
+  // Addendum 10 (Q2): the dispatch record (class c, no content) is written before the request is
+  // sent. It is the durable evidence from which the cost of a call whose result never commits is
+  // recovered (`recoverDispatchCosts`). It is never an input to a customer charge.
+  const key = sys.newCallKey();
+  sys.store.put(dispatchPath(id, key), { usdEstimate: usd, lease: held, at: sys.dynamic.now } satisfies DispatchDoc);
   yield; // the provider call is in flight; it cannot be recalled
-  return yield* recordCallResult(sys, id, outcome, usd);
+  return yield* recordCallResult(sys, id, outcome, usd, { key, lease: held });
 }
 
 export type CallOutcome = "ok" | "error";
 
+export interface CallResultOptions {
+  /** The call attempt's key (its dispatch record). A fresh key when absent. */
+  key?: string;
+  /** The fencing token of the worker that made the call (Addendum 10). The current one when absent. */
+  lease?: string;
+}
+
+/** Records a cost entry exactly once per call attempt (deterministic path; create-once semantics). */
+function recordCostOnce(sys: System, id: string, key: string, entry: CostDoc): void {
+  if (sys.store.get(costPath(id, key)) === undefined) sys.store.put(costPath(id, key), entry);
+}
+
 /** Second half of a provider call: its result arrives and is recorded behind the late-write barrier. */
-export function* recordCallResult(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01): Generator<void, ApiResponse, void> {
-  for (;;) {
+export function* recordCallResult(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01, opts: CallResultOptions = {}): Generator<void, ApiResponse, void> {
+  const key = opts.key ?? sys.newCallKey();
+  let held = opts.lease;
+  for (let attempt = 1; ; attempt++) {
+    if (attempt > MAX_TX_ATTEMPTS * 10) throw new Error("recordCallResult contention");
     const tx = sys.store.begin();
     const job = tx.read<JobDoc>(`jobs/${id}`);
     if (!job || job.deleted || TERMINAL.has(job.state)) {
       tx.abort();
       // The call happened (it could not be recalled): its internal cost entry (class c, no content)
       // is recorded; its content is refused and it is not charged to the customer (already settled).
-      sys.store.put(`cost/${id}/late_${sys.store.keys(`cost/${id}/`).length + 1}`, { usd, outcome } satisfies CostDoc);
+      recordCostOnce(sys, id, key, { usd, outcome, source: "refused_result" });
       return { status: 409, code: "late_write_refused" };
+    }
+    if (held === undefined) held = leaseToken(job);
+    // Addendum 10 (Q3): a worker that has lost its lease commits no call record, so its result is
+    // never committed work and never billable. Its cost is still recorded (Q2).
+    if (leaseToken(job) !== held) {
+      tx.abort();
+      recordCostOnce(sys, id, key, { usd, outcome, source: "refused_result" });
+      return { status: 409, code: "lease_lost" };
     }
     const n = (job.callsMade ?? 0) + (job.failedCalls ?? 0) + 1;
     tx.set(`calls/${id}/${n}`, { text: "raw model text", outcome }); // class (a), purged at deletion
     // Internal cost entry (class c, no content), created with the per-call record whatever the
     // outcome and whatever the customer is later charged (ledger-and-billing.md §3.1).
-    tx.create(`cost/${id}/${n}`, { usd, outcome } satisfies CostDoc);
+    tx.create(costPath(id, key), { usd, outcome, source: "call_record" } satisfies CostDoc);
     tx.set(`jobs/${id}`, outcome === "ok" ? { ...job, callsMade: (job.callsMade ?? 0) + 1 } : { ...job, failedCalls: (job.failedCalls ?? 0) + 1 });
     // Addendum 9: the provider has returned but nothing is committed yet. A worker that dies here
-    // leaves no call record, no cost entry and no committed work: the call is not billable.
+    // leaves no call record and no committed work: the call is not billable. Addendum 10: its
+    // dispatch record survives, and the cost is recovered from it.
     yield;
     if (tx.commit() === "committed") return { status: 200 };
     yield;
+  }
+}
+
+/**
+ * Addendum 10 (Q3): the durable record of a lease expiry. It increments `leaseExpiries`, which
+ * revokes the expired worker's fencing token. Controlled recovery, not a worker.
+ */
+export function* expireLease(sys: System, id: string): Generator<void, ApiResponse, void> {
+  for (;;) {
+    const tx = sys.store.begin();
+    const job = tx.read<JobDoc>(`jobs/${id}`);
+    if (!job || TERMINAL.has(job.state) || (job.state !== "running" && job.state !== "synthesizing")) {
+      tx.abort();
+      return { status: 409, code: "not_leased" };
+    }
+    yield;
+    tx.set(`jobs/${id}`, { ...job, leaseExpiries: (job.leaseExpiries ?? 0) + 1 });
+    if (tx.commit() === "committed") return { status: 200 };
+    yield;
+  }
+}
+
+/**
+ * Addendum 10: a retried step. The lease transaction grants a new lease (new fencing token) to a
+ * job whose earlier lease expired fewer than three times; the step-start check then stops a job
+ * with a cancellation pending, settling its committed usable work (owner decision Q1, T18).
+ */
+export function* workerRetryStep(sys: System, id: string): Generator<void, ApiResponse, void> {
+  for (;;) {
+    const tx = sys.store.begin();
+    const job = tx.read<JobDoc>(`jobs/${id}`);
+    if (!job || TERMINAL.has(job.state) || (job.state !== "running" && job.state !== "synthesizing") || (job.leaseExpiries ?? 0) >= LEASE_EXPIRY_LIMIT) {
+      tx.abort();
+      return { status: 409, code: "not_started" };
+    }
+    yield;
+    const next: JobDoc = { ...job, leaseEpoch: (job.leaseEpoch ?? 0) + 1 };
+    tx.set(`jobs/${id}`, next);
+    if (tx.commit() === "conflict") {
+      yield;
+      continue;
+    }
+    if (!next.cancelRequested) return { status: 200 };
+    return yield* finishJob(sys, id, "canceled", next.deletionRequested ? "deletion_requested" : "canceled", undefined, { lease: leaseToken(next) });
   }
 }
 
@@ -841,18 +963,19 @@ export function* workerStart(sys: System, id: string): Generator<void, ApiRespon
       return { status: 409, code: "not_started" };
     }
     yield;
-    tx.set(`jobs/${id}`, { ...job, state: "running" });
+    tx.set(`jobs/${id}`, { ...job, state: "running", leaseEpoch: (job.leaseEpoch ?? 0) + 1 });
     if (tx.commit() === "committed") return { status: 200 };
     yield;
   }
 }
 
 /** The worker at a step boundary: stops a job whose cancellation was requested, settling work done. */
-export function* workerBoundary(sys: System, id: string): Generator<void, ApiResponse, void> {
+export function* workerBoundary(sys: System, id: string, lease?: string): Generator<void, ApiResponse, void> {
   const job = sys.store.get<JobDoc>(`jobs/${id}`);
   if (!job || TERMINAL.has(job.state)) return { status: 200 };
   if (!job.cancelRequested) return { status: 200 };
-  return yield* finishJob(sys, id, "canceled", job.deletionRequested ? "deletion_requested" : "canceled");
+  // Addendum 10 (Q3): the stop is a worker's terminal transition, fenced by its lease token.
+  return yield* finishJob(sys, id, "canceled", job.deletionRequested ? "deletion_requested" : "canceled", undefined, { lease: lease ?? leaseToken(job) });
 }
 
 /**
@@ -913,11 +1036,37 @@ export function* sweep(sys: System): Generator<void, ApiResponse, void> {
       yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "expired", j.deletionRequested ? "deletion_requested" : "max_queue_wait");
     }
   }
+  recoverDispatchCosts(sys);
   for (const p of sys.store.keys("apiDeletions/")) {
     const op = sys.store.get<DeletionOp>(p) as DeletionOp;
     if (op.status === "pending") yield* completeDeletion(sys, p.slice("apiDeletions/".length));
   }
   return { status: 200 };
+}
+
+/**
+ * Addendum 10 (owner decision Q2): cost recovery for calls whose result never committed. For every
+ * dispatch record without a cost entry whose worker can no longer commit (the job is terminal or
+ * purged, or the record's lease token is no longer the job's), the estimated cost is recorded once,
+ * as `costEstimated` with source `dispatch_record`. Internal cost ledger only: no customer entry,
+ * no charge.
+ */
+export function recoverDispatchCosts(sys: System): number {
+  // FAILING-FIRST SCAFFOLD: the documents as they stand (Addendum 9 §7 Q2) record no cost for an
+  // uncommitted call. Replaced by the fix commit.
+  let recovered = 0;
+  if (recovered === 0) return recovered;
+  for (const p of sys.store.keys("dispatch/")) {
+    const [, id, key] = p.split("/");
+    if (sys.store.get(costPath(id, key)) !== undefined) continue;
+    const rec = sys.store.get<DispatchDoc>(p) as DispatchDoc;
+    const job = sys.store.get<JobDoc>(`jobs/${id}`);
+    const workerCanStillCommit = job !== undefined && !job.deleted && !TERMINAL.has(job.state) && leaseToken(job) === rec.lease;
+    if (workerCanStillCommit) continue;
+    recordCostOnce(sys, id, key, { usd: rec.usdEstimate, outcome: "unrecorded", source: "dispatch_record", estimated: true });
+    recovered++;
+  }
+  return recovered;
 }
 
 /** Failure codes the failed-job count and ratio exclude as platform-caused (ledger-and-billing.md §4). */
@@ -938,7 +1087,9 @@ export const SHORT_CIRCUIT_WINDOW_MS = HOUR_MS;
 export const SHORT_CIRCUIT_BLOCK_MS = HOUR_MS;
 export const FAILED_COUNT_HARD_1H = 10;
 export const FAILED_COUNT_HARD_24H = 25;
-export const FAILED_RATIO_SOFT = 0.3;
+/** Addendum 10: the soft ratio is compared in integers (percent), so 30 % exactly is not "> 30 %". */
+export const FAILED_RATIO_SOFT_PERCENT = 30;
+export const FAILED_RATIO_SOFT = FAILED_RATIO_SOFT_PERCENT / 100;
 export const FAILED_RATIO_MIN_JOBS = 20;
 export const FAILED_COST_HARD_USD_24H = 5;
 
@@ -956,8 +1107,27 @@ export interface OutcomeDoc {
 
 export interface CostDoc {
   usd: number;
-  outcome: CallOutcome;
+  /** The call site's outcome; `unrecorded` when only the dispatch record exists (Addendum 10). */
+  outcome: CallOutcome | "unrecorded";
+  /**
+   * Addendum 10: where the entry came from. `call_record`: with the committed call record.
+   * `refused_result`: a result refused by the late-write barrier or by lease fencing.
+   * `dispatch_record`: recovered from the dispatch record of a call whose result never arrived.
+   */
+  source?: "call_record" | "refused_result" | "dispatch_record";
+  estimated?: boolean;
 }
+
+/** Addendum 10 (Q2): written before a provider request is sent. Class (c): no content. */
+export interface DispatchDoc {
+  usdEstimate: number;
+  /** The fencing token of the worker that dispatched the call. */
+  lease: string;
+  at: number;
+}
+
+export const costPath = (id: string, key: string): string => `cost/${id}/${key}`;
+export const dispatchPath = (id: string, key: string): string => `dispatch/${id}/${key}`;
 
 export interface ShortCircuitRejection {
   orgId: string;

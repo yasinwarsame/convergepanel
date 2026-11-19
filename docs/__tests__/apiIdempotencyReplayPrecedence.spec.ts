@@ -45,6 +45,11 @@ import {
   workerBoundary,
   workerProviderCall,
   workerStart,
+  workerRetryStep,
+  expireLease,
+  currentLease,
+  recoverDispatchCosts,
+  FAILED_RATIO_SOFT_PERCENT,
   periodPath,
   failureControls,
   FAILED_COUNT_HARD_1H,
@@ -1760,7 +1765,8 @@ describe("Addendum 8 E3: a provider call returning after the job became terminal
       // Every call that was made has exactly one cost entry: recorded (with its call record) or late.
       // A call not yet started when the job failed is not made (refused before the call).
       const calls = o.sys.store.keys(`calls/${id}/`).length;
-      const late = o.sys.store.keys(`cost/${id}/late_`).length;
+      // Addendum 10: one cost entry per call attempt at a deterministic path; a refused (late) result is source refused_result.
+      const late = costsOf(o.sys, id).filter((c) => c.source === "refused_result").length;
       expect(costsOf(o.sys, id).length).toBe(calls + late);
       if (fmt(o.results[0] as ApiResponse) === "200 undefined") expect([calls, late]).toEqual([2, 0]);
       else expect(calls).toBe(1);
@@ -2069,7 +2075,24 @@ function a9Event(r: A9Run, event: string): boolean {
       runToEnd(sweep(sys));
       return true;
     }
-    case "lease expires once, the retried panel step starts": put({ leaseExpiries: 1 }); runToEnd(workerBoundary(sys, id)); return true;
+    case "lease expires once, the retried panel step starts":
+      // Addendum 10: the expiry is recorded (revoking the crashed worker's lease); the retried step
+      // takes a new lease and its step-start check finds the cancellation (owner decision Q1).
+      expect(fmt(runToEnd(expireLease(sys, id)))).toBe("200 undefined");
+      runToEnd(workerRetryStep(sys, id));
+      return true;
+    case "a worker whose lease was revoked commits a provider result": {
+      const stale = currentLease(sys, id);
+      expect(fmt(runToEnd(expireLease(sys, id)))).toBe("200 undefined");
+      expect(fmt(runToEnd(recordCallResult(sys, id, "ok", 0.01, { lease: stale })))).toBe("409 lease_lost");
+      return true;
+    }
+    case "a worker whose lease was revoked reaches its boundary": {
+      const stale = currentLease(sys, id);
+      expect(fmt(runToEnd(expireLease(sys, id)))).toBe("200 undefined");
+      expect(fmt(runToEnd(workerBoundary(sys, id, stale)))).toBe("409 lease_lost");
+      return true;
+    }
     case "finalize, every requested section completed": runToEnd(finishJob(sys, id, "completed", undefined, { summary: "r" })); return true;
     case "finalize, a requested section failed": runToEnd(finishJob(sys, id, "partial", undefined, { summary: "r" })); return true;
     case "job failure": runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models")); return true;
@@ -2123,10 +2146,9 @@ function a9Check(row: TRow, r: A9Run): A9Result {
     const entry = e as SettleEntry;
     if (row.charged === "0") expect({ ...tag, charged: entry.charged }).toEqual({ ...tag, charged: 0 });
     else if (row.charged === "committed usable work") expect({ ...tag, charged: entry.charged }).toEqual({ ...tag, charged: want });
-    else if (row.charged === "unresolved") expect([0, want]).toContain(entry.charged);
     else throw new Error(`unknown Charged value "${row.charged}" in ${row.id}`);
     if (row.released === "whole reservation") expect({ ...tag, released: entry.released }).toEqual({ ...tag, released: reserved });
-    else if (row.released === "the rest" || row.released === "unresolved") expect({ ...tag, released: entry.released }).toEqual({ ...tag, released: reserved - entry.charged });
+    else if (row.released === "the rest") expect({ ...tag, released: entry.released }).toEqual({ ...tag, released: reserved - entry.charged });
     else throw new Error(`unknown Released value "${row.released}" in ${row.id}`);
     // Conservation, one settlement, balance restored by exactly the release, never negative.
     expect(entry.charged + entry.released).toBe(reserved);
@@ -2152,12 +2174,14 @@ const TERMINAL_STATES: ReadonlySet<JobState> = new Set<JobState>(["completed", "
 describe("Addendum 9: settlement state transitions (jobs-and-idempotency.md §6.3, parsed)", () => {
   it("the table has rows T1–T24 with known vocabulary", () => {
     const rows = transitionTable();
-    expect(rows.map((r) => r.id)).toEqual(Array.from({ length: 24 }, (_, i) => `T${i + 1}`));
+    // Addendum 10 appends T25–T26 (lease fencing); T1–T24 keep their numbers.
+    expect(rows.map((r) => r.id)).toEqual(Array.from({ length: 26 }, (_, i) => `T${i + 1}`));
     for (const r of rows) {
       expect({ row: r.id, pending: PENDING_VOCAB[r.pending] !== undefined }).toEqual({ row: r.id, pending: true });
       expect({ row: r.id, from: ["queued", "running", "synthesizing", "terminal"].includes(r.from) }).toEqual({ row: r.id, from: true });
-      expect({ row: r.id, charged: ["0", "committed usable work", "none yet", "unchanged", "unresolved"].includes(r.charged) }).toEqual({ row: r.id, charged: true });
-      expect({ row: r.id, released: ["whole reservation", "the rest", "none yet", "unchanged", "unresolved"].includes(r.released) }).toEqual({ row: r.id, released: true });
+      // Addendum 10: "unresolved" is no longer a value; owner decision Q1 decided T18.
+      expect({ row: r.id, charged: ["0", "committed usable work", "none yet", "unchanged"].includes(r.charged) }).toEqual({ row: r.id, charged: true });
+      expect({ row: r.id, released: ["whole reservation", "the rest", "none yet", "unchanged"].includes(r.released) }).toEqual({ row: r.id, released: true });
     }
   });
 
@@ -2169,9 +2193,21 @@ describe("Addendum 9: settlement state transitions (jobs-and-idempotency.md §6.
     for (const r of crash) expect({ row: r.id, to: r.to, charged: r.charged, released: r.released }).toEqual({ row: r.id, to: "failed: worker_timeout", charged: "0", released: "whole reservation" });
   });
 
+  it("the Pending vocabulary is derived from the cell's own words, so a row cannot silently lose a pending case (R5 NIT-2)", () => {
+    const fromWords = (cell: string): string[] => (cell === "any" ? ["none", "cancel", "DELETE"] : cell.split(" or "));
+    for (const r of transitionTable()) expect({ row: r.id, expansion: PENDING_VOCAB[r.pending] }).toEqual({ row: r.id, expansion: fromWords(r.pending) });
+    // Owner rule (Addendum 9 §2): every stop, crash and fencing row compares cancel with DELETE, so each names both.
+    const both = transitionTable().filter((r) => /safe boundary|stop transaction|third lease expiry|sweeper's terminal transaction|retried panel step|lease was revoked reaches/.test(r.event) && r.pending !== "none");
+    expect(both.map((r) => r.id)).toEqual(["T10", "T11", "T12", "T13", "T15", "T16", "T17", "T18", "T26"]);
+    for (const r of both) expect({ row: r.id, names: (PENDING_VOCAB[r.pending] ?? []).filter((p) => p !== "none").sort() }).toEqual({ row: r.id, names: ["DELETE", "cancel"] });
+  });
+
   it("every row, for every pending request it names, 0–3 committed usable calls and 0–1 failed calls (executed)", () => {
     const rows = transitionTable();
     expect(rows.length).toBeGreaterThan(0);
+    // The exact number of executed cases is computed from the parsed cells alone (R5 NIT-2).
+    const pendingWords = (cell: string): number => (cell === "any" ? 3 : cell.split(" or ").length);
+    const expected = rows.reduce((n, r) => n + pendingWords(r.pending) * (r.from === "terminal" ? 4 : 1) * (r.from === "queued" ? 1 : 8), 0);
     let cases = 0;
     for (const row of rows) {
       const kinds = row.from === "terminal" ? TERMINAL_KINDS : (["completed"] as const);
@@ -2192,7 +2228,7 @@ describe("Addendum 9: settlement state transitions (jobs-and-idempotency.md §6.
         }
       }
     }
-    expect(cases).toBeGreaterThan(200);
+    expect(cases).toBe(expected);
   });
 });
 
@@ -2228,21 +2264,29 @@ describe("Addendum 9: a worker crash settles identically with and without a pend
     expect(n).toBe(2 * 9 * 3 * 3);
   });
 
-  it("a crash after the provider returned but before the call record committed is not billable: a later stop settles only committed calls", () => {
+  it("a crash after the provider returned but before the call record committed is not billable: the retried step settles exactly the committed calls (Addendum 10 Q1, Q2)", () => {
     for (const pending of ["cancel", "DELETE"] as const) {
       const r = a9Setup("running", "none", 2, 0);
-      const g = workerProviderCall(r.sys, r.id, "ok");
+      const g = workerProviderCall(r.sys, r.id, "ok", 0.07);
       expect(g.next().done).toBe(false);
       expect(g.next().done).toBe(false); // the record transaction is open; the worker dies
       expect(r.sys.store.keys(`calls/${r.id}/`).length).toBe(2);
       expect(jobOf(r.sys, r.id).callsMade).toBe(2);
       if (pending === "cancel") runToEnd(handleCancel(r.sys, "live1", r.id));
       else runToEnd(handleDelete(r.sys, "live1", r.id));
-      runToEnd(workerBoundary(r.sys, r.id)); // the retried step stops at its start
+      // The crashed worker's lease expires (recorded), and the retried step's start check stops the job.
+      expect(fmt(runToEnd(expireLease(r.sys, r.id)))).toBe("200 undefined");
+      runToEnd(workerRetryStep(r.sys, r.id));
       const e = settleOf(r.sys, r.id);
+      // Owner decision Q1: the crash does not erase the 2 committed usable calls; the uncommitted one is not billable.
       expect({ pending, state: jobOf(r.sys, r.id).state, charged: e.charged, released: e.released }).toEqual({ pending, state: "canceled", charged: 2, released: r.reserved - 2 });
-      // The lost call left no cost entry either (owner question Addendum 9 §7 Q2): only committed calls are recorded.
-      expect(costsOf(r.sys, r.id).length).toBe(2);
+      // Owner decision Q2: the uncommitted call's cost is recorded from its dispatch record, once, as an estimate.
+      runToEnd(sweep(r.sys));
+      runToEnd(sweep(r.sys));
+      const costs = costsOf(r.sys, r.id);
+      expect(costs.map((c) => c.source).sort()).toEqual(["call_record", "call_record", "dispatch_record"]);
+      expect(costs.find((c) => c.source === "dispatch_record")).toMatchObject({ usd: 0.07, estimated: true, outcome: "unrecorded" });
+      expect(settleOf(r.sys, r.id)).toEqual(e);
     }
   });
 
@@ -2283,34 +2327,77 @@ describe("Addendum 9: a worker crash settles identically with and without a pend
     expect(costsOf(r.sys, r.id).length).toBe(5); // 4 committed calls + the late one (cost only)
   });
 
-  it("every interleaving of a slow worker's stop and the sweeper: the outcome set is identical with cancel and with DELETE", () => {
+  it("every interleaving of a slow worker's stop and the sweeper, the worker's lease already revoked: only failed: worker_timeout, charged 0; the worker is fenced (Addendum 10 Q3)", () => {
     const outcomes = (pending: "cancel" | "DELETE"): string[] => {
       let id = "";
+      let stale = "";
       const setup = (): System => {
         const s = world();
         id = runningJob(s, ["ok", "ok"], { ...SAME, input: { question: "slow worker" } });
+        stale = currentLease(s, id); // the slow worker's lease, granted before it stalled
         if (pending === "cancel") runToEnd(handleCancel(s, "live1", id));
         else runToEnd(handleDelete(s, "live1", id));
-        s.store.put(`jobs/${id}`, { ...jobOf(s, id), leaseExpiries: LEASE_LIMIT });
+        for (let i = 0; i < LEASE_LIMIT; i++) expect(fmt(runToEnd(expireLease(s, id)))).toBe("200 undefined");
         return s;
       };
       return interleavings(setup, [
-        { name: "worker", start: (s) => workerBoundary(s, id) },
+        { name: "worker", start: (s) => workerBoundary(s, id, stale) },
         { name: "sweeper", start: (s) => sweep(s) },
       ]).map((o) => {
         const e = settleOf(o.sys, id);
         expect(e.charged + e.released).toBe(e.reserved);
         expect(o.sys.settlements.filter((x) => x === id).length).toBe(1);
+        // The worker never commits a terminal transition: refused by the fence or finding the job terminal.
+        expect(["409 lease_lost", "200 undefined"]).toContain(fmt(o.results[0] as ApiResponse));
+        expect(a9Code(o.sys, id)).toBe("worker_timeout");
         return `${jobOf(o.sys, id).state}:${e.charged}`;
       });
     };
     const set = (xs: string[]): string[] => Array.from(new Set(xs)).sort();
     const c = outcomes("cancel");
     expect(c.length).toBeGreaterThan(2);
-    // Whichever terminal transition commits first wins (§5B); the set of possible settlements is
-    // the same whether the stop was requested by cancel or by DELETE.
+    expect(set(c)).toEqual(["failed:0"]);
     expect(set(outcomes("DELETE"))).toEqual(set(c));
-    expect(set(c)).toEqual(["canceled:2", "failed:0"]);
+  });
+
+  it("every interleaving of a worker's stop with the revocation of its lease: the stop commits only while the lease is current (Addendum 10 Q3)", () => {
+    for (const pending of ["cancel", "DELETE"] as const) {
+      let id = "";
+      let held = "";
+      const setup = (): System => {
+        const s = world();
+        id = runningJob(s, ["ok", "ok"], { ...SAME, input: { question: `fence race ${pending}` } });
+        held = currentLease(s, id);
+        if (pending === "cancel") runToEnd(handleCancel(s, "live1", id));
+        else runToEnd(handleDelete(s, "live1", id));
+        return s;
+      };
+      const seen = new Set<string>();
+      for (const o of interleavings(setup, [
+        { name: "worker", start: (s) => workerBoundary(s, id, held) },
+        { name: "revoke", start: (s) => expireLease(s, id) },
+      ])) {
+        const worker = fmt(o.results[0] as ApiResponse);
+        const revoke = fmt(o.results[1] as ApiResponse);
+        // Exactly one of them commits: the stop (lease still current) or the revocation.
+        expect([worker, revoke].filter((x) => x === "200 undefined").length).toBe(1);
+        if (worker === "200 undefined") {
+          const e = settleOf(o.sys, id);
+          expect({ state: jobOf(o.sys, id).state, charged: e.charged, released: e.released }).toEqual({ state: "canceled", charged: 2, released: e.reserved - 2 });
+          seen.add("stopped");
+        } else {
+          expect(worker).toBe("409 lease_lost");
+          expect(o.sys.store.get(`ledger/settle_${id}`)).toBeUndefined();
+          expect(jobOf(o.sys, id).state).toBe("running");
+          // Controlled recovery: the retried step (new lease) stops the job and settles the committed work.
+          runToEnd(workerRetryStep(o.sys, id));
+          expect(settleOf(o.sys, id).charged).toBe(2);
+          seen.add("fenced");
+        }
+        expect(o.sys.settlements.filter((x) => x === id).length).toBe(1);
+      }
+      expect(Array.from(seen).sort()).toEqual(["fenced", "stopped"]);
+    }
   });
 
   it("retries during settlement: every interleaving of the crash sweeper and an in-flight call result, DELETE pending → failed, charged 0", () => {
@@ -2367,6 +2454,20 @@ describe("Addendum 9 (R4 MINOR-1): the acceptance identity comes only from a CSP
 
   it("the default generator is crypto.randomBytes", () => {
     expect((new System() as unknown as { acceptanceRng: Rng }).acceptanceRng).toBe(cryptoRandomBytes);
+  });
+
+  it("newAcceptanceId() with no argument draws exactly once from crypto.randomBytes, and the ID is those bytes (R5 NIT-1)", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodeCrypto = require("crypto") as { randomBytes: Rng };
+    const spy = jest.spyOn(nodeCrypto, "randomBytes");
+    try {
+      const id = model.newAcceptanceId();
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(model.ACCEPTANCE_ID_BYTES);
+      expect(id).toBe(`acc_${hex(spy.mock.results[0].value as Uint8Array)}`);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("each acceptance draws exactly ACCEPTANCE_ID_BYTES (≥ 16) bytes once, and the ID is exactly those bytes in hex", () => {
@@ -2448,16 +2549,24 @@ describe("Addendum 9 (R4 MINOR-3): the soft failed-job ratio limits concurrency 
     for (let i = 0; i < failed; i++) runToEnd(finishJob(sys, runningJob(sys, ["ok"], { ...SAME, input: { question: `bad ${i}` } }), "failed", "insufficient_usable_models"));
   };
   it.each([
-    // [failed, completed]: ratio and job count against the parsed thresholds (> 30 %, ≥ 20 jobs)
-    [7, 14],
-    [6, 15],
-    [7, 12],
-    [9, 11],
-  ])("%i failed + %i completed: soft iff ratio > threshold with ≥ min jobs; a second concurrent create is refused only when soft", (failed, completed) => {
+    // [failed, completed, soft]: literal expectations against "> 30 % … with ≥ 20 jobs" (not the model's formula)
+    [7, 14, true], // 33.3 %
+    [6, 15, false], // 28.6 %
+    [7, 12, false], // 36.8 %, but 19 jobs
+    [9, 11, true], // 45 %
+    // R5 MINOR-2: the exact boundary and its neighbours (Addendum 10)
+    [6, 14, false], // exactly 30 % at 20 jobs: not "> 30 %"
+    [9, 21, false], // exactly 30 % at 30 jobs
+    [7, 13, true], // 35 % at 20 jobs (the smallest soft step above 30 % at 20 jobs)
+    [7, 17, false], // 29.17 %
+    [7, 16, true], // 30.43 %
+    [8, 19, false], // 29.63 %
+    [8, 18, true], // 30.77 %
+    [6, 13, false], // 31.6 %, but 19 jobs
+  ])("%i failed + %i completed: soft is %s; a second concurrent create is refused only when soft", (failed, completed, soft) => {
     const sys = world();
     history(sys, failed, completed);
     const jobs = failed + completed;
-    const soft = jobs >= FAILED_RATIO_MIN_JOBS && failed / jobs > FAILED_RATIO_SOFT;
     const c = failureControls(sys, "o1");
     expect({ soft: c.soft, hard: c.hard, jobs: c.jobs24h }).toEqual({ soft, hard: false, jobs });
     expect(fmt(send(sys, req({ ...SAME, input: { question: "first" } }, { idempotencyKey: "soft-1" })))).toBe("202 new");
@@ -2465,9 +2574,14 @@ describe("Addendum 9 (R4 MINOR-3): the soft failed-job ratio limits concurrency 
     expect(fmt(send(sys, req({ ...SAME, input: { question: "second" } }, { idempotencyKey: "soft-2" })))).toBe(soft ? "429 concurrency_limit" : "202 new");
   });
 
-  it("the soft cases above include at least one soft and one not-soft case", () => {
-    const soft = (f: number, c: number): boolean => f + c >= FAILED_RATIO_MIN_JOBS && f / (f + c) > FAILED_RATIO_SOFT;
-    expect([soft(7, 14), soft(6, 15), soft(7, 12), soft(9, 11)]).toEqual([true, false, false, true]);
+  it("the literal expectations agree with the parsed thresholds in integer arithmetic (30 % exactly is not soft)", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const m = /\| Failed-job ratio \| > (\d+) % of an org's live jobs in a rolling 24 h with ≥ (\d+) jobs \|/.exec(md);
+    expect(m).not.toBeNull();
+    const [pct, min] = [Number(m?.[1]), Number(m?.[2])];
+    expect([pct, min]).toEqual([FAILED_RATIO_SOFT_PERCENT, FAILED_RATIO_MIN_JOBS]);
+    const soft = (f: number, c: number): boolean => f + c >= min && f * 100 > pct * (f + c);
+    expect([soft(6, 14), soft(9, 21), soft(7, 13), soft(7, 17), soft(7, 16), soft(8, 19), soft(8, 18), soft(6, 13)]).toEqual([false, false, true, false, true, false, true, false]);
   });
 });
 
@@ -2512,5 +2626,340 @@ describe("Addendum 9 (R4 MINOR-4): the Addendum 8 ledger paragraphs are parsed i
     }
     // Together they are exactly the short-circuit feed of Addendum 7.
     expect([...attributable, ...platform].sort()).toEqual([...SHORT_CIRCUIT_CODES].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 10: owner decisions Q1 (committed usable work is billed under the existing tariff; a
+// crash erases none of it; uncommitted work is never billable), Q2 (internal provider cost is
+// recorded independently of the customer charge, including failed and uncommitted calls) and Q3
+// (a worker that has lost its lease commits no final transition and no charge; fencing and
+// controlled recovery reconcile committed work).
+// ---------------------------------------------------------------------------------------------
+const ledgerKeysOf = (s: System, id: string): string[] => s.store.keys("ledger/").filter((k) => k.endsWith(`_${id}`)).sort();
+const usdOf = (costs: CostDoc[]): number => Math.round(costs.reduce((n, c) => n + c.usd, 0) * 1e6) / 1e6;
+
+describe("Addendum 10 (Q3): a worker that has lost its lease is fenced; controlled recovery reconciles the committed work", () => {
+  it("a revoked worker makes no call, commits no call record and no terminal transition; its cost is still recorded; the new lease holder settles the committed work once", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["ok", "ok"]);
+    const w1 = currentLease(sys, id);
+    const inFlight = workerProviderCall(sys, id, "ok", 0.05); // W1's call, in flight
+    expect(inFlight.next().done).toBe(false);
+    expect(fmt(runToEnd(expireLease(sys, id)))).toBe("200 undefined"); // W1's lease expires (recorded)
+    expect(fmt(runToEnd(workerRetryStep(sys, id)))).toBe("200 undefined"); // W2 takes the retried step
+    const w2 = currentLease(sys, id);
+    expect(w2).not.toBe(w1);
+    // W1's result arrives: refused (not committed work, never billable); its cost is recorded.
+    expect(fmt(runToEnd(inFlight))).toBe("409 lease_lost");
+    expect([sys.store.keys(`calls/${id}/`).length, jobOf(sys, id).callsMade]).toEqual([2, 2]);
+    expect(costsOf(sys, id).filter((c) => c.source === "refused_result")).toEqual([{ usd: 0.05, outcome: "ok", source: "refused_result" }]);
+    // W1 can neither start a new call nor finalize.
+    const dispatches = sys.store.keys(`dispatch/${id}/`).length;
+    expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w1)))).toBe("409 lease_lost");
+    expect(sys.store.keys(`dispatch/${id}/`).length).toBe(dispatches);
+    expect(fmt(runToEnd(finishJob(sys, id, "completed", undefined, { summary: "stale" }, { lease: w1 })))).toBe("409 lease_lost");
+    expect(sys.store.get(`ledger/settle_${id}`)).toBeUndefined();
+    expect(sys.store.get(`results/${id}`)).toBeUndefined();
+    // W2 re-issues the call that has no record, then finalizes.
+    expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w2)))).toBe("200 undefined");
+    expect(fmt(runToEnd(finishJob(sys, id, "partial", undefined, { summary: "w2" }, { lease: w2 })))).toBe("200 undefined");
+    const e = settleOf(sys, id);
+    expect({ charged: e.charged, released: e.released }).toEqual({ charged: 3, released: e.reserved - 3 });
+    expect(creditsOf(sys)).toBe(before - 3);
+    expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+    // Every attempt has exactly one cost entry: 2 + W1's refused one + W2's.
+    runToEnd(sweep(sys));
+    expect(costsOf(sys, id).length).toBe(4);
+    expect(usdOf(costsOf(sys, id))).toBe(0.08);
+  });
+
+  it("a revoked worker's stop is refused whatever is pending, and the settlement is the one recovery writes (none, cancel, DELETE)", () => {
+    const out: Record<string, unknown> = {};
+    for (const pending of ["none", "cancel", "DELETE"] as const) {
+      const r = a9Setup("running", pending, 2, 1);
+      const stale = currentLease(r.sys, r.id);
+      for (let i = 0; i < LEASE_LIMIT; i++) runToEnd(expireLease(r.sys, r.id));
+      const stop = fmt(runToEnd(workerBoundary(r.sys, r.id, stale)));
+      expect(stop).toBe(pending === "none" ? "200 undefined" : "409 lease_lost"); // with nothing pending there is nothing to stop
+      expect(fmt(runToEnd(finishJob(r.sys, r.id, "completed", undefined, undefined, { lease: stale })))).toBe("409 lease_lost");
+      expect(r.sys.store.get(`ledger/settle_${r.id}`)).toBeUndefined();
+      runToEnd(sweep(r.sys));
+      const e = settleOf(r.sys, r.id);
+      out[pending] = { state: jobOf(r.sys, r.id).state, code: a9Code(r.sys, r.id), charged: e.charged, released: e.released };
+    }
+    expect(out.none).toEqual({ state: "failed", code: "worker_timeout", charged: 0, released: expect.any(Number) });
+    expect(out.cancel).toEqual(out.none);
+    expect(out.DELETE).toEqual(out.none);
+  });
+});
+
+describe("Addendum 10 (Q2): provider cost is recorded for every dispatched call, failed or uncommitted, independently of the charge", () => {
+  type End = "sweeper" | "retried step stops (cancel)" | "retried step finalizes partial";
+  const ENDS: End[] = ["sweeper", "retried step stops (cancel)", "retried step finalizes partial"];
+
+  it("exhaustive: 0–3 committed usable × 0–2 failed × 0–1 uncommitted calls × 3 endings: one cost entry per dispatched call, Σ cost = Σ dispatched, charge = tariff(terminal state, committed usable work)", () => {
+    let n = 0;
+    for (const end of ENDS) {
+      for (let ok = 0; ok <= 3; ok++) {
+        for (let bad = 0; bad <= 2; bad++) {
+          for (let lost = 0; lost <= 1; lost++) {
+            const sys = world();
+            const before = creditsOf(sys);
+            const id = runningJob(sys, [...Array(ok).fill("ok"), ...Array(bad).fill("error")], { ...SAME, input: { question: `q2 ${end} ${ok} ${bad} ${lost}` } }, 0.02);
+            if (lost) {
+              const g = workerProviderCall(sys, id, "ok", 0.3);
+              g.next();
+              g.next(); // the provider returned; the worker dies before the record commits
+            }
+            if (end === "sweeper") {
+              for (let i = 0; i < LEASE_LIMIT; i++) runToEnd(expireLease(sys, id));
+              runToEnd(sweep(sys));
+            } else {
+              if (end === "retried step stops (cancel)") runToEnd(handleCancel(sys, "live1", id));
+              runToEnd(expireLease(sys, id));
+              runToEnd(workerRetryStep(sys, id));
+              if (end === "retried step finalizes partial") runToEnd(finishJob(sys, id, "partial", undefined, { summary: "p" }, { lease: currentLease(sys, id) }));
+            }
+            runToEnd(sweep(sys));
+            runToEnd(sweep(sys));
+            const tag = { end, ok, bad, lost };
+            const job = jobOf(sys, id);
+            const e = settleOf(sys, id);
+            const want = expectedCharged(job.state, ok, e.reserved);
+            expect({ ...tag, state: job.state, charged: e.charged, released: e.released }).toEqual({ ...tag, state: end === "sweeper" ? "failed" : end === "retried step stops (cancel)" ? "canceled" : "partial", charged: want, released: e.reserved - want });
+            expect({ ...tag, balance: creditsOf(sys) }).toEqual({ ...tag, balance: before - want });
+            // Cost ledger: one entry per dispatched call, and its total is the total dispatched.
+            const costs = costsOf(sys, id);
+            const dispatched = sys.store.keys(`dispatch/${id}/`).map((k) => k.slice(`dispatch/${id}/`.length)).sort();
+            expect({ ...tag, entries: sys.store.keys(`cost/${id}/`).map((k) => k.slice(`cost/${id}/`.length)).sort() }).toEqual({ ...tag, entries: dispatched });
+            expect({ ...tag, usd: usdOf(costs) }).toEqual({ ...tag, usd: Math.round(((ok + bad) * 0.02 + lost * 0.3) * 1e6) / 1e6 });
+            expect({ ...tag, recovered: costs.filter((c) => c.source === "dispatch_record").length }).toEqual({ ...tag, recovered: lost });
+            // The two ledgers never mix: the customer ledger holds exactly reserve and settle.
+            expect(ledgerKeysOf(sys, id)).toEqual([`ledger/reserve_${id}`, `ledger/settle_${id}`]);
+            n++;
+          }
+        }
+      }
+    }
+    expect(n).toBe(3 * 4 * 3 * 2);
+  });
+
+  it("each call attempt has exactly one cost entry: a late result after recovery, a recovery after a refused result, and repeated sweeps add nothing", () => {
+    const sys = world();
+    const id = runningJob(sys, ["ok"]);
+    const g = workerProviderCall(sys, id, "ok", 0.4);
+    g.next(); // in flight
+    for (let i = 0; i < LEASE_LIMIT; i++) runToEnd(expireLease(sys, id));
+    runToEnd(sweep(sys)); // failed: worker_timeout; the in-flight call's cost is recovered from its dispatch record
+    expect(costsOf(sys, id).map((c) => c.source).sort()).toEqual(["call_record", "dispatch_record"]);
+    expect(fmt(runToEnd(g))).toBe("409 late_write_refused"); // the late result: content refused, no second entry
+    runToEnd(sweep(sys));
+    expect(recoverDispatchCosts(sys)).toBe(0);
+    expect(costsOf(sys, id).length).toBe(2);
+    expect(settleOf(sys, id).charged).toBe(0);
+  });
+
+  it("recovery never records a cost for a call whose worker still holds its lease (no double entry when the result then commits)", () => {
+    const sys = world();
+    const id = runningJob(sys, []);
+    const g = workerProviderCall(sys, id, "ok", 0.1);
+    g.next(); // in flight; the lease is current
+    expect(recoverDispatchCosts(sys)).toBe(0);
+    runToEnd(sweep(sys));
+    expect(fmt(runToEnd(g))).toBe("200 undefined");
+    runToEnd(sweep(sys));
+    expect(costsOf(sys, id)).toEqual([{ usd: 0.1, outcome: "ok", source: "call_record" }]);
+  });
+});
+
+describe("Addendum 10: accounting conservation; the customer ledger and the internal cost ledger are separate and each is conserved", () => {
+  /** A mixed workload covering every settlement path. `scale` multiplies every provider cost. */
+  const workload = (scale: number): { sys: System; ids: string[]; initial: number } => {
+    const sys = world();
+    patchOrg(sys, { creditsRemaining: 1000, concurrencyLimit: 20 });
+    const initial = creditsOf(sys);
+    const ids: string[] = [];
+    const q = (label: string): unknown => ({ ...SAME, input: { question: `conserve ${label}` } });
+    const usd = 0.01 * scale;
+    // completed and partial (committed usable work)
+    let id = runningJob(sys, ["ok", "ok", "error"], q("completed"), usd); runToEnd(finishJob(sys, id, "completed", undefined, { s: 1 })); ids.push(id);
+    id = runningJob(sys, ["ok", "error"], q("partial"), usd); runToEnd(finishJob(sys, id, "partial", undefined, { s: 1 })); ids.push(id);
+    // fully failed (charged 0, cost recorded)
+    id = runningJob(sys, ["ok", "error", "error"], q("failed"), usd); runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models")); ids.push(id);
+    // crash with an uncommitted call, then sweeper recovery (charged 0; cost recovered)
+    id = runningJob(sys, ["ok", "ok"], q("crash"), usd);
+    { const g = workerProviderCall(sys, id, "ok", 3 * usd); g.next(); g.next(); }
+    for (let i = 0; i < LEASE_LIMIT; i++) runToEnd(expireLease(sys, id));
+    ids.push(id);
+    // cancel at a safe boundary and DELETE of a running job
+    id = runningJob(sys, ["ok"], q("cancel"), usd); runToEnd(handleCancel(sys, "live1", id)); runToEnd(workerBoundary(sys, id)); ids.push(id);
+    id = runningJob(sys, ["ok", "ok"], q("delete"), usd); runToEnd(handleDelete(sys, "live1", id)); runToEnd(workerBoundary(sys, id)); ids.push(id);
+    // a stale worker refused, then the retried step stops with a cancellation (Q1 + Q3)
+    id = runningJob(sys, ["ok", "ok"], q("stale"), usd);
+    { const stale = currentLease(sys, id); const g = workerProviderCall(sys, id, "ok", 2 * usd); g.next();
+      runToEnd(handleCancel(sys, "live1", id)); runToEnd(expireLease(sys, id)); runToEnd(workerRetryStep(sys, id));
+      expect(fmt(runToEnd(g))).toBe("409 late_write_refused"); expect(fmt(runToEnd(workerBoundary(sys, id, stale)))).toBe("200 undefined"); }
+    ids.push(id);
+    // a queued job canceled before execution
+    const res = send(sys, req(q("queued"), { idempotencyKey: `conserve-q-${scale}` }));
+    id = res.body?.id as string; runToEnd(handleCancel(sys, "live1", id)); ids.push(id);
+    // a job still running (its reservation is still held)
+    id = runningJob(sys, ["ok"], q("open"), usd); ids.push(id);
+    runToEnd(sweep(sys));
+    runToEnd(sweep(sys));
+    return { sys, ids, initial };
+  };
+
+  it("customer ledger: per job charged + released = reserved, charged = tariff(terminal state, committed usable work); balance = initial − Σ charged − open reservations", () => {
+    const { sys, ids, initial } = workload(1);
+    let charged = 0;
+    let open = 0;
+    const tariff: Record<string, number> = {};
+    for (const id of ids) {
+      const job = jobOf(sys, id);
+      const e = sys.store.get<SettleEntry>(`ledger/settle_${id}`);
+      if (!TERMINAL_STATES.has(job.state)) {
+        expect(e).toBeUndefined();
+        open += job.credits;
+        continue;
+      }
+      const entry = e as SettleEntry;
+      expect(entry.charged + entry.released).toBe(entry.reserved);
+      expect(entry.charged).toBe(expectedCharged(job.state, job.callsMade ?? 0, entry.reserved));
+      expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+      tariff[job.state] = (tariff[job.state] ?? 0) + entry.charged;
+      charged += entry.charged;
+    }
+    expect(tariff).toEqual({ completed: 2, partial: 1, failed: 0, canceled: 1 + 2 + 2 + 0 });
+    expect(creditsOf(sys)).toBe(initial - charged - open);
+  });
+
+  it("cost ledger: Σ cost = Σ every dispatched or directly recorded attempt, one entry each; no cost entry is a customer entry and no customer entry carries a cost", () => {
+    const { sys, ids } = workload(1);
+    let entries = 0;
+    for (const id of ids) {
+      const costs = sys.store.keys(`cost/${id}/`);
+      expect(costs.map((k) => k.slice(`cost/${id}/`.length)).sort()).toEqual(sys.store.keys(`dispatch/${id}/`).map((k) => k.slice(`dispatch/${id}/`.length)).sort());
+      entries += costs.length;
+      for (const k of ledgerKeysOf(sys, id)) expect(Object.keys(sys.store.get<object>(k) as object).sort()).not.toContain("usd");
+    }
+    // 3 + 2 + 3 + (2 + 1 uncommitted) + 1 + 2 + (2 + 1 refused) + 0 + 1
+    expect(entries).toBe(18);
+    const total = usdOf(ids.flatMap((id) => costsOf(sys, id)));
+    expect(total).toBe(Math.round((16 * 0.01 + 0.03 + 0.02) * 1e6) / 1e6);
+    for (const k of sys.store.keys("cost/")) expect(Object.keys(sys.store.get<object>(k) as object)).not.toContain("charged");
+  });
+
+  // ×10 keeps the failed-job cost below the hard cost limit: admission controls read cost by design (§4.3); charges never do.
+  it("independence: multiplying every provider cost by 10 changes no customer entry, no balance and no job outcome; the cost ledger scales exactly", () => {
+    const a = workload(1);
+    const b = workload(10);
+    const customer = (w: { sys: System; ids: string[] }): unknown[] => w.ids.map((id) => [jobOf(w.sys, id).state, w.sys.store.get(`ledger/reserve_${id}`), w.sys.store.get(`ledger/settle_${id}`) ?? null]);
+    expect(customer(b)).toEqual(customer(a));
+    expect(creditsOf(b.sys)).toBe(creditsOf(a.sys));
+    const total = (w: { sys: System; ids: string[] }): number => usdOf(w.ids.flatMap((id) => costsOf(w.sys, id)));
+    expect(total(b)).toBe(Math.round(total(a) * 10 * 1e6) / 1e6);
+  });
+});
+
+describe("Addendum 10: durable partial work and repeated settlement", () => {
+  it("committed calls survive a crash; the retried step keeps them (no re-call, no re-charge) and settles them once; every repeated settlement changes nothing", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["ok", "ok", "error"]);
+    runToEnd(expireLease(sys, id)); // the worker crashed mid-panel
+    expect(fmt(runToEnd(workerRetryStep(sys, id)))).toBe("200 undefined");
+    const w2 = currentLease(sys, id);
+    expect([sys.store.keys(`calls/${id}/`).length, jobOf(sys, id).callsMade, jobOf(sys, id).failedCalls]).toEqual([3, 2, 1]);
+    expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w2)))).toBe("200 undefined");
+    expect(fmt(runToEnd(finishJob(sys, id, "partial", undefined, { summary: "p" }, { lease: w2 })))).toBe("200 undefined");
+    const settled = { ...settleOf(sys, id) };
+    expect([settled.charged, settled.released]).toEqual([3, settled.reserved - 3]);
+    const balance = creditsOf(sys);
+    expect(balance).toBe(before - 3);
+    // Repeated settlement by every actor: worker (same lease), stale worker, sweeper, cancel, DELETE, late result.
+    runToEnd(finishJob(sys, id, "partial", undefined, { summary: "again" }, { lease: w2 }));
+    runToEnd(finishJob(sys, id, "completed"));
+    runToEnd(finishJob(sys, id, "failed", "worker_timeout"));
+    runToEnd(workerBoundary(sys, id));
+    runToEnd(workerRetryStep(sys, id));
+    expect(fmt(runToEnd(recordCallResult(sys, id, "ok")))).toBe("409 late_write_refused");
+    expect(fmt(runToEnd(handleCancel(sys, "live1", id)))).toBe("409 not_cancelable");
+    sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), leaseExpiries: LEASE_LIMIT });
+    runToEnd(sweep(sys));
+    runToEnd(handleDelete(sys, "live1", id));
+    runToEnd(handleDelete(sys, "live1", id));
+    runToEnd(sweep(sys));
+    runToEnd(sweep(sys));
+    expect(settleOf(sys, id)).toEqual(settled);
+    expect(creditsOf(sys)).toBe(balance);
+    expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+    expect(sys.releases.filter((x) => x === id).length).toBe(1);
+    expect(jobOf(sys, id)).toMatchObject({ deleted: true, state: "partial", settledCharged: 3, settledReleased: settled.reserved - 3 });
+  });
+
+  it.each(["completed", "partial", "failed", "canceled", "expired"] as const)("repeated settlement after %s: one entry, one release, balance unchanged by any later event", (to) => {
+    const sys = world();
+    const id = runningJob(sys, ["ok", "ok"]);
+    if (to === "canceled") {
+      runToEnd(handleCancel(sys, "live1", id));
+      runToEnd(workerBoundary(sys, id));
+    } else runToEnd(finishJob(sys, id, to, to === "failed" ? "insufficient_usable_models" : undefined));
+    const settled = { ...settleOf(sys, id) };
+    expect(settled.charged).toBe(expectedCharged(to, 2, settled.reserved));
+    const balance = creditsOf(sys);
+    for (const t of ["completed", "partial", "failed", "canceled", "expired"] as const) runToEnd(finishJob(sys, id, t, "x"));
+    runToEnd(workerBoundary(sys, id));
+    runToEnd(workerRetryStep(sys, id));
+    runToEnd(expireLease(sys, id));
+    runToEnd(recordCallResult(sys, id, "ok"));
+    runToEnd(sweep(sys));
+    runToEnd(handleDelete(sys, "live1", id));
+    runToEnd(sweep(sys));
+    expect(settleOf(sys, id)).toEqual(settled);
+    expect(creditsOf(sys)).toBe(balance);
+    expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+    expect(sys.releases.filter((x) => x === id).length).toBe(1);
+  });
+});
+
+describe("Addendum 10: the owner decisions are stated in the normative documents (parsed)", () => {
+  const sectionOf = (md: string, start: string, end: string): string => {
+    const i = md.indexOf(start);
+    return i < 0 ? "" : md.slice(i, md.indexOf(end, i + start.length));
+  };
+
+  it("jobs §4.2: a cancellation found at a step start cancels and settles the committed usable work (0 when none); before synthesis the job also ends canceled (R5 NIT-3)", () => {
+    const md = fs.readFileSync(JOBS, "utf8");
+    const row = /^\| `cancelRequested` \| job \| ([^|]+) \| ([^|]+) \|$/m.exec(sectionOf(md, "### 4.2 Step-start checks", "### 4.3"));
+    expect(row).not.toBeNull();
+    expect(row?.[1]).toMatch(/→ `canceled`, settling the committed usable work \(none before the first panel attempt, so a full release\)/);
+    expect(row?.[2]).toMatch(/→ `canceled`, settling the committed usable work/);
+  });
+
+  it("jobs §4.1: lease fencing; a revoked worker commits no call record, step output, advance or terminal transition", () => {
+    const md = fs.readFileSync(JOBS, "utf8");
+    const sec = sectionOf(md, "### 4.1 Lease protocol", "### 4.2");
+    const fence = /\*Addendum 10:\* \*\*Lease fencing\.\*\*([^\n]+)/.exec(sec)?.[1] ?? "";
+    expect(fence).toMatch(/A worker whose lease has been revoked commits no call record, no step output, no advance and no terminal transition, so it commits no charge/);
+    expect(fence).toMatch(/Recording a lease expiry revokes the lease/);
+  });
+
+  it("ledger §3.1: a dispatch record precedes every provider call and recovers the cost of an uncommitted call; it is never an input to a customer charge", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const para = /\*\*Dispatch record and cost recovery \(Addendum 10\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    expect(para).toMatch(/written before the request is sent/);
+    expect(para).toMatch(/exactly one cost entry per call attempt/);
+    expect(para).toMatch(/never an input to a customer charge/);
+  });
+
+  it("ledger §2.5: committed usable work, fencing and the crash rule (Q1) are stated together", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const para = /\*\*Committed work and stale workers \(Addendum 10\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    expect(para).toMatch(/A crash never erases committed usable work/);
+    expect(para).toMatch(/uncommitted work is never billable/);
+    expect(para).toMatch(/A worker that has lost its lease commits no terminal transition and no charge/);
   });
 });
