@@ -2675,6 +2675,22 @@ describe("Addendum 10 (Q3): a worker that has lost its lease is fenced; controll
     expect(usdOf(costsOf(sys, id))).toBe(0.08);
   });
 
+  it("a lease granted again to another worker revokes the earlier holder: only the newest holder commits a call or the terminal transition", () => {
+    const sys = world();
+    const id = runningJob(sys, ["ok"]);
+    runToEnd(expireLease(sys, id));
+    expect(fmt(runToEnd(workerRetryStep(sys, id)))).toBe("200 undefined");
+    const w2 = currentLease(sys, id);
+    expect(fmt(runToEnd(workerRetryStep(sys, id)))).toBe("200 undefined"); // a redelivered retry takes the lease
+    const w3 = currentLease(sys, id);
+    expect(w3).not.toBe(w2);
+    expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w2)))).toBe("409 lease_lost");
+    expect(fmt(runToEnd(finishJob(sys, id, "completed", undefined, undefined, { lease: w2 })))).toBe("409 lease_lost");
+    expect(fmt(runToEnd(workerProviderCall(sys, id, "ok", 0.01, w3)))).toBe("200 undefined");
+    expect(fmt(runToEnd(finishJob(sys, id, "completed", undefined, undefined, { lease: w3 })))).toBe("200 undefined");
+    expect(settleOf(sys, id).charged).toBe(2);
+  });
+
   it("a revoked worker's stop is refused whatever is pending, and the settlement is the one recovery writes (none, cancel, DELETE)", () => {
     const out: Record<string, unknown> = {};
     for (const pending of ["none", "cancel", "DELETE"] as const) {
