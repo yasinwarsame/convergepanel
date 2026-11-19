@@ -34,10 +34,13 @@ jobs:
   quality:
     name: Quality Gate
     needs: jest
-    # `!cancelled()`, not the default `success()`: when a shard fails this job
-    # must still RUN and fail. A required check that is skipped is reported as
-    # passing by branch protection. A cancelled run stays cancelled (not green).
-    if: ${{ !cancelled() }}
+    # `always()`: this job must RUN and decide in every case, including a
+    # failed, timed-out or cancelled shard and a cancelled run. A required check
+    # whose job is skipped (the default `success()`, or `!cancelled()` in a
+    # cancelled run) is reported as passing by branch protection. The final
+    # Test step also runs under `always()` and fails unless the shards' combined
+    # result is exactly "success".
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -116,6 +119,7 @@ jobs:
         # errored suite, a suite run twice, a suite of the full `--listTests`
         # inventory that no shard ran, a suite outside it, or a shard whose
         # executed set differs from its deterministic `--shard` plan.
+        if: ${{ always() }}
         env:
           JEST_SHARDS_RESULT: ${{ needs.jest.result }}
         run: node scripts/ci/check-jest-shards.js --total 3 --dir jest-shards --needs-result "$JEST_SHARDS_RESULT"
@@ -176,4 +180,6 @@ jobs:
           name: jest-shard-${{ matrix.shard }}
           path: jest-shard-${{ matrix.shard }}.json
           if-no-files-found: error
+          # "Re-run failed jobs" re-uploads the same artifact name.
+          overwrite: true
           retention-days: 7

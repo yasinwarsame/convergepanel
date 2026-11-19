@@ -36,9 +36,9 @@ describe("security-test pre-flight is wired into the Quality Gate", () => {
     expect(WORKFLOW.indexOf("security:preflight")).toBeLessThan(WORKFLOW.indexOf("npx jest"));
     // Since the Jest suite moved into parallel shard jobs, "even if tests fail"
     // rests on the required job still RUNNING when a shard fails: it waits for
-    // the shards under `!cancelled()`, not the default `success()`.
+    // the shards under `always()`, not the default `success()`.
     const required = WORKFLOW.slice(WORKFLOW.indexOf("name: Quality Gate"));
-    expect(required.slice(0, required.indexOf("steps:"))).toMatch(/\n {4}if: \$\{\{ !cancelled\(\) \}\}\n/);
+    expect(required.slice(0, required.indexOf("steps:"))).toMatch(/\n {4}if: \$\{\{ always\(\) \}\}\n/);
     expect(required.indexOf("security:preflight")).toBeLessThan(required.indexOf("check-jest-shards.js"));
   });
 
