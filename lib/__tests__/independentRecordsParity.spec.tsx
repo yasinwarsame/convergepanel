@@ -136,6 +136,17 @@ try {
 }
 const IS_BASELINE = presentation === null;
 
+/** R6: the server history row's explicit basis marker, when the module provides it (absent at earlier heads). */
+function historyMarker(data: unknown): { consensusBasis?: unknown } {
+  let sources: any = null;
+  try {
+    sources = require("@/lib/verification/claimStatementBasisSources");
+  } catch {
+    sources = null;
+  }
+  return sources && typeof sources.storedClaimScoreBasis === "function" ? { consensusBasis: sources.storedClaimScoreBasis(data) } : {};
+}
+
 /**
  * Order 36 (remote CI): a seeded Fisher–Yates shuffle. The former `[...xs].sort(() => r() - 0.5)` depended on the
  * engine's sort algorithm (Node 24 and Node 26 produced different records from the same seed).
@@ -344,7 +355,7 @@ async function outputs(): Promise<unknown> {
     const summary = toTeamClaimVerificationSummary({ verificationId: rec.id, data: rec.data, workspaceId: "w", projectId: null, project: null })!;
     const history = IS_BASELINE
       ? ` · ${payload.consensusScore} consensus`
-      : presentation.claimHistoryConsensusSuffix({ consensusScore: payload.consensusScore, modelIndependence: (payload as any).modelIndependence });
+      : presentation.claimHistoryConsensusSuffix({ consensusScore: payload.consensusScore, modelIndependence: (payload as any).modelIndependence, ...historyMarker(rec.data) });
     const q = { ...byId[rec.id] };
     return {
       id: rec.id,

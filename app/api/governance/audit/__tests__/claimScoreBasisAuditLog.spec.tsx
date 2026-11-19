@@ -80,6 +80,8 @@ import { AuditLogEventCard } from "@/components/governance/GovernanceDashboard";
 const CREATOR = "creator-uid";
 const VIEWER = "legacy-reviewer";
 const QUALIFIED = "92/100 (computed over panel slot responses, not independent corroboration)";
+const RETAINED_INSUFFICIENT = "92/100 (fewer than two independent models, not independent corroboration)";
+const RETAINED_UNVERIFIED = "92/100 (unverified: model independence not recorded)";
 const OWN: Record<string, string> = { chatgpt: "openai", claude: "anthropic", gemini: "google", grok: "xai", perplexity: "perplexity" };
 const row = (modelId: string, verdict: string, rec: { sub?: boolean; provider?: string } = {}) => ({
   modelId,
@@ -165,10 +167,13 @@ describe("governance Audit Log — claim score badge on the shared claim score b
     for (const id of ["e02", "e01"]) expect([id, "consensusBasis" in by[id], "consensusWithheld" in by[id]]).toEqual([id, false, false]);
 
     expect(card(by.e06)).toContain(`>${QUALIFIED}</span>`);
-    expect(card(by.e05)).toContain("No consensus score (fewer than two independent models)");
-    expect(card(by.e05)).not.toContain("92/100");
-    expect(card(by.e03)).toContain("Consensus score withheld (model independence not recorded)");
-    expect(card(by.e03)).not.toContain("92/100");
+    // R6 owner decision B2: the Audit Log RETAINS the valid recorded number, qualified — never withheld, never bare.
+    expect(card(by.e05)).toContain(`>${RETAINED_INSUFFICIENT}</span>`);
+    expect(card(by.e05)).not.toContain("No consensus score");
+    expect(card(by.e05)).not.toContain(">92/100<");
+    expect(card(by.e03)).toContain(`>${RETAINED_UNVERIFIED}</span>`);
+    expect(card(by.e03)).not.toContain("Consensus score withheld");
+    expect(card(by.e03)).not.toContain(">92/100<");
     expect(card(by.e04)).toContain(">92/100</span>");
     expect(card(by.e04)).not.toContain("slot responses");
     expect(card(by.e02)).toContain(">92/100</span>");
@@ -182,7 +187,9 @@ describe("governance Audit Log — claim score badge on the shared claim score b
     const r = await get("?limit=20");
     expect(r.status).toBe(200);
     expect(r.body.events[0].consensusWithheld).toBe("independence_unverified");
-    expect(card(r.body.events[0])).not.toContain("92/100");
+    // R6 B2: the number is kept, explicitly unverified — never presented as independent agreement.
+    expect(card(r.body.events[0])).toContain(`>${RETAINED_UNVERIFIED}</span>`);
+    expect(card(r.body.events[0])).not.toContain(">92/100<");
   });
 
   it("selectedModels is read: a requested model without a row makes otherwise-independent rows unverified (review M17)", async () => {
@@ -203,5 +210,14 @@ describe("governance Audit Log — claim score badge on the shared claim score b
     const r = await get("?runId=v-mix&collection=verifications");
     expect(r.status).toBe(200);
     expect(r.body.events.map((e: any) => [e.id, e.consensusScore, e.consensusBasis])).toEqual([["e06", 92, "slot_responses"]]);
+  });
+
+  it("R6 B2: the badge carries no aria-label / title of its own — its accessible name is the qualified visible text", () => {
+    const html = card({ id: "x", action: "approved", at: "2026-09-10T00:00:00.000Z", collection: "verifications", runId: "v", consensusScore: 92, consensusWithheld: "insufficient_independent_models" });
+    const badge = /<span[^>]*>92\/100[^<]*<\/span>/.exec(html)?.[0] ?? "";
+    expect(badge).toContain(`>${RETAINED_INSUFFICIENT}</span>`);
+    expect(badge).not.toMatch(/aria-label=|title=/);
+    // A non-claim (research) event keeps its bare recorded score.
+    expect(card({ id: "y", action: "approved", at: "2026-09-10T00:00:00.000Z", collection: "runs", runId: "r", consensusScore: 92 })).toContain(">92/100</span>");
   });
 });

@@ -68,12 +68,17 @@ import { consensusScoreWithheldReason } from "@/lib/panel/independentVoices";
  * shared builder when the module exports one (R4), else the route's inline wiring as of the R4 review head.
  */
 function historyScoreFields(doc: Record<string, unknown>): Record<string, unknown> {
-  let mod: { storedClaimHistoryScoreFields?: (d: Record<string, unknown>) => Record<string, unknown> } = {};
+  let mod: {
+    storedClaimHistoryScoreFields?: (d: Record<string, unknown>) => Record<string, unknown>;
+    storedClaimHistoryRowFields?: (d: Record<string, unknown>) => Record<string, unknown>;
+  } = {};
   try {
     mod = require("@/lib/verification/claimStatementBasisSources");
   } catch {
     mod = {};
   }
+  // R6: the route builds its claim item with the row builder that also carries the explicit basis marker.
+  if (mod.storedClaimHistoryRowFields) return mod.storedClaimHistoryRowFields(doc);
   if (mod.storedClaimHistoryScoreFields) return mod.storedClaimHistoryScoreFields(doc);
   const modelIndependence = storedVerificationConsensusIndependence(doc);
   const withheld = consensusScoreWithheldReason(modelIndependence);

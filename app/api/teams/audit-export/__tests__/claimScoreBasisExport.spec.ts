@@ -14,6 +14,7 @@
 const teamRunDocs = new Map<string, Record<string, any>>();
 const canonicalDocs = new Map<string, Record<string, any>>();
 let failBasisRead = false;
+const vanishOnMaskedRead = new Set<string>();
 
 const mockAdminDb: any = {
   collection: (name: string) => ({
@@ -29,7 +30,7 @@ const mockAdminDb: any = {
     const mask: string[] | undefined = hasOpts ? last.fieldMask : undefined;
     if (failBasisRead && mask) throw new Error("basis read failed");
     return refs.map((ref: any) => {
-      const full = canonicalDocs.get(ref.__path);
+      const full = mask && vanishOnMaskedRead.has(ref.__path) ? undefined : canonicalDocs.get(ref.__path);
       const data = full && mask ? Object.fromEntries(Object.entries(full).filter(([k]) => mask.includes(k))) : full;
       return { id: ref.__id, ref: { path: ref.__path }, exists: !!full, data: () => data };
     });
@@ -106,6 +107,7 @@ beforeEach(() => {
   teamRunDocs.clear();
   canonicalDocs.clear();
   failBasisRead = false;
+  vanishOnMaskedRead.clear();
   claim("c-mix", "v-mix", MIX, "2026-08-05T00:00:00.000Z");
   claim("c-ds", "v-ds", ALL_DS, "2026-08-04T00:00:00.000Z");
   claim("c-own", "v-own", OWN_TWO, "2026-08-03T00:00:00.000Z");
@@ -162,5 +164,54 @@ describe("GET /api/teams/audit-export — claim score basis (R5)", () => {
     failBasisRead = true;
     const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
     expect(rows.filter((r: any) => r.type === "verification").map((r: any) => r.consensusBasis)).toEqual(Array(4).fill("independence_unverified"));
+  });
+
+  // ── R6 owner decision B1: the appended column is kept; its contract is pinned here ──
+  const BASES = ["independent_models", "slot_responses", "insufficient_independent_models", "independence_unverified"];
+
+  it("R6 B1: a claim row whose linked verification document is absent at the basis read is independence_unverified (explicit unknown)", async () => {
+    // The authority read (no field mask) still sees the document; it is gone by the basis read (field-masked).
+    vanishOnMaskedRead.add("verifications/v-own");
+    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
+    const by = Object.fromEntries(rows.map((r: any) => [r.runId, r]));
+    expect(by["c-own"].consensusBasis).toBe("independence_unverified");
+    expect(by["c-own"].consensusScore).toBe(92);
+  });
+
+  it("R6 B1: claim rows take only the four documented values; research rows ''; the export shares the history enum", async () => {
+    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
+    for (const r of rows) {
+      if (r.type === "verification") expect([r.runId, BASES.includes(r.consensusBasis)]).toEqual([r.runId, true]);
+      else expect([r.runId, r.consensusBasis]).toEqual([r.runId, ""]);
+    }
+    const { CLAIM_SCORE_BASES } = require("@/lib/verification/claimStatementBasisSources");
+    expect(CLAIM_SCORE_BASES).toEqual(BASES);
+  });
+
+  it("R6 B1: CSV — every row has 11 cells; column 7 stays the numeric stored score for every row, withheld or not", async () => {
+    const text = await (await GET(new NextRequest("http://localhost/api/teams/audit-export?format=csv"))).text();
+    const [header, ...body] = text.split("\n");
+    expect(header.split(",")).toEqual([...ESTABLISHED.split(","), "consensusBasis"]);
+    expect(body).toHaveLength(5);
+    for (const line of body) {
+      const cells = line.split(",");
+      expect(cells).toHaveLength(11);
+      expect(Number.isFinite(Number(cells[6]))).toBe(true);
+      expect(cells[6]).toMatch(/^\d+$/);
+      expect(['""', ...BASES.map((b) => `"${b}"`)]).toContain(cells[10]);
+    }
+    // Withheld claim rows still export their stored number (the basis column says why it is not a consensus).
+    expect(body.find((l) => l.startsWith('"c-ds"'))?.split(",").slice(6, 7)).toEqual(["92"]);
+    expect(body.find((l) => l.startsWith('"c-ds"'))?.endsWith(',"insufficient_independent_models"')).toBe(true);
+  });
+
+  it("R6 B1: the JSON row carries no other new field and no per-model data (no unsupported metadata)", async () => {
+    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
+    for (const r of rows) {
+      expect(Object.keys(r)).toEqual(["runId", "timestamp", "userEmail", "type", "queryTruncated", "verdict", "consensusScore", "policyFlags", "humanDecision", "consensusBasis"]);
+      expect(typeof r.consensusScore).toBe("number");
+    }
+    const raw = JSON.stringify(rows);
+    for (const leak of ["modelResults", "selectedModels", "provider", "deepseek", "substituted"]) expect(raw).not.toContain(leak);
   });
 });

@@ -40,6 +40,8 @@ import { GET } from "@/app/api/admin/runs/route";
 import { adminRunConsensusText, adminRunDetailConsensusText } from "@/components/admin/AdminRunsTab";
 
 const QUALIFIER = "computed over panel slot responses, not independent corroboration";
+const INSUFFICIENT = "fewer than two independent models, not independent corroboration";
+const UNVERIFIED = "unverified: model independence not recorded";
 const OWN: Record<string, string> = { chatgpt: "openai", claude: "anthropic", gemini: "google", grok: "xai", perplexity: "perplexity" };
 const row = (modelId: string, verdict: string, rec: { sub?: boolean; provider?: string } = {}) => ({
   modelId,
@@ -93,8 +95,10 @@ describe("admin runs tab — claim consensus column on the shared claim score ba
     expect(JSON.stringify(body)).not.toContain("modelResults");
 
     expect(adminRunConsensusText(by["v-mix"])).toBe(`92 (${QUALIFIER})`);
-    expect(adminRunConsensusText(by["v-ds"])).toBe("No consensus score (fewer than two independent models)");
-    expect(adminRunConsensusText(by["v-none"])).toBe("Consensus score withheld (model independence not recorded)");
+    // R6 owner decision B2: the admin tab RETAINS the valid stored number, qualified — never withheld, never bare.
+    expect(adminRunConsensusText(by["v-ds"])).toBe(`92 (${INSUFFICIENT})`);
+    expect(adminRunConsensusText(by["v-none"])).toBe(`92 (${UNVERIFIED})`);
+    expect(adminRunConsensusText({ ...by["v-ds"], consensusScore: null })).toBe("—");
     expect(adminRunConsensusText(by["v-own"])).toBe("92");
     expect(adminRunConsensusText(by.r1)).toBe("92");
     expect(adminRunConsensusText({ ...by.r1, consensusScore: null })).toBe("—");
@@ -113,11 +117,20 @@ describe("admin runs tab — claim consensus column on the shared claim score ba
   it("detail line: a claim's raw document is presented on the same basis; research / video unchanged", () => {
     const claim = { runType: "claim" } as const;
     expect(adminRunDetailConsensusText(claim, ver("x", MIX, 1).data)).toBe(`92 (${QUALIFIER})`);
-    expect(adminRunDetailConsensusText(claim, ver("x", ALL_DS, 1).data)).toBe("No consensus score (fewer than two independent models)");
-    expect(adminRunDetailConsensusText(claim, ver("x", undefined, 1).data)).toBe("Consensus score withheld (model independence not recorded)");
+    expect(adminRunDetailConsensusText(claim, ver("x", ALL_DS, 1).data)).toBe(`92 (${INSUFFICIENT})`);
+    expect(adminRunDetailConsensusText(claim, ver("x", undefined, 1).data)).toBe(`92 (${UNVERIFIED})`);
+    expect(adminRunDetailConsensusText(claim, { ...ver("x", undefined, 1).data, consensusScore: undefined })).toBe("—");
     expect(adminRunDetailConsensusText(claim, ver("x", OWN_TWO, 1).data)).toBe("92");
     expect(adminRunDetailConsensusText({ runType: "research" }, { consensusScore: 92 })).toBe("92");
     expect(adminRunDetailConsensusText({ runType: "video" }, { consensusScore: 70 })).toBe("70");
     expect(adminRunDetailConsensusText({ runType: "research" }, {})).toBe("—");
+  });
+
+  it("R6 B2: the list cell and the detail line render through the qualifying helpers, with no aria-label / title of their own", () => {
+    const src = require("fs").readFileSync(require("path").join(process.cwd(), "components/admin/AdminRunsTab.tsx"), "utf8") as string;
+    const cell = /<td className=\{`px-3 py-2 \$\{consensusClass\([^`]*`\}>\s*\{adminRunConsensusText\(r\)\}\s*<\/td>/.exec(src);
+    expect(cell).not.toBeNull();
+    expect(src).toContain("{adminRunDetailConsensusText(r, detail)}");
+    expect(src.match(/notIndependent: "qualify"/g)?.length).toBe(2);
   });
 });

@@ -138,7 +138,8 @@ describe.each(CLASSES)("one independence across every surface — $name", (c) =>
     const view = html(createElement(ClaimVerificationResultView, { data: payload }));
     const summary = toTeamClaimVerificationSummary({ verificationId: "vcl-x", data: { ...claimDoc, workspaceId: "w" }, workspaceId: "w", projectId: null, project: null })!;
     const teamRow = html(createElement("ul", null, createElement(TeamClaimListRow, { workspaceId: "w", item: summary as never, showProject: false })));
-    const historyLine = claimHistoryConsensusSuffix({ consensusScore: summary.consensusScore, modelIndependence: c.expected });
+    // R6: the server history row carries its explicit basis marker (lib/verification/claimStatementBasisSources.ts).
+    const historyLine = claimHistoryConsensusSuffix({ consensusScore: summary.consensusScore, modelIndependence: c.expected, consensusBasis: require("@/lib/verification/claimStatementBasisSources").storedClaimScoreBasis(claimDoc) });
     const memo = generateVerificationMemo({ type: "claim", claim: "c", verdict: "confirmed", consensusScore: 88, confidenceLabel: "High", evidenceQuality: "strong", verificationId: "v", modelEvidence: payload.modelEvidence, claimModelIndependence: c.expected });
     if (c.expected === "independent") {
       expect(view).toContain(">88</p>");

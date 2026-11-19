@@ -223,8 +223,9 @@ describe.each(SCENARIOS)("claim surfaces — %s", (label, stored, expected) => {
   });
 
   it("Personal history line (client suffix over the server item and over a live result)", () => {
-    const serverItem = { consensusScore: expected === "independent" ? 93 : null, modelIndependence: expected };
-    const live = { consensusScore: 93, modelIndependence: claimModelIndependence(payload.modelIndependence) };
+    // R6: a server item carries its explicit basis marker; a live item carries its payload (app/page.tsx).
+    const serverItem = { consensusScore: expected === "independent" ? 93 : null, modelIndependence: expected, consensusBasis: require("@/lib/verification/claimStatementBasisSources").storedClaimScoreBasis(stored) };
+    const live = { consensusScore: 93, modelIndependence: claimModelIndependence(payload.modelIndependence), payload };
     for (const item of [serverItem, live]) {
       const line = `Confirmed${claimHistoryConsensusSuffix(item)}`;
       if (expected === "independent") expect(line).toBe("Confirmed · 93 consensus");
@@ -249,6 +250,9 @@ describe("fail closed + wiring", () => {
     expect(src.match(/modelIndependence: claimModelIndependence\(data\.modelIndependence\)/g)?.length).toBe(2);
     expect(src.match(/modelIndependence: payload\.modelIndependence/g)?.length).toBe(2);
     expect(src).toContain("modelIndependence: claimModelIndependence(row.modelIndependence)");
+    // R6 B3: the history mapper carries the server's basis marker whatever its value (not only "slot_responses").
+    expect(src).toContain("...(row.consensusBasis !== undefined ? { consensusBasis: row.consensusBasis } : {}),");
+    expect(src).not.toContain('row.consensusBasis === "slot_responses"');
     // The claim branch no longer formats a bare stored score (video keeps its own line).
     const claimBranch = src.slice(src.indexOf("formatHistoryVerdictLabel(item.verdict)}`"), src.indexOf("<GovernanceChip status={item.governanceStatus} />"));
     expect(claimBranch).not.toContain("consensus`");

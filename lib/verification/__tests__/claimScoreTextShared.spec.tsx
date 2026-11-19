@@ -12,6 +12,7 @@ import { claimQueuePresentation } from "@/lib/verification/claimQueuePresentatio
 
 const mode = (name: string) => MODES.find((m) => m.name === name)!;
 const QUALIFIER = "computed over panel slot responses, not independent corroboration";
+const HISTORICAL = "historical score, unverified: model independence not recorded";
 // Read lazily so a missing export fails the test that needs it (failing-first), not the whole file.
 const P = Presentation as unknown as Record<string, any>;
 
@@ -37,9 +38,10 @@ describe("Personal history suffix — live / cached payload path (R5, X11)", () 
     expect(Presentation.claimHistoryConsensusSuffix({ consensusScore: 70, modelIndependence: "independent", payload: own.payload })).toBe(" · 70 consensus");
   });
 
-  it("a cached payload that carries no rows proves no basis → withheld as unverified (fail closed), never a bare score", () => {
+  it("a cached payload that carries no rows proves no basis → shown as a historical, unverified score (R6 B3), never a bare score", () => {
     const rowless = { ...collapsed.payload, modelEvidence: undefined } as unknown as typeof collapsed.payload;
-    expect(Presentation.claimHistoryConsensusSuffix({ consensusScore: 70, modelIndependence: "independent", payload: rowless })).toBe(" · Consensus score withheld (model independence not recorded)");
+    // R5 withheld this score; the R6 owner decision (B3) keeps the historical number with an explicit unverified state.
+    expect(Presentation.claimHistoryConsensusSuffix({ consensusScore: 70, modelIndependence: "independent", payload: rowless })).toBe(` · 70 consensus (${HISTORICAL})`);
     // The server's basis, when the row carries one, still decides.
     expect(Presentation.claimHistoryConsensusSuffix({ consensusScore: 70, modelIndependence: "independent", consensusBasis: "slot_responses", payload: rowless })).toBe(` · 70 consensus (${QUALIFIER})`);
   });

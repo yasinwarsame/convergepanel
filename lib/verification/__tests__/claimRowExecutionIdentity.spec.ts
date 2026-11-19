@@ -76,13 +76,13 @@ describe("the reviewer's mix on the client surfaces (R4)", () => {
   it("Team row and Personal history: qualified score", () => {
     const item = toTeamClaimVerificationSummary({ verificationId: "v", data: c.doc as never, workspaceId: "w", projectId: null, project: null });
     expect(item?.consensusBasis).toBe("slot_responses");
-    expect(claimHistoryConsensusSuffix(storedClaimHistoryScoreFields(c.doc as never))).toBe(" · 70 consensus (computed over panel slot responses, not independent corroboration)");
+    expect(claimHistoryConsensusSuffix(require("@/lib/verification/claimStatementBasisSources").storedClaimHistoryRowFields(c.doc as never))).toBe(" · 70 consensus (computed over panel slot responses, not independent corroboration)");
   });
 
   it("control: five own models — no qualifier anywhere", () => {
     const own = buildCase(["A", "A", "A", "A", "I"], mode("own"));
     expect(buildClaimVerdictClipboardText(own.payload)).not.toContain("not independent corroboration");
     expect(memoFor(own.payload)).not.toContain("not independent corroboration");
-    expect(claimHistoryConsensusSuffix(storedClaimHistoryScoreFields(own.doc as never))).toBe(" · 70 consensus");
+    expect(claimHistoryConsensusSuffix(require("@/lib/verification/claimStatementBasisSources").storedClaimHistoryRowFields(own.doc as never))).toBe(" · 70 consensus");
   });
 });
