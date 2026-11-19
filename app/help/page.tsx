@@ -107,9 +107,15 @@ export default function HelpPage() {
 
           <FaqQ>What formats are supported, and is my video kept?</FaqQ>
           <FaqA>
-            MP4, MOV, and WebM; max 50MB and 60 seconds. The file is processed in memory and not stored
-            as media — only analysis results and structured metadata are saved. Extracted frames are
-            discarded after the models finish.
+            {/* OWNER/LEGAL VERIFY: aligned with Privacy Policy §6 (frames + file details sent; file name and metadata stored). Confirm against app/api/verify-video/route.ts. */}
+            MP4, MOV, and WebM; max 50MB and 60 seconds. The file is processed in your browser and is not
+            uploaded or stored as media. Extracted frames and technical details read from the file are sent
+            for analysis; the analysis results, the file name and those details are saved. Extracted frames
+            are discarded after the models finish. See the{" "}
+            <Link href="/privacy" className="font-medium text-sky-600 hover:text-sky-700">
+              Privacy Policy
+            </Link>{" "}
+            for details.
           </FaqA>
         </section>
 
@@ -239,9 +245,10 @@ export default function HelpPage() {
 
           <FaqQ>What do paid plans add?</FaqQ>
           <FaqA>
-            More models per run (up to five on the full plan), higher monthly run limits, video
-            verification with its own monthly allowance (each video also uses one panel run), and longer
-            history retention on paid tiers. The 5-Model plan adds governance dashboards, peer review,
+            {/* OWNER/LEGAL VERIFY: "longer history retention on paid tiers" removed — no tier has a shorter retention today (lib/plans.ts historyRetentionDays is never read; audit 02 D-3). Restore only if a Free-tier limit is implemented. */}
+            More models per run (up to five on the full plan), higher monthly run limits, and video
+            verification with its own monthly allowance (each video also uses one panel run). The
+            5-Model plan adds governance dashboards, peer review,
             and the review audit log. See the{" "}
             <Link href="/pricing" className="font-medium text-sky-600 hover:text-sky-700">
               pricing page
