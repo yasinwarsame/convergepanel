@@ -114,9 +114,15 @@
  * flight longer than STUCK_IN_FLIGHT_MS (trigger `stuck_in_flight`). It carries
  * counts only (no credential, token or uid). `[auth-verification]
  * saturation_recovered` (logger.info) follows at most once per emitted
- * `saturated`, at the first admission with nothing stuck. Every refusal is also
- * counted in authVerificationRefusalsTotal(). There is deliberately no
- * per-refusal log line: under saturation that would be one line per request.
+ * `saturated`, and only when the instance has genuinely recovered: an admission
+ * finds no refusal for a full SATURATION_SIGNAL_INTERVAL_MS, at most
+ * RECOVERY_INFLIGHT_MAX (half the cap) in flight, and nothing stuck. It carries
+ * the episode's refusal counts (since the last line, total, per site). Every
+ * refusal is also counted in authVerificationRefusalsTotal(). Ages and the rate
+ * limit use a monotonic clock (performance.now). This module adds no
+ * per-refusal line of its own (the callers' own per-request failure lines —
+ * `[auth-session] POST failed … { cause: "capped" }`, `[auth-identity]
+ * resolution_failed` — remain).
  */
 
 import "server-only";
@@ -136,6 +142,21 @@ export const SATURATION_SIGNAL_INTERVAL_MS = 60_000;
  * the SDK will not end it by itself. 60 × the deadline = 600 s.
  */
 export const STUCK_IN_FLIGHT_MS = 60 * AUTH_VERIFICATION_DEADLINE_MS;
+
+/**
+ * `saturation_recovered` is reported only at or below this many calls in
+ * flight (half the cap), so a recovery line never appears while the instance is
+ * at or near the cap — e.g. when one slot frees and is taken again at once.
+ */
+export const RECOVERY_INFLIGHT_MAX = MAX_INFLIGHT_AUTH_VERIFICATIONS / 2;
+
+/**
+ * MONOTONIC milliseconds (performance.now): ages and the rate-limit window must
+ * not move when the wall clock is stepped (NTP, manual change).
+ */
+function monotonicNow(): number {
+  return performance.now();
+}
 
 /** Where a verification runs — a log label only (no credential, token or uid is ever logged here). */
 export type VerificationSite = "request_identity" | "session_mint";
@@ -161,8 +182,12 @@ let abandonedInFlight = 0;
 const inFlightTasks = new Set<Task>();
 /** Upstream verifications refused at the cap since this instance started (monotonic). */
 let refusedTotal = 0;
-/** Refusals not yet reported by a `saturated` line. */
+/** Refusals per site since this instance started (monotonic; reported in the recovery line). */
+const refusedBySite: Record<VerificationSite, number> = { request_identity: 0, session_mint: 0 };
+/** Refusals not yet reported by a `saturated` or `saturation_recovered` line. */
 let refusedSinceSignal = 0;
+/** When the last refusal happened (monotonic; null: never). */
+let lastRefusalAt: number | null = null;
 /** When the last `saturated` line was emitted (null: never). */
 let lastSignalAt: number | null = null;
 /** A `saturated` line was emitted and no `saturation_recovered` has followed it yet. */
@@ -182,7 +207,7 @@ export function authVerificationRefusalsTotal(): number {
 }
 
 /** Age of the oldest upstream verification still in flight (0 when none). */
-export function oldestAuthVerificationInFlightMs(now: number = Date.now()): number {
+export function oldestAuthVerificationInFlightMs(now: number = monotonicNow()): number {
   for (const task of inFlightTasks) return Math.max(0, now - task.startedAt);
   return 0;
 }
@@ -201,26 +226,35 @@ function stuckInFlightCount(now: number): number {
  * decision (refused or admitted). Counts only — never a credential.
  */
 function reportSaturation(site: VerificationSite, refused: boolean): void {
-  const now = Date.now();
+  const now = monotonicNow();
   if (refused) {
     refusedTotal += 1;
+    refusedBySite[site] += 1;
     refusedSinceSignal += 1;
+    lastRefusalAt = now;
   }
   const stuck = stuckInFlightCount(now);
   if (!refused && stuck === 0) {
-    if (saturationSignalled) {
+    // Genuinely recovered only: no refusal for a full interval, at most half the
+    // cap in flight, nothing stuck. Otherwise stay silent (still saturated).
+    const quiet = lastRefusalAt === null || now - lastRefusalAt >= SATURATION_SIGNAL_INTERVAL_MS;
+    if (saturationSignalled && quiet && inFlight <= RECOVERY_INFLIGHT_MAX) {
       saturationSignalled = false;
       logger.info("[auth-verification] saturation_recovered", {
         site,
         inFlight,
         abandonedInFlight,
         cap: MAX_INFLIGHT_AUTH_VERIFICATIONS,
+        recoveryInFlightMax: RECOVERY_INFLIGHT_MAX,
+        refusedSinceLastSignal: refusedSinceSignal,
+        refusedTotal,
+        refusedBySite: { ...refusedBySite },
       });
+      refusedSinceSignal = 0;
     }
     return;
   }
-  // `now < lastSignalAt`: the wall clock stepped back — do not stay silent for the gap.
-  if (lastSignalAt !== null && now >= lastSignalAt && now - lastSignalAt < SATURATION_SIGNAL_INTERVAL_MS) return;
+  if (lastSignalAt !== null && now - lastSignalAt < SATURATION_SIGNAL_INTERVAL_MS) return;
   lastSignalAt = now;
   saturationSignalled = true;
   logger.error("[auth-verification] saturated", {
@@ -291,7 +325,7 @@ export function startVerificationDeadline(site: VerificationSite): VerificationD
         return Promise.resolve(CAPPED_OUTCOME);
       }
       if (upstream) reportSaturation(site, false);
-      const task: Task = { abandoned: false, startedAt: Date.now() };
+      const task: Task = { abandoned: false, startedAt: monotonicNow() };
       // Counted BEFORE the call starts (so a synchronous re-entry cannot overshoot),
       // released exactly once in `settle` — when the call itself settles, never earlier.
       if (upstream) {
