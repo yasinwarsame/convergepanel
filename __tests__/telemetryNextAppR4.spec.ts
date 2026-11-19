@@ -334,7 +334,7 @@ d("real Next.js production build (contained)", () => {
       };
     }).then(async (s) => ({ ...s, cookie: JSON.stringify(await page.context().cookies()) })); // every cookie, incl. HttpOnly
   for (const mode of ["normal", "session-getter-throws"] as StorageMode[]) {
-    it(`invitation acceptance link (${mode}): credential gone before any SDK initializes; in no request, cookie, localStorage, history entry or telemetry payload`, async () => {
+    it(`invitation acceptance link (${mode}): the document never initializes telemetry; credential in no request, cookie, localStorage or history entry`, async () => {
       const run = await open(`${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`, mode);
       try {
         const atLoad = await browserState(run.page);
@@ -343,7 +343,16 @@ d("real Next.js production build (contained)", () => {
         // on the pre-existing continuity path it lands in the existing sessionStorage envelope), then go to the static login URL.
         if (mode === "normal") await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
         else await run.page.waitForTimeout(6_000); // PRE-EXISTING: the page reads window.sessionStorage directly and cannot proceed when site data is blocked
+        await run.page.waitForTimeout(6_000); // well past both SDKs' init + first flush in every other test
         const afterRedirect = await browserState(run.page);
+        // The acceptance-link DOCUMENT never initializes telemetry — also after its client-side redirect to /login: no
+        // Sentry tunnel request, no PostHog request, no PostHog persistence. (The navigation timing entry keeps the
+        // original URL for the document's lifetime; no SDK may run in it.)
+        await run.save();
+        const inAcceptanceDocument = await run.all();
+        expect(leakList(inAcceptanceDocument.filter(isTelemetry))).toEqual([]);
+        expect(afterRedirect.local).not.toMatch(/(^|;)ph_/);
+        expect(await run.page.evaluate(() => (performance.getEntriesByType("navigation")[0] as PerformanceEntry | undefined)?.name ?? "")).toContain(INV_TOKEN); // why: the entry is immutable
         if (mode === "normal") {
           expect(afterRedirect.href).toBe(`${BASE}/login?redirect=${enc(ACCEPT)}`);
           expect(afterRedirect.session).toContain("convergepanel.invitationAcceptance.v1=");
@@ -371,12 +380,9 @@ d("real Next.js production build (contained)", () => {
           expect(s.historyState).not.toContain(INV_TOKEN);
           expect(s.referrer).not.toContain(INV_TOKEN);
         }
-        // PostHog persistence exists and was examined (positive control for the localStorage check).
-        expect(afterRedirect.local).toMatch(/ph_phc_synthetic_posthog|__ph_opt_in_out|ph_/);
         await run.page.waitForTimeout(6_000);
         await run.save();
         const all = await assertContained(run);
-        expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(true);
         // Every request at both layers — URL, every header (Cookie, Referer, Next-Router-State-Tree) and decoded body,
         // telemetry or first-party — is free of the credential. The document request never carries a fragment.
         expect(leakList(requestsContaining(all, INV_TOKEN))).toEqual([]);

@@ -24,7 +24,7 @@
  *     dropped too: an over-decoding producer (signup's `safeRedirect` decodes
  *     the nested target once more before re-encoding it) splits a claim at its
  *     own `&`, so the boundary is unreliable there;
- *   - fragment: a plain anchor or a registered routing fragment is kept; a
+ *   - fragment: a plain anchor is kept (no key=value routing fragment is kept on any path); a
  *     hand-off fragment (`/verify#text=`) is captured; anything else is dropped.
  *     A nested target keeps no fragment.
  * The path is never rewritten (no producer puts content in a path segment;

@@ -6,6 +6,7 @@ import * as Sentry from "@sentry/nextjs";
 import { resolveSentryDsn } from "./lib/telemetry/sentryDsn";
 import { scrubReplayRecordingEvent, scrubSentryBreadcrumb, scrubSentryEvent } from "./lib/privacy/sentryScrub";
 import { scrubUrlBeforeTelemetry } from "./lib/privacy/preTelemetryUrlScrub";
+import { isTelemetryFreeDocument } from "./lib/telemetry/telemetryFreeDocument";
 
 // PR #329 R4/R5 (review MAJOR-1): FIRST, before any SDK reads the URL. Moves claim
 // text (`#text=`, legacy `?text=` / `?claim=` / `?q=`, and the same nested in
@@ -15,13 +16,20 @@ import { scrubUrlBeforeTelemetry } from "./lib/privacy/preTelemetryUrlScrub";
 // runs before React hydrates and therefore before PostHog's init effect too.
 scrubUrlBeforeTelemetry();
 
+// Private advisory GHSA-655j-5f43-92pw: a document loaded as the workspace invitation
+// acceptance link never initializes Sentry, for its whole lifetime. The browser keeps the
+// original URL (credential fragment included) in the navigation timing entry, which the
+// SDK reads for pageload and Replay spans; scrubbing the address bar cannot change it.
+// See lib/telemetry/telemetryFreeDocument.ts.
+const telemetryFreeDocument = isTelemetryFreeDocument();
+
 // Telemetry isolation: only an explicitly configured DSN is used. Missing or
 // empty means browser Sentry is never initialized (see lib/telemetry/sentryDsn.ts).
 // The literal `process.env.NEXT_PUBLIC_SENTRY_DSN` reference is required for
 // Next.js build-time inlining.
 const dsn = resolveSentryDsn(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
-if (dsn !== undefined) {
+if (dsn !== undefined && !telemetryFreeDocument) {
   Sentry.init({
     dsn,
     enabled: process.env.NODE_ENV === "production",
