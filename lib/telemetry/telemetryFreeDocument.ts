@@ -36,6 +36,28 @@ function pathnameOf(url: string): string | null {
   }
 }
 
+/**
+ * Correction round (review R2 NIT-1): a navigation entry whose fragment carries an invitation-credential-shaped key
+ * (`token` / `invitationId`, any case) makes the document telemetry-free whatever its path — e.g. a non-canonical
+ * spelling such as `/workspace-invitations/%61ccept#…` that the router still serves but `isAcceptancePath` does not
+ * match. Tolerant parse; an unparseable fragment that mentions either key also counts (fail closed).
+ */
+function hasCredentialShapedFragment(url: string): boolean {
+  const i = url.indexOf("#");
+  if (i < 0) return false;
+  const fragment = url.slice(i + 1);
+  if (fragment === "") return false;
+  try {
+    for (const key of new URLSearchParams(fragment).keys()) {
+      const k = key.toLowerCase();
+      if (k === "token" || k === "invitationid") return true;
+    }
+    return false;
+  } catch {
+    return /(^|[&;])\s*(token|invitationid)\s*=/i.test(fragment);
+  }
+}
+
 function isAcceptancePath(pathname: string | null | undefined): boolean {
   return pathname === INVITATION_ACCEPTANCE_ROUTE_PATH || pathname === `${INVITATION_ACCEPTANCE_ROUTE_PATH}/`;
 }
@@ -67,7 +89,7 @@ function decideFromDocumentUrl(win: DocWindow): boolean {
   } catch {
     navigationName = undefined;
   }
-  if (navigationName !== undefined) return isAcceptancePath(pathnameOf(navigationName));
+  if (navigationName !== undefined) return isAcceptancePath(pathnameOf(navigationName)) || hasCredentialShapedFragment(navigationName);
   try {
     return isAcceptancePath(String(win.location?.pathname ?? ""));
   } catch {

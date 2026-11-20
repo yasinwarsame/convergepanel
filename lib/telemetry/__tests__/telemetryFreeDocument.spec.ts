@@ -76,6 +76,21 @@ describe("isTelemetryFreeDocument", () => {
     expect(fresh().isTelemetryFreeDocument({ performance: login, sessionStorage: { getItem: () => { throw new Error("x"); } } })).toBe(false);
   });
 
+  it("correction round (NIT-1): a navigation entry with a credential-shaped fragment is telemetry-free on any path (non-canonical spellings); other fragments are not", () => {
+    for (const u of [
+      "https://convergepanel.com/workspace-invitations/%61ccept#invitationId=i&token=t",
+      "https://convergepanel.com/Workspace-Invitations/Accept#invitationId=i&token=t",
+      "https://convergepanel.com/workspace-invitations//accept#token=t",
+      "https://convergepanel.com/pricing#TOKEN=t",
+      "https://convergepanel.com/x#a=1&InvitationId=i",
+    ]) {
+      expect(fresh().isTelemetryFreeDocument({ performance: nav(u) })).toBe(true);
+    }
+    for (const u of ["https://convergepanel.com/pricing#plans", "https://convergepanel.com/verify#text=abc", "https://convergepanel.com/pricing?token=x", "https://convergepanel.com/pricing#"]) {
+      expect(fresh().isTelemetryFreeDocument({ performance: nav(u) })).toBe(false);
+    }
+  });
+
   it("covers the trailing-slash acceptance URL and no other path; no window → false (server render)", () => {
     expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations/accept/#x=1") })).toBe(true);
     expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations/acceptance") })).toBe(false);

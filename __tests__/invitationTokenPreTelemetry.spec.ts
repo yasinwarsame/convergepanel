@@ -199,12 +199,13 @@ describe("acceptance-link documents: neither SDK ever initializes", () => {
 });
 
 describe("every other document: both SDKs initialize, with a clean URL", () => {
-  it("a credential-shaped fragment on another path is dropped before init and never handed off", () => {
-    installWindow(`/workspace#invitationId=${INV_ID}&token=${TOKEN}`);
+  it("a credential-shaped fragment on another path is dropped and never handed off; correction round (NIT-1): its navigation entry keeps it, so that document is telemetry-free too", () => {
+    const env = installWindow(`/workspace#invitationId=${INV_ID}&token=${TOKEN}`);
     require("../instrumentation-client");
     mountPostHogProvider();
-    expect(atInit.sentry?.href).toBe("https://convergepanel.com/workspace");
-    expect(atInit.posthog?.href).toBe("https://convergepanel.com/workspace");
+    expect(env.location.href).toBe("https://convergepanel.com/workspace");
+    expect(atInit.sentry).toBeUndefined();
+    expect(atInit.posthog).toBeUndefined();
     const { takeCapturedInvitationCredential } = require("@/lib/client/invitationAcceptance");
     expect(takeCapturedInvitationCredential()).toBeNull();
   });

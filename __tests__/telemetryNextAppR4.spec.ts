@@ -497,6 +497,24 @@ d("real Next.js production build (contained)", () => {
     });
   }
 
+  it("NIT-1: a non-canonical acceptance URL (percent-encoded path) fails closed: no credential hand-off, no telemetry in that document, the credential in no request", async () => {
+    const run = await open(`/workspace-invitations/%61ccept#invitationId=${INV_ID}&token=${INV_TOKEN}`, "normal");
+    try {
+      await run.page.waitForTimeout(8_000);
+      const state = await browserState(run.page);
+      expect(state.href).not.toContain(INV_TOKEN);
+      expect(state.session).not.toContain(INV_TOKEN); // never accepted from a non-canonical URL
+      expect(await navName(run.page)).toContain(INV_TOKEN); // why: the immutable entry still holds it
+      await run.save();
+      const all = await assertContained(run);
+      expect(leakList(all.filter(isTelemetry))).toEqual([]);
+      expect(leakList(requestsContaining(all, INV_TOKEN))).toEqual([]);
+      expect(leakList(requestsContaining(all, INV_ID))).toEqual([]);
+    } finally {
+      await run.close();
+    }
+  });
+
   it("positive control: Sentry traffic went through the /monitoring tunnel and was answered locally; the server guard log is empty", () => {
     const tunnel = allObserved.filter((r) => r.decision === "sentry-tunnel");
     expect(tunnel.length).toBeGreaterThan(0);
