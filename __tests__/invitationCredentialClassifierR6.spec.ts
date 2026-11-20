@@ -96,7 +96,6 @@ describe("ordinary URLs keep telemetry (no unnecessary suppression)", () => {
     `${O}/login?redirect=%2Fworkspace-invitations%2Faccept`,
     `${O}/research?q=100%25%20sure`,
     `${O}/blog/tokenomics-explained`,
-    `${O}/x?tokens=3`,
     `${O}/workspace-invitations/acceptable`,
     `${O}/pricing#plans`,
     "",

@@ -33,7 +33,7 @@
  *   might arrive — is ever allowed to regress the UI away from success.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { sendEmailVerification, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
@@ -45,6 +45,7 @@ import {
   handOffInvitationCredential,
   hasInvitationAcceptanceEnvelope,
   isInvitationDocumentSuperseded,
+  subscribeInvitationDocumentSuperseded,
   parseInvitationFragment,
   restoreInvitationAcceptance,
   scrubInvitationAcceptanceHistory,
@@ -97,6 +98,9 @@ export default function AcceptInvitationClient() {
   const [accountSwitchError, setAccountSwitchError] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
 
+  // Review R7 F3/F4: re-render the moment this document hands the invitation off (see the render below).
+  const superseded = useSyncExternalStore(subscribeInvitationDocumentSuperseded, isInvitationDocumentSuperseded, () => false);
+
   const credentialRef = useRef<InvitationAcceptanceCredential | null>(null);
   const captureDoneRef = useRef(false);
   const inFlightRef = useRef(false);
@@ -108,6 +112,9 @@ export default function AcceptInvitationClient() {
     captureDoneRef.current = true;
     setViewState("capturing");
     if (typeof window === "undefined") return;
+    // Review R7 F4: this document already handed the invitation to a successor (e.g. the page chunk loaded after the
+    // fragment guard fired). Nothing to do here: stay in the loading view; never "Invitation unavailable".
+    if (isInvitationDocumentSuperseded()) return;
 
     // GHSA-655j-5f43-92pw: on a full page load the pre-telemetry scrub (instrumentation-client.ts, before either SDK
     // initializes) has already captured the credential into memory and removed the fragment. Take it exactly once.
@@ -342,17 +349,20 @@ export default function AcceptInvitationClient() {
   }, [attemptAcceptance]);
 
   const handleSendVerification = useCallback(async () => {
-    if (!user || verificationSendState === "pending") return;
+    if (!user || verificationSendState === "pending" || isInvitationDocumentSuperseded()) return; // review R7 F3
     setVerificationSendState("pending");
     try {
       await sendEmailVerification(user);
+      if (isInvitationDocumentSuperseded()) return;
       setVerificationSendState("sent");
     } catch {
+      if (isInvitationDocumentSuperseded()) return;
       setVerificationSendState("failed");
     }
   }, [user, verificationSendState]);
 
   const handleVerifiedRetry = useCallback(async () => {
+    if (isInvitationDocumentSuperseded()) return; // review R7 F3 (handleRetry re-checks after the reload)
     if (user) {
       try {
         await user.reload();
@@ -365,7 +375,10 @@ export default function AcceptInvitationClient() {
   }, [user, handleRetry]);
 
   const handleSwitchAccount = useCallback(async () => {
-    if (isInvitationDocumentSuperseded()) return; // review R6 MINOR-3
+    // Review R6 MINOR-3 / R7 F3: ownership is checked immediately before EVERY consequential step. Once a later
+    // invitation owns the tab, this document never signs out (shared auth state the successor relies on), never
+    // touches the envelope, never navigates and never shows an error about the earlier invitation.
+    if (isInvitationDocumentSuperseded()) return;
     const credential = credentialRef.current;
     if (credential) {
       storeInvitationAcceptance(window.sessionStorage, credential, Date.now());
@@ -374,13 +387,18 @@ export default function AcceptInvitationClient() {
     beginLogout();
     try {
       await clearServerSession();
+      if (isInvitationDocumentSuperseded()) return;
       await signOut(auth);
-      if (isInvitationDocumentSuperseded()) return; // review R6 MINOR-3: a later invitation owns the tab now
+      if (isInvitationDocumentSuperseded()) return;
       router.replace(LOGIN_REDIRECT_HREF);
     } catch {
+      if (isInvitationDocumentSuperseded()) return;
       setAccountSwitchError(true);
     }
   }, [beginLogout, router]);
+
+  // Review R7 F3/F4: rendering follows the document's hand-off state: once superseded, only the loading view.
+  if (superseded || isInvitationDocumentSuperseded()) return <p>Loading your invitation…</p>;
 
   switch (viewState) {
     case "initializing":

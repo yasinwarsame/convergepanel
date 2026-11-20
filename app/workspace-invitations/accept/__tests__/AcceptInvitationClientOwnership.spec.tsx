@@ -23,7 +23,8 @@ jest.mock("next/navigation", () => ({
 const mockedUseAuth = jest.fn();
 jest.mock("@/components/AuthProvider", () => ({ useAuth: () => mockedUseAuth() }));
 const mockedSignOut = jest.fn();
-jest.mock("firebase/auth", () => ({ sendEmailVerification: jest.fn(), signOut: (...a: unknown[]) => mockedSignOut(...a) }));
+const mockedSendEmailVerification = jest.fn();
+jest.mock("firebase/auth", () => ({ sendEmailVerification: (...a: unknown[]) => mockedSendEmailVerification(...a), signOut: (...a: unknown[]) => mockedSignOut(...a) }));
 jest.mock("@/lib/firebase/client", () => ({ auth: { __fakeAuth: true } }));
 const mockTelemetryFree = jest.fn(() => true);
 jest.mock("@/lib/telemetry/telemetryFreeDocument", () => ({ isTelemetryFreeDocument: () => mockTelemetryFree() }));
@@ -168,7 +169,9 @@ describe("R6 MINOR-3: invitation B stays authoritative when A's in-flight reques
     expect(envelope(w)).toEqual(atHandOff); // same credential AND same storedAt: not restored, not cleared, not extended
     expect(w.storage.setItem.mock.calls.length).toBe(setCalls);
     expect(w.storage.removeItem.mock.calls.length).toBe(removeCalls);
-    expect(text(r)).toContain("Accepting your invitation"); // never A's success/failure view
+    // never A's success/failure view: review R7 F3/F4 — a superseded document renders only the loading view
+    expect(r.root.findAllByType("h1")).toHaveLength(0);
+    expect(text(r)).toContain("Loading your invitation");
     expect(mockedRouterReplace).not.toHaveBeenCalled();
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
@@ -232,10 +235,14 @@ describe("R6 MINOR-3: invitation B stays authoritative when A's in-flight reques
     (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 403, json: async () => ({ errorCode: "invitation_email_mismatch" }) });
     const r = await mount(doc, auth());
     const button = r.root.findAllByType("button").find((b) => String(b.props.children).includes("Switch"))!;
-    secondLinkArrives(doc, w);
+    const onClick = button.props.onClick; // a click racing the hand-off
+    await doc.TR.act(async () => {
+      secondLinkArrives(doc, w);
+    });
+    expect(r.root.findAllByType("button")).toHaveLength(0); // review R7 F4: the superseded document shows no controls
     const atHandOff = envelope(w);
     await doc.TR.act(async () => {
-      await button.props.onClick();
+      await onClick();
     });
     expect(mockedClearServerSession).not.toHaveBeenCalled();
     expect(mockedSignOut).not.toHaveBeenCalled();
@@ -250,9 +257,12 @@ describe("R6 MINOR-3: invitation B stays authoritative when A's in-flight reques
     const r = await mount(doc, auth());
     const retry = r.root.findAllByType("button").find((b) => String(b.props.children).includes("Try again") || String(b.props.children).includes("Retry"));
     expect(retry).toBeDefined();
-    secondLinkArrives(doc, w);
+    const onClick = retry!.props.onClick;
     await doc.TR.act(async () => {
-      retry!.props.onClick();
+      secondLinkArrives(doc, w);
+    });
+    await doc.TR.act(async () => {
+      onClick();
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
@@ -302,6 +312,144 @@ describe("R6 MINOR-3: invitation B stays authoritative when A's in-flight reques
     expect(doc.inv.isInvitationDocumentSuperseded()).toBe(false);
     doc.inv.storeInvitationAcceptance(s, { invitationId: ID_A, token: SECRET_A }, Date.now());
     expect(doc.inv.restoreInvitationAcceptance(s, Date.now())).toMatchObject({ invitationId: ID_A });
+  });
+});
+
+describe("R7 F3: Switch account continuations after B took over (deferred server session clear / sign-out)", () => {
+  async function wrongAccountDocument() {
+    const doc = loadDocument();
+    const w = setWindow(`#invitationId=${ID_A}&token=${SECRET_A}`);
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 403, json: async () => ({ errorCode: "invitation_email_mismatch" }) });
+    const r = await mount(doc, auth());
+    expect(text(r)).toContain("Different account");
+    const button = r.root.findAllByType("button").find((b) => String(b.props.children).includes("Switch"))!;
+    return { doc, w, r, button };
+  }
+
+  it.each([
+    ["clearServerSession resolves after B", "clear", "resolve"],
+    ["clearServerSession rejects after B", "clear", "reject"],
+    ["signOut resolves after B", "signOut", "resolve"],
+    ["signOut rejects after B", "signOut", "reject"],
+  ] as const)("%s: no sign-out after the hand-off, no navigation, no error view, B's envelope unchanged", async (_n, where, how) => {
+    const { doc, w, r, button } = await wrongAccountDocument();
+    const pending = deferred<void>();
+    if (where === "clear") mockedClearServerSession.mockReturnValueOnce(pending.promise);
+    else {
+      mockedClearServerSession.mockResolvedValueOnce(undefined);
+      mockedSignOut.mockReturnValueOnce(pending.promise);
+    }
+    let clicked!: Promise<unknown>;
+    await doc.TR.act(async () => {
+      clicked = button.props.onClick();
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    const signOutsBefore = mockedSignOut.mock.calls.length;
+    secondLinkArrives(doc, w);
+    const atHandOff = envelope(w);
+    await doc.TR.act(async () => {
+      if (how === "resolve") pending.resolve();
+      else pending.reject(new Error("network"));
+      await clicked;
+    });
+    expect(mockedSignOut.mock.calls.length).toBe(signOutsBefore); // nothing new after the hand-off
+    if (where === "clear") expect(mockedSignOut).not.toHaveBeenCalled();
+    expect(mockedRouterReplace).not.toHaveBeenCalled();
+    expect(text(r)).not.toContain("Couldn");
+    expect(r.root.findAllByType("h1")).toHaveLength(0);
+    expect(text(r)).toContain("Loading your invitation");
+    expect(envelope(w)).toEqual(atHandOff);
+  });
+
+  it("control: without a hand-off, the same deferred switch DOES sign out and redirect (assertions can fail)", async () => {
+    const { doc, button } = await wrongAccountDocument();
+    const pending = deferred<void>();
+    mockedClearServerSession.mockReturnValueOnce(pending.promise);
+    mockedSignOut.mockResolvedValueOnce(undefined);
+    let clicked!: Promise<unknown>;
+    await doc.TR.act(async () => {
+      clicked = button.props.onClick();
+    });
+    await doc.TR.act(async () => {
+      pending.resolve();
+      await clicked;
+    });
+    expect(mockedSignOut).toHaveBeenCalledTimes(1);
+    expect(mockedRouterReplace).toHaveBeenCalledTimes(1);
+  });
+
+  it("control: without a hand-off, a sign-out failure DOES show the error", async () => {
+    const { doc, r, button } = await wrongAccountDocument();
+    mockedClearServerSession.mockResolvedValueOnce(undefined);
+    mockedSignOut.mockRejectedValueOnce(new Error("x"));
+    await doc.TR.act(async () => {
+      await button.props.onClick();
+    });
+    expect(text(r)).toContain("Couldn");
+  });
+});
+
+describe("R7 F4: a page that mounts after its document was superseded", () => {
+  it("envelope-restore document, guard hands off B before the page mounts: loading view only, no restore, no fetch, no navigation", async () => {
+    const doc = loadDocument();
+    const w = setWindow("");
+    w.storage.backing.set(KEY, JSON.stringify({ version: 1, invitationId: ID_A, token: SECRET_A, storedAt: Date.now() }));
+    secondLinkArrives(doc, w); // before the page chunk mounts
+    const atHandOff = envelope(w);
+    const r = await mount(doc, auth());
+    expect(r.root.findAllByType("h1")).toHaveLength(0); // never "Invitation unavailable"
+    expect(text(r)).toContain("Loading your invitation");
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockedRouterReplace).not.toHaveBeenCalled();
+    expect(envelope(w)).toEqual(atHandOff);
+  });
+
+  it("same, signed out: no store of anything, no sign-in redirect", async () => {
+    const doc = loadDocument();
+    const w = setWindow("");
+    secondLinkArrives(doc, w);
+    const sets = w.storage.setItem.mock.calls.length;
+    const r = await mount(doc, auth({ user: null, authReady: true, syncState: "signed_out", canMutate: false }));
+    expect(text(r)).toContain("Loading your invitation");
+    expect(w.storage.setItem.mock.calls.length).toBe(sets);
+    expect(mockedRouterReplace).not.toHaveBeenCalled();
+  });
+
+  it("control: the same document WITHOUT a hand-off and without an envelope shows 'Invitation unavailable'", async () => {
+    const doc = loadDocument();
+    setWindow("");
+    const r = await mount(doc, auth());
+    expect(text(r)).toContain("Invitation unavailable");
+  });
+
+  it("control: without a hand-off the same verification request IS sent (the assertion can fail)", async () => {
+    const doc = loadDocument();
+    setWindow(`#invitationId=${ID_A}&token=${SECRET_A}`);
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 403, json: async () => ({ errorCode: "email_verification_required" }) });
+    mockedSendEmailVerification.mockResolvedValueOnce(undefined);
+    const r = await mount(doc, auth());
+    const send = r.root.findAllByType("button").find((b) => /verification|Send/i.test(String(b.props.children)))!;
+    await doc.TR.act(async () => {
+      await send.props.onClick();
+    });
+    expect(mockedSendEmailVerification).toHaveBeenCalledTimes(1);
+  });
+
+  it("verification e-mail requested after the hand-off is not sent", async () => {
+    const doc = loadDocument();
+    const w = setWindow(`#invitationId=${ID_A}&token=${SECRET_A}`);
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 403, json: async () => ({ errorCode: "email_verification_required" }) });
+    const r = await mount(doc, auth());
+    const send = r.root.findAllByType("button").find((b) => /verification|Send/i.test(String(b.props.children)));
+    expect(send).toBeDefined();
+    const onClick = send!.props.onClick;
+    await doc.TR.act(async () => {
+      secondLinkArrives(doc, w);
+    });
+    await doc.TR.act(async () => {
+      await onClick();
+    });
+    expect(mockedSendEmailVerification).not.toHaveBeenCalled();
   });
 });
 

@@ -111,6 +111,19 @@ export function isInvitationDocumentSuperseded(): boolean {
   return envelopeOwnershipHandedOff;
 }
 
+const supersededListeners = new Set<() => void>();
+
+/**
+ * Review R7 F3/F4: lets the page re-render deterministically at the moment of hand-off (`useSyncExternalStore`), so a
+ * superseded document shows only the loading view — never an earlier invitation's outcome or error. In-memory only.
+ */
+export function subscribeInvitationDocumentSuperseded(listener: () => void): () => void {
+  supersededListeners.add(listener);
+  return () => {
+    supersededListeners.delete(listener);
+  };
+}
+
 /**
  * Hands the tab's invitation state to a successor document: valid → the envelope now holds `credential` (it replaces
  * any earlier one); invalid → the envelope is cleared. Then this document loses envelope write access. The caller
@@ -121,7 +134,17 @@ export function handOffInvitationCredential(storage: Pick<Storage, "setItem" | "
     if (parsed && parsed.kind === "valid") writeEnvelope(storage, { invitationId: parsed.invitationId, token: parsed.token }, Date.now());
     else if (parsed) removeEnvelope(storage);
   }
+  const first = !envelopeOwnershipHandedOff;
   envelopeOwnershipHandedOff = true;
+  if (first) {
+    for (const listener of Array.from(supersededListeners)) {
+      try {
+        listener();
+      } catch {
+        /* a listener never blocks the hand-off */
+      }
+    }
+  }
 }
 
 function writeEnvelope(storage: Pick<Storage, "setItem">, credential: InvitationAcceptanceCredential, now: number): void {
@@ -241,37 +264,143 @@ export function captureInvitationCredentialFromLocation(location: { pathname: st
  */
 const MAX_CLASSIFIED_URL_LENGTH = 8192;
 const MAX_DECODE_LAYERS = 8;
-const WELL_FORMED_ESCAPE = /%([0-9a-fA-F]{2})/g;
+const MAX_ENTITY_PASSES = 3;
+const MAX_NORMALIZED_LENGTH = 4 * MAX_CLASSIFIED_URL_LENGTH;
+const ESCAPE_RUN = /(?:%[0-9a-fA-F]{2})+/g;
 const HAS_WELL_FORMED_ESCAPE = /%[0-9a-fA-F]{2}/;
-// A credential key (any case) preceded by start-of-text or any non-alphanumeric separator, followed by `=` (also as
-// an HTML entity). Matches `token=`, `?Token =`, `/accept#invitationId=`, `x_token=` (over-matching is the safe side).
-const CREDENTIAL_KEY = /(^|[^a-z0-9])(token|invitation[\s_-]*id)\s*(=|&#0*61;?|&#x0*3d;?|&equals;?)/i;
+// Review R7 F2: a credential key (any case, any prefix — `x_token`, `amptoken` from a mangled `&amp;`), optionally
+// plural or with an array suffix (`tokens`, `token[]`), up to three filler characters, then `=`, `:` or U+FFFD (an
+// invalid/overlong encoded separator such as `%C0%BD`). Matched on raw, decoded and normalized text.
+const CREDENTIAL_KEY = /(token|invitation[\s_.-]*id)s?(?:\[[^\]]{0,8}\])?[\s_.-]{0,3}(=|:|\uFFFD)/i;
+// Review R7 F1: URL component boundaries — path segments, query / fragment parts, keys and values. NOT `:`, `.`, `-`
+// or other characters that join parts of one identifier (e.g. a claim id `v1:findings:4:<43-char SHA-256 base64url>`).
+const URL_COMPONENT_SEPARATORS = /[/\?#&;=\s]+/;
+const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+// Review R7 F1: the invitation token is 32 random bytes as base64url — exactly 43 characters (see
+// lib/workspaces/invitationToken.ts). A STANDALONE URL component of exactly that shape with both letter cases (a
+// random token lacks one with probability ~1e-10; lower-case slugs are left alone) is treated as a token.
+const TOKEN_LENGTH = 43;
 const ACCEPTANCE_PATH_PREFIX = INVITATION_ACCEPTANCE_ROUTE_PATH.toLowerCase();
+
+/**
+ * Review R7 F2: an explicit, deliberately incomplete list of known lookalikes for the letters of the credential keys
+ * and the acceptance path (Cyrillic / Greek / small-capital letters, Unicode dashes). NFKC (below) handles fullwidth
+ * and compatibility forms; neither is a complete confusables solution, which is why invalid or ambiguous key-like
+ * material also fails closed (see `classifyText`).
+ */
+const KNOWN_ALIASES: Record<string, string> = {
+  "\u0430": "a", "\u0410": "A", "\u03B1": "a", "\u0391": "A", "\u1D00": "a",
+  "\u0501": "d", "\u1D05": "d",
+  "\u0435": "e", "\u0415": "E", "\u03B5": "e", "\u0395": "E", "\u1D07": "e",
+  "\u0456": "i", "\u0406": "I", "\u03B9": "i", "\u0399": "I", "\u0131": "i", "\u026A": "i", "\u04CF": "i",
+  "\u043A": "k", "\u041A": "K", "\u03BA": "k", "\u039A": "K", "\u1D0B": "k",
+  "\u0578": "n", "\u039D": "N", "\u0274": "n",
+  "\u043E": "o", "\u041E": "O", "\u03BF": "o", "\u039F": "O", "\u1D0F": "o", "\u0585": "o",
+  "\u0442": "t", "\u0422": "T", "\u03C4": "t", "\u03A4": "T", "\u1D1B": "t",
+  "\u03BD": "v", "\u0475": "v", "\u1D20": "v",
+  "\u0440": "p", "\u0420": "P", "\u0441": "c", "\u0421": "C", "\u0445": "x", "\u0425": "X", "\u0455": "s", "\u0405": "S",
+  "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-", "\uFE63": "-", "\uFF0D": "-",
+};
+const ALIAS_PATTERN = new RegExp(`[${Object.keys(KNOWN_ALIASES).join("")}]`, "g");
+// C0/C1 controls, soft hyphen, zero-width and bidi controls: invisible characters that can split a key.
+const INVISIBLES = /[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
+const NAMED_ENTITIES: Record<string, string> = { amp: "&", equals: "=", lowbar: "_", colon: ":", num: "#", quest: "?", sol: "/", period: ".", hyphen: "-", dash: "-" };
 
 type Decoded = { text: string; settled: boolean };
 
-/** Decodes well-formed escapes (and `+`) layer by layer; `settled` is false when the layer limit was reached first. */
+function decodeEscapeRun(run: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < run.length; i += 3) bytes.push(parseInt(run.slice(i + 1, i + 3), 16));
+  try {
+    if (typeof TextDecoder === "function") return new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(bytes)); // invalid/overlong \u2192 U+FFFD
+  } catch {
+    /* fall through */
+  }
+  return String.fromCharCode(...bytes);
+}
+
+/**
+ * Decodes well-formed escapes (as UTF-8; invalid or overlong sequences become U+FFFD) and `+`, layer by layer.
+ * A stray `%` is left as is. `settled` is false when the layer limit was reached first.
+ */
 function decodeBounded(input: string): Decoded {
   let text = input;
   for (let n = 0; n < MAX_DECODE_LAYERS; n++) {
-    const next = text.replace(/\+/g, " ").replace(WELL_FORMED_ESCAPE, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    const next = text.replace(/\+/g, " ").replace(ESCAPE_RUN, decodeEscapeRun);
     if (next === text) return { text, settled: true };
     text = next;
   }
   return { text, settled: !HAS_WELL_FORMED_ESCAPE.test(text) };
 }
 
+function codePointText(cp: number): string {
+  return Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "\uFFFD";
+}
+
+/**
+ * Review R7 F2: bounded normalization for MATCHING only (never used to accept anything): HTML entities (at most
+ * MAX_ENTITY_PASSES passes, e.g. `&amp;#61;`), NFKC, invisible characters removed, known aliases mapped. `null` when
+ * the result would exceed MAX_NORMALIZED_LENGTH (the caller fails closed).
+ */
+function normalizeForMatching(text: string): string | null {
+  let t = text;
+  for (let n = 0; n < MAX_ENTITY_PASSES; n++) {
+    const next = t
+      .replace(/&#x([0-9a-f]{1,6});?/gi, (_m, hex: string) => codePointText(parseInt(hex, 16)))
+      .replace(/&#([0-9]{1,7});?/g, (_m, dec: string) => codePointText(parseInt(dec, 10)))
+      .replace(/&([a-z]{2,8});/gi, (m, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? m);
+    if (next === t) break;
+    t = next;
+  }
+  try {
+    t = t.normalize("NFKC");
+  } catch {
+    /* keep the un-normalized text; the other checks still apply */
+  }
+  if (t.length > MAX_NORMALIZED_LENGTH) return null;
+  return t.replace(INVISIBLES, "").replace(ALIAS_PATTERN, (ch) => KNOWN_ALIASES[ch] ?? ch);
+}
+
+const mixedCase = (v: string) => /[A-Z]/.test(v) && /[a-z]/.test(v);
+
+/**
+ * Review R7 F1 (+ F2 missing separator): a URL component that is exactly token-shaped, or a credential key glued
+ * directly to a token-like value (`token<value>`). Linear: one split, one anchored test per component.
+ */
+function hasTokenShapedComponent(text: string): boolean {
+  for (const component of text.split(URL_COMPONENT_SEPARATORS)) {
+    if (component.length === TOKEN_LENGTH && TOKEN_SHAPE.test(component) && mixedCase(component)) return true;
+    const glued = /^(token|invitationid)([A-Za-z0-9_-]{32,})$/i.exec(component);
+    if (glued && mixedCase(glued[2])) return true;
+  }
+  return false;
+}
+
 function classifyText(raw: string): boolean {
   if (raw.length > MAX_CLASSIFIED_URL_LENGTH) return true; // too long to classify confidently: fail closed
   const decoded = decodeBounded(raw);
   if (!decoded.settled) return true; // still encoded after the layer limit: ambiguous, fail closed
-  return CREDENTIAL_KEY.test(raw) || CREDENTIAL_KEY.test(decoded.text);
+  const normalized = normalizeForMatching(decoded.text);
+  if (normalized === null) return true;
+  for (const t of [raw, decoded.text, normalized]) {
+    if (CREDENTIAL_KEY.test(t) || hasTokenShapedComponent(t)) return true;
+  }
+  // Uncertain: invalid UTF-8 (U+FFFD) or invisible characters next to key-like material cannot be classified
+  // confidently — fail closed.
+  if ((decoded.text.includes("\uFFFD") || INVISIBLES_TEST.test(decoded.text)) && /tok|invit/i.test(normalized)) return true;
+  return false;
 }
+const INVISIBLES_TEST = /[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/;
 
-/** Whether a decoded path is the acceptance route in any spelling (case, repeated slashes, trailing segments). */
+/**
+ * Whether a decoded path is the acceptance route in any spelling: case, repeated slashes, backslashes, known aliases,
+ * and any non-alphanumeric continuation (`accept/…`, `accept;x`, `accept.`, `accept#…`, `accept ` …).
+ */
 function isAcceptancePathPrefix(decodedPath: string): boolean {
-  const normalized = decodedPath.replace(/\\/g, "/").replace(/\/{2,}/g, "/").toLowerCase();
-  return normalized === ACCEPTANCE_PATH_PREFIX || normalized.startsWith(`${ACCEPTANCE_PATH_PREFIX}/`) || normalized.startsWith(ACCEPTANCE_PATH_PREFIX + "#") || normalized.startsWith(ACCEPTANCE_PATH_PREFIX + "?");
+  const normalized = (normalizeForMatching(decodedPath) ?? decodedPath).replace(/\\/g, "/").replace(/\/{2,}/g, "/").toLowerCase();
+  if (!normalized.startsWith(ACCEPTANCE_PATH_PREFIX)) return false;
+  const next = normalized.charAt(ACCEPTANCE_PATH_PREFIX.length);
+  return next === "" || !/[a-z0-9]/.test(next);
 }
 
 /**

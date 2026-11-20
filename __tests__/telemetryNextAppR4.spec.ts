@@ -740,6 +740,135 @@ d("real Next.js production build (contained)", () => {
     }
   });
 
+  // Review R7 F1 / F2: key-less token-shaped material and mangled credential keys. Same contract as the R6 cases.
+  const TOK43 = "ZQX7keylessSentinelAbCdEfGhIjKlMnOpQrSt0123"; // the real token format: 43 base64url characters
+  if (!/^[A-Za-z0-9_-]{43}$/.test(TOK43)) throw new Error("TOK43 must be a 43-character base64url sentinel");
+  const pctAll = (v: string) => v.split("").map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0").toUpperCase()).join("");
+  const fullyDecoded = (v: string) => {
+    for (let i = 0; i < 8; i++) {
+      const n = safeDecode(v);
+      if (n === v) break;
+      v = n;
+    }
+    return v;
+  };
+  const r7Links: Array<[string, string, string]> = [
+    ["key-less token as a path segment", `/pricing/${TOK43}`, TOK43],
+    ["key-less token as a bare query component", `/pricing?${TOK43}`, TOK43],
+    ["key-less token as a bare query component after another", `/pricing?a=1&${TOK43}`, TOK43],
+    ["fully percent-encoded key-less token in the query", `/pricing?${pctAll(TOK43)}`, TOK43],
+    ["key-less token after an encoded slash", `/pricing%2F${TOK43}`, TOK43],
+    ["fullwidth = (as Chromium encodes it)", `/pricing?invitationId%EF%BC%9D${INV_ID}&token%EF%BC%9D${INV_TOKEN}`, INV_TOKEN],
+    ["overlong encoded =", `/pricing?token%C0%BD${INV_TOKEN}`, INV_TOKEN],
+    ["Cyrillic letter in the key", `/pricing?t%D0%BEken=${INV_TOKEN}`, INV_TOKEN],
+    ["NUL inside the key", `/pricing?t%00oken=${INV_TOKEN}`, INV_TOKEN],
+    ["colon separator", `/pricing?token:${INV_TOKEN}`, INV_TOKEN],
+  ];
+  for (const [name, link, needle] of r7Links) {
+    it(`R7: ${name} → that document never initializes telemetry; nothing accepted or persisted; a clean load restores telemetry`, async () => {
+      const run = await open(link, "normal");
+      try {
+        expect(fullyDecoded(await navName(run.page))).toContain(needle); // the immutable entry holds it
+        await run.page.waitForTimeout(8_000);
+        await run.save();
+        const inDocument = (await run.all()).filter(isTelemetry);
+        console.log(`[next harness] R7 ${name}: ${inDocument.length} telemetry request(s); carrying it: ${requestsContaining(inDocument, needle).length}`);
+        expect(leakList(inDocument)).toEqual([]);
+        const state = await browserState(run.page);
+        for (const v of [state.session, state.local, state.cookie]) expect(fullyDecoded(v)).not.toContain(needle);
+        // When the token IS the document's path, Next's own history.state mirrors that path (exactly like the address bar
+        // and the browser history entry); no client code can remove it without rewriting the route. Anywhere else it must
+        // not appear. This is recorded, not hidden; it is not a telemetry channel (no SDK runs in this document).
+        const pathHoldsIt = fullyDecoded(new URL(state.href).pathname).includes(needle);
+        if (pathHoldsIt) console.log(`[next harness] R7 ${name}: token is the URL path; history.state mirrors the path: ${fullyDecoded(state.historyState).includes(needle)}`);
+        else expect(fullyDecoded(state.historyState)).not.toContain(needle);
+        const beforeClean = await run.mark();
+        await run.page.goto(`${BASE}/pricing`, { waitUntil: "load" });
+        await run.page.waitForTimeout(6_000);
+        await run.save();
+        expect((await telemetryDuring(run, beforeClean)).length).toBeGreaterThan(0);
+        const all = await assertContained(run);
+        expect(leakList(requestsContaining(all.filter(isTelemetry), needle))).toEqual([]);
+      } finally {
+        await run.close();
+      }
+    });
+  }
+
+  for (const [name, link] of [
+    ["43 token characters inside a longer identifier", `/pricing?ref=${TOK43}xyz`],
+    ["a 43-character lower-case slug", "/pricing?slug=how-to-compare-answers-from-many-llms-fast"],
+  ] as const) {
+    it(`R7 benign control: ${name} → an ordinary document: telemetry runs`, async () => {
+      const run = await open(link, "normal");
+      try {
+        await run.page.waitForTimeout(6_000);
+        await run.save();
+        expect((await run.all()).filter(isTelemetry).length).toBeGreaterThan(0);
+        await assertContained(run);
+      } finally {
+        await run.close();
+      }
+    });
+  }
+
+  it("R7 F4: an envelope-restore acceptance document whose page code loads only after a second link B took over shows no 'Invitation unavailable' and changes nothing; the fresh document carries B", async () => {
+    const run = await open(`${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`, "normal");
+    let releaseChunk: () => void = () => undefined;
+    let releaseSuccessor: () => void = () => undefined;
+    try {
+      await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 }); // envelope A written (signed out)
+      // Every document records, in this tab's storage (survives into the next document), whether it ever rendered the
+      // 'Invitation unavailable' view, and what the envelope held at its start.
+      await run.page.addInitScript(() => {
+        (window as any).__cpEnvelopeAtStart = sessionStorage.getItem("convergepanel.invitationAcceptance.v1") ?? "";
+        const watch = () => {
+          if ((document.body?.innerText ?? "").includes("Invitation unavailable")) sessionStorage.setItem("cp.harness.sawUnavailable", location.pathname);
+        };
+        new MutationObserver(watch).observe(document, { subtree: true, childList: true, characterData: true });
+      });
+      const chunkHeld = new Promise<void>((r) => (releaseChunk = r));
+      const successorHeld = new Promise<void>((r) => (releaseSuccessor = r));
+      let documents = 0;
+      await run.page.route(/\/_next\/static\/chunks\/app\/workspace-invitations\/accept\/page-[^/]+\.js/, async (route) => {
+        await chunkHeld;
+        await route.fallback();
+      });
+      await run.page.route((u) => u.pathname === ACCEPT, async (route) => {
+        if (route.request().resourceType() === "document" && ++documents === 2) await successorHeld;
+        await route.fallback();
+      });
+      await run.page.goto(`${BASE}${ACCEPT}`, { waitUntil: "commit" }); // envelope-restore document, page code held
+      await run.page.waitForFunction(() => performance.getEntriesByType("resource").some((e) => /main-app/.test(e.name)), null, { timeout: 20_000 });
+      await run.page.waitForTimeout(1_000); // the pre-SDK guard is installed (main-app ran)
+      await run.page.evaluate((h) => {
+        location.hash = h;
+      }, `invitationId=${INV_ID2}&token=${INV_TOKEN2}`);
+      const deadline = Date.now() + 10_000;
+      while (documents < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+      expect(documents).toBe(2); // handed off; successor held
+      releaseChunk(); // the superseded document's page mounts late
+      await new Promise((r) => setTimeout(r, 5_000));
+      releaseSuccessor();
+      await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+      await run.page.waitForTimeout(2_000);
+      const saw = await run.page.evaluate(() => sessionStorage.getItem("cp.harness.sawUnavailable"));
+      const atStart = String(await run.page.evaluate(() => (window as any).__cpEnvelopeAtStart ?? ""));
+      console.log(`[next harness] R7 F4: superseded document rendered 'Invitation unavailable': ${saw !== null}; successor started with B: ${atStart.includes(INV_TOKEN2)}, A: ${atStart.includes(INV_TOKEN)}`);
+      expect(saw).toBeNull();
+      expect(atStart).toContain(INV_TOKEN2);
+      expect(atStart).not.toContain(INV_TOKEN);
+      await run.page.waitForTimeout(4_000);
+      await run.save();
+      const all = await assertContained(run);
+      for (const needle of [INV_TOKEN, INV_ID, INV_TOKEN2, INV_ID2]) expect(leakList(requestsContaining(all.filter(isTelemetry), needle))).toEqual([]);
+    } finally {
+      releaseChunk();
+      releaseSuccessor();
+      await run.close();
+    }
+  });
+
   it("positive control: Sentry traffic went through the /monitoring tunnel and was answered locally; the server guard log is empty", () => {
     const tunnel = allObserved.filter((r) => r.decision === "sentry-tunnel");
     expect(tunnel.length).toBeGreaterThan(0);
