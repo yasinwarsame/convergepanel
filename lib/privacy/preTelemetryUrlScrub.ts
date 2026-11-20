@@ -32,8 +32,10 @@
  * scripts ran. Dependency-light (no React, no Firebase). Never throws, never logs.
  */
 import { migrateContentFromUrl } from "@/lib/client/verifyPrefill";
+import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
 import {
   captureInvitationCredentialFromLocation,
+  hasInvitationAcceptanceEnvelope,
   installInvitationFragmentNavigationGuard,
   purgeStaleInvitationAcceptance,
 } from "@/lib/client/invitationAcceptance";
@@ -72,6 +74,42 @@ function sanitizeReferrer(doc: { referrer?: string }): void {
   }
 }
 
+let bfcacheGuardInstalled = false;
+
+/**
+ * GHSA-655j-5f43-92pw (correction round, review R3 MAJOR-1): a telemetry-enabled document restored from the
+ * back/forward cache does not start again, so the once-per-document decision never sees an envelope written meanwhile
+ * by another document in this tab. On such a restore, if the envelope is present, the document is reloaded: the new
+ * document starts with the envelope present and is telemetry-free. Never logs; idempotent. The restored document's
+ * own unload flush (data it queued before it was cached, i.e. before the envelope existed) is still sent.
+ */
+function installBackForwardCacheGuard(win: ScrubWindow): void {
+  const w = win as unknown as {
+    addEventListener?: (type: string, fn: (e: { persisted?: boolean; stopImmediatePropagation?: () => void }) => void) => void;
+    location: { reload?: () => void };
+  };
+  if (bfcacheGuardInstalled || typeof w.addEventListener !== "function") return;
+  bfcacheGuardInstalled = true;
+  try {
+    w.addEventListener("pageshow", (event) => {
+      try {
+        if (!event?.persisted) return;
+        if (isTelemetryFreeDocument(win as unknown as Parameters<typeof isTelemetryFreeDocument>[0])) return;
+        if (!hasInvitationAcceptanceEnvelope(storageOf(win))) return;
+        // Registered before Sentry.init, so this runs first on restore, before any resumed timer task; no later
+        // pageshow listener (an SDK's included) runs in the restored document. Only its unload flush remains, which
+        // was queued before the restore.
+        event.stopImmediatePropagation?.();
+        w.location.reload?.();
+      } catch {
+        /* never throws */
+      }
+    });
+  } catch {
+    /* best effort */
+  }
+}
+
 export function scrubUrlBeforeTelemetry(win: ScrubWindow | undefined = typeof window !== "undefined" ? window : undefined): void {
   if (!win || !win.location) return;
   // GHSA-655j-5f43-92pw: hand the invitation acceptance credential to the page in memory FIRST; the scrub below then
@@ -82,6 +120,7 @@ export function scrubUrlBeforeTelemetry(win: ScrubWindow | undefined = typeof wi
   // registered here, before Sentry.init installs its history handlers, so it runs first.
   purgeStaleInvitationAcceptance(storageOf(win), Date.now());
   installInvitationFragmentNavigationGuard(win as unknown as Parameters<typeof installInvitationFragmentNavigationGuard>[0]);
+  installBackForwardCacheGuard(win);
   try {
     migrateContentFromUrl({ location: win.location, history: win.history ?? null, storage: storageOf(win), currentUid: null });
   } catch {

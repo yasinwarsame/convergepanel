@@ -40,6 +40,10 @@ jest.mock("firebase/auth", () => ({
 }));
 
 jest.mock("@/lib/firebase/client", () => ({ auth: { __fakeAuth: true } }));
+// The page runs in a telemetry-free document in every real flow (acceptance-origin or envelope-present); the
+// correction-round test below flips this to model a telemetry-enabled (back/forward-cache-restored) document.
+const mockTelemetryFree = jest.fn(() => true);
+jest.mock("@/lib/telemetry/telemetryFreeDocument", () => ({ isTelemetryFreeDocument: () => mockTelemetryFree() }));
 
 const mockedClearServerSession = jest.fn();
 jest.mock("@/lib/client/sessionSync", () => ({
@@ -166,6 +170,28 @@ describe("POST-LOGIN RESTORE", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(storage.backing.has(SESSION_STORAGE_KEY)).toBe(false);
+  });
+
+  it("correction round (review R3 MAJOR-1): in a telemetry-ENABLED document the envelope is never read or used: no POST, envelope untouched, the tab is moved to a fresh acceptance document", async () => {
+    mockTelemetryFree.mockReturnValue(false);
+    try {
+      const { win, storage } = setWindow({ hash: "" });
+      const replace = jest.fn();
+      (win.location as any).replace = replace;
+      const raw = JSON.stringify({ version: 1, invitationId: INVITATION_ID, token: SENTINEL, storedAt: Date.now() });
+      storage.backing.set(SESSION_STORAGE_KEY, raw);
+      const getItem = jest.spyOn(storage, "getItem");
+      const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+      expect(replace).toHaveBeenCalledWith(INVITATION_ACCEPTANCE_ROUTE_PATH);
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(storage.backing.get(SESSION_STORAGE_KEY)).toBe(raw);
+      // only the presence check may touch the key; the token value never leaves storage in this document
+      expect(getItem.mock.calls.length).toBeLessThanOrEqual(1);
+      expect(renderer.root.findAllByType("h1")).toHaveLength(0); // never "Invitation unavailable"
+      expect(renderer.root.findByType("p").props.children).toBe("Loading your invitation…");
+    } finally {
+      mockTelemetryFree.mockReturnValue(true);
+    }
   });
 
   it("enters invalid_or_expired when no hash and no restorable storage exist", async () => {

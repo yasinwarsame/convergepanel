@@ -49,6 +49,7 @@ const d = APP_DIR && chromiumAvailable() ? describe : describe.skip;
 type Recorded = RecordedRequest & { decision: RouteDecision };
 
 let browser: Browser | null = null;
+let bfcacheBrowser: Browser | null = null;
 let server: ChildProcess | null = null;
 let workDir = "";
 let guardLog = "";
@@ -99,13 +100,17 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (browser) await browser.close();
+  if (bfcacheBrowser) await bfcacheBrowser.close();
   if (server) server.kill("SIGTERM");
   if (workDir) rmSync(workDir, { recursive: true, force: true });
 });
 
-async function open(path: string, mode: StorageMode) {
+async function open(path: string, mode: StorageMode, opts: { bfcache?: boolean } = {}) {
   if (!browser) browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
+  // Review R3 MAJOR-1: Playwright disables the back/forward cache by default and the headless shell cannot use it;
+  // the full Chromium build with that default argument removed does.
+  if (opts.bfcache && !bfcacheBrowser) bfcacheBrowser = await chromium.launch({ headless: true, channel: "chromium", ignoreDefaultArgs: ["--disable-back-forward-cache"] });
+  const context = await (opts.bfcache ? bfcacheBrowser! : browser).newContext({
     userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
   });
   const network: Recorded[] = [];
@@ -166,6 +171,16 @@ async function open(path: string, mode: StorageMode) {
   return {
     page,
     websockets,
+    /** A point in time: network records so far and saved (earlier-document) page records so far. */
+    mark: async () => {
+      await Promise.all(pending);
+      return { network: network.length, saved: saved.length };
+    },
+    /** Every record after `m`: later network records, later saved page records, and the current document's page records. */
+    since: async (m: { network: number; saved: number }): Promise<Recorded[]> => {
+      await Promise.all(pending);
+      return [...network.slice(m.network), ...saved.slice(m.saved), ...(await pageRecords(page))];
+    },
     save: async () => {
       saved.push(...(await pageRecords(page)));
     },
@@ -398,7 +413,7 @@ d("real Next.js production build (contained)", () => {
   const INV_TOKEN2 = "ZQX7SECONDINVITETOKEN";
   const INV_ID2 = "inv_ZQX7SECONDSYNTH";
   const navName = (page: Page) => page.evaluate(() => (performance.getEntriesByType("navigation")[0] as PerformanceEntry | undefined)?.name ?? "");
-  const telemetryDuring = async (run: Awaited<ReturnType<typeof open>>, from: number) => (await run.all()).slice(from).filter(isTelemetry);
+  const telemetryDuring = async (run: Awaited<ReturnType<typeof open>>, from: { network: number; saved: number }) => (await run.since(from)).filter(isTelemetry);
   /** The acceptance POST exactly as AcceptInvitationClient sends it after restoring the envelope (signed-in branch; no Firebase in the harness). */
   const acceptancePost = (page: Page) =>
     page.evaluate(async (key) => {
@@ -421,7 +436,7 @@ d("real Next.js production build (contained)", () => {
       await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
       await run.page.waitForTimeout(2_000);
       await run.save();
-      const before = (await run.all()).length;
+      const before = await run.mark();
       await run.page.reload({ waitUntil: "load" });
       // A NEW document whose own URL is /login (navigation entry is clean) but whose tab holds the raw-token envelope.
       expect(await navName(run.page)).toBe(`${BASE}/login?redirect=${enc(ACCEPT)}`);
@@ -440,7 +455,8 @@ d("real Next.js production build (contained)", () => {
       expect(carrying.filter((r) => !new URL(r.url).pathname.startsWith("/api/workspace-invitations/"))).toEqual([]);
       // Telemetry resumes: the page clears the envelope on success; the next clean full-page load is an ordinary document.
       await run.page.evaluate((key) => sessionStorage.removeItem(key), ENVELOPE_KEY);
-      const beforeClean = (await run.all()).length;
+      await run.save();
+      const beforeClean = await run.mark();
       await run.page.goto(`${BASE}/pricing`, { waitUntil: "load" });
       await run.page.waitForTimeout(6_000);
       await run.save();
@@ -496,6 +512,66 @@ d("real Next.js production build (contained)", () => {
       }
     });
   }
+
+  it("review R3 MAJOR-1: an ordinary telemetry-on /login document restored from the back/forward cache after the invitation wrote the envelope never uses it with telemetry running", async () => {
+    const run = await open(`/login?redirect=${enc(ACCEPT)}`, "normal", { bfcache: true });
+    try {
+      await run.page.route("**/api/workspace-invitations/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, workspaceId: "ws_ZQX7SYNTH", alreadyMember: false }) }));
+      await run.page.evaluate(() => {
+        (window as any).__cpLoginDocument = true;
+        addEventListener("pageshow", (e) => ((window as any).__cpRestoredFromCache = (e as PageTransitionEvent).persisted));
+      });
+      await run.page.waitForTimeout(6_000); // L: an ordinary document, both SDKs running
+      await run.save();
+      expect((await run.all()).filter(isTelemetry).length).toBeGreaterThan(0);
+      // Same tab: the invitation link (new, telemetry-free document Y) writes the envelope and soft-redirects to /login.
+      // HARNESS LIMITATION (observed, R3): while L is frozen into the back/forward cache, one of L's own Sentry tunnel
+      // requests escapes Playwright's request routing, reaches the local app server, and the server's tunnel forward is
+      // refused by the egress guard (nothing leaves the machine). It is L's telemetry from BEFORE the invitation link
+      // was opened in this tab, so it cannot carry the credential. Those refused entries are checked and set aside here
+      // (host must be the Sentry ingest host); containment stays strict for everything after.
+      const guardBefore = guardAttempts().length;
+      await run.page.goto(`${BASE}${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`, { waitUntil: "load" });
+      await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+      await run.page.waitForTimeout(2_000);
+      const escaped = guardAttempts().slice(guardBefore);
+      expect(escaped.every((line) => JSON.parse(line).host === "o1.ingest.sentry.io")).toBe(true);
+      if (escaped.length > 0) {
+        console.log(`[next harness] R3 MAJOR-1: ${escaped.length} pre-invitation tunnel request(s) from the frozen /login document refused by the server egress guard (set aside)`);
+        writeFileSync(guardLog, guardAttempts().slice(0, guardBefore).map((l) => `${l}\n`).join(""));
+      }
+      await run.save();
+      const before = await run.mark();
+      // Back → L. Without the guard, L is restored from the cache WITH telemetry running and the envelope present.
+      await run.page.goBack({ waitUntil: "commit" }); // a cache restore fires no load event
+      await run.page.waitForTimeout(3_000);
+      const restoredLiveDocument = await run.page.evaluate(() => (window as any).__cpLoginDocument === true);
+      await run.save();
+      const fresh = await run.mark(); // from here on: the fresh document only
+      console.log(`[next harness] R3 MAJOR-1: after Back the telemetry-on /login document is ${restoredLiveDocument ? "STILL LIVE (restored from the cache)" : "gone (fresh document)"}`);
+      expect(restoredLiveDocument).toBe(false);
+      expect((await browserState(run.page)).session).toContain(INV_TOKEN); // the envelope is intact for the page
+      // After sign-in the login page soft-navigates to the acceptance page; then the acceptance POST; then an error (flushes Sentry).
+      await run.page.evaluate((p) => (window as any).next?.router?.push(p), ACCEPT);
+      await run.page.waitForTimeout(3_000);
+      await acceptancePost(run.page);
+      await run.page.evaluate(() => setTimeout(() => { throw new Error("zqx7 harness probe"); }, 0));
+      await run.page.waitForTimeout(6_000);
+      await run.save();
+      // Everything after Back: only the restored document's own unload flush (queued before the invitation existed)
+      // may appear, and it carries neither part of the credential. The fresh document after it sends nothing.
+      const afterBack = await telemetryDuring(run, before);
+      console.log(`[next harness] R3 MAJOR-1: ${afterBack.length} telemetry request(s) after Back (unload flush of the restored document)`);
+      expect(leakList(requestsContaining(afterBack, INV_TOKEN))).toEqual([]);
+      expect(leakList(requestsContaining(afterBack, INV_ID))).toEqual([]);
+      expect(leakList(await telemetryDuring(run, fresh))).toEqual([]);
+      const all = await assertContained(run);
+      expect(leakList(requestsContaining(all.filter(isTelemetry), INV_TOKEN))).toEqual([]);
+      expect(leakList(requestsContaining(all.filter(isTelemetry), INV_ID))).toEqual([]);
+    } finally {
+      await run.close();
+    }
+  });
 
   it("NIT-1: a non-canonical acceptance URL (percent-encoded path) fails closed: no credential hand-off, no telemetry in that document, the credential in no request", async () => {
     const run = await open(`/workspace-invitations/%61ccept#invitationId=${INV_ID}&token=${INV_TOKEN}`, "normal");

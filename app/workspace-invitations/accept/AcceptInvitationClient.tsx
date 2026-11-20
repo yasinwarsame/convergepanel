@@ -39,8 +39,10 @@ import { sendEmailVerification, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "@/components/AuthProvider";
 import { clearServerSession } from "@/lib/client/sessionSync";
+import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
 import {
   clearInvitationAcceptance,
+  hasInvitationAcceptanceEnvelope,
   parseInvitationFragment,
   restoreInvitationAcceptance,
   scrubInvitationAcceptanceHistory,
@@ -130,6 +132,15 @@ export default function AcceptInvitationClient() {
       return;
     }
 
+    // GHSA-655j-5f43-92pw (correction round, review R3 MAJOR-1): the envelope holds the raw token, so it is only ever
+    // read in a telemetry-free document. A telemetry-enabled document that reaches this page (e.g. one restored from the
+    // back/forward cache and then soft-navigated here after sign-in) never touches it: it is replaced by a fresh full
+    // load of the acceptance page, which starts with the envelope present and is therefore telemetry-free.
+    if (!isTelemetryFreeDocument() && hasInvitationAcceptanceEnvelope(window.sessionStorage)) {
+      // Stays in "capturing" (loading view): never "invalid_or_expired", never an acceptance attempt in this document.
+      window.location.replace(INVITATION_ACCEPTANCE_ROUTE_PATH);
+      return;
+    }
     const restored = restoreInvitationAcceptance(window.sessionStorage, Date.now());
     if (restored) {
       credentialRef.current = restored;

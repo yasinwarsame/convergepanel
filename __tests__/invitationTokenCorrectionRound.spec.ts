@@ -56,6 +56,7 @@ function installWindow(path: string, opts: { storage?: "working" | "throws"; env
   Object.defineProperty(location, "href", { get: () => `${u.origin}${location.pathname}${location.search}${location.hash}` });
   const replaced: string[] = [];
   location.replace = (url: string) => replaced.push(url);
+  location.reload = () => replaced.push("<reload>");
   const calls: string[] = [];
   const history = {
     state: { __NA: true } as unknown,
@@ -252,5 +253,50 @@ describe("MINOR-2: a second invitation link by same-document fragment navigation
     boot();
     expect(env.listeners.popstate).toHaveLength(1);
     expect(env.listeners.hashchange).toHaveLength(1);
+  });
+});
+
+describe("review R3 MAJOR-1: a telemetry-enabled document restored from the back/forward cache", () => {
+  const pageshow = (env: ReturnType<typeof installWindow>, persisted: boolean) => {
+    let stopped = false;
+    for (const fn of env.listeners.pageshow ?? []) {
+      if (stopped) break;
+      fn({ type: "pageshow", persisted, stopImmediatePropagation: () => (stopped = true) } as unknown as Event);
+    }
+    return stopped;
+  };
+
+  it("is reloaded (→ a fresh, telemetry-free document) when the tab now holds the envelope", () => {
+    const env = installWindow("/login?redirect=%2Fworkspace-invitations%2Faccept");
+    boot();
+    expect(atInit.sentry).toBeDefined(); // an ordinary, telemetry-on document
+    env.session.setItem(KEY, envelope(Date.now())); // written meanwhile by another document in this tab
+    const sdkPageshow = jest.fn();
+    env.listeners.pageshow.push(sdkPageshow); // registered later (e.g. by an SDK)
+    expect(pageshow(env, true)).toBe(true);
+    expect(sdkPageshow).not.toHaveBeenCalled();
+    expect(env.replaced).toEqual(["<reload>"]);
+  });
+
+  it("is left alone when there is no envelope, on an ordinary (non-cache) pageshow, and in a telemetry-free document", () => {
+    const a = installWindow("/login");
+    boot();
+    pageshow(a, true);
+    a.session.setItem(KEY, envelope(Date.now()));
+    pageshow(a, false);
+    expect(a.replaced).toEqual([]);
+
+    jest.resetModules();
+    const b = installWindow(ACCEPT, { envelope: envelope(Date.now()) });
+    boot();
+    pageshow(b, true);
+    expect(b.replaced).toEqual([]);
+  });
+
+  it("the pageshow guard is installed once, before Sentry.init", () => {
+    const env = installWindow("/pricing");
+    boot();
+    expect(env.listeners.pageshow).toHaveLength(1);
+    expect(events.indexOf("listen:pageshow")).toBeLessThan(events.indexOf("init:sentry"));
   });
 });
