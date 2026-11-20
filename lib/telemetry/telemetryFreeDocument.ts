@@ -18,7 +18,7 @@
  * starts while the tab holds the invitation continuity envelope (sessionStorage)
  * is telemetry-free as well, whatever its URL. Dependency-free, never throws, never logs.
  */
-import { hasInvitationAcceptanceEnvelope, INVITATION_ACCEPTANCE_ROUTE_PATH } from "@/lib/client/invitationAcceptance";
+import { hasCredentialShapedFragment, hasInvitationAcceptanceEnvelope, INVITATION_ACCEPTANCE_ROUTE_PATH } from "@/lib/client/invitationAcceptance";
 
 type DocWindow = {
   location?: { pathname?: string } | null;
@@ -33,28 +33,6 @@ function pathnameOf(url: string): string | null {
     return new URL(url, "https://document.invalid").pathname;
   } catch {
     return null;
-  }
-}
-
-/**
- * Correction round (review R2 NIT-1): a navigation entry whose fragment carries an invitation-credential-shaped key
- * (`token` / `invitationId`, any case) makes the document telemetry-free whatever its path — e.g. a non-canonical
- * spelling such as `/workspace-invitations/%61ccept#…` that the router still serves but `isAcceptancePath` does not
- * match. Tolerant parse; an unparseable fragment that mentions either key also counts (fail closed).
- */
-function hasCredentialShapedFragment(url: string): boolean {
-  const i = url.indexOf("#");
-  if (i < 0) return false;
-  const fragment = url.slice(i + 1);
-  if (fragment === "") return false;
-  try {
-    for (const key of new URLSearchParams(fragment).keys()) {
-      const k = key.toLowerCase();
-      if (k === "token" || k === "invitationid") return true;
-    }
-    return false;
-  } catch {
-    return /(^|[&;])\s*(token|invitationid)\s*=/i.test(fragment);
   }
 }
 

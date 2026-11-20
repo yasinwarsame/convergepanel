@@ -78,6 +78,15 @@ beforeAll(async () => {
   if (!APP_DIR || !chromiumAvailable()) return;
   // The build directory must not carry any environment file: `next start` would load it.
   expect(readdirSync(APP_DIR).filter((f) => f.startsWith(".env") && !f.endsWith(".example"))).toEqual([]);
+  // Review R4 MINOR-1: never test a server this spec did not start (a stale `next start` on the port would answer).
+  let portBusy = false;
+  try {
+    await fetch(`${BASE}/`);
+    portBusy = true;
+  } catch {
+    portBusy = false;
+  }
+  if (portBusy) throw new Error(`${BASE} is already answering: stop that server first (the harness must test ${APP_DIR})`);
   workDir = mkdtempSync(join(tmpdir(), "cp-next-harness-"));
   guardLog = join(workDir, "egress.log");
   writeFileSync(guardLog, "");
@@ -96,6 +105,10 @@ beforeAll(async () => {
   server.stdout?.on("data", (b) => (serverOutput += String(b)));
   server.stderr?.on("data", (b) => (serverOutput += String(b)));
   await waitForServer();
+  // ...and the server answering is the build under test.
+  const buildId = readFileSync(join(APP_DIR, ".next/BUILD_ID"), "utf8").trim();
+  const manifest = await fetch(`${BASE}/_next/static/${buildId}/_buildManifest.js`);
+  if (manifest.status !== 200) throw new Error(`the server on ${BASE} is not serving build ${buildId} of ${APP_DIR}`);
 });
 
 afterAll(async () => {
@@ -536,6 +549,15 @@ d("real Next.js production build (contained)", () => {
       await run.page.waitForTimeout(2_000);
       const escaped = guardAttempts().slice(guardBefore);
       expect(escaped.every((line) => JSON.parse(line).host === "o1.ingest.sentry.io")).toBe(true);
+      // Review R4 MINOR-2: each set-aside entry must predate the moment the invitation document finished downloading
+      // its FIRST script file: no telemetry code of that document (it has no inline SDK code) can have run before
+      // then, so the entry can only come from L. The server logs the attempt after the browser sent the request.
+      const firstScriptReady = await run.page.evaluate(() => {
+        const ends = (performance.getEntriesByType("resource") as PerformanceResourceTiming[]).filter((e) => e.initiatorType === "script").map((e) => e.responseEnd);
+        return ends.length > 0 ? performance.timeOrigin + Math.min(...ends) : 0;
+      });
+      console.log(`[next harness] R3 MAJOR-1: set-aside timing margin(s) ms: ${escaped.map((l) => Math.round(firstScriptReady - Date.parse(JSON.parse(l).at))).join(",") || "n/a"}`);
+      for (const line of escaped) expect(Date.parse(JSON.parse(line).at)).toBeLessThan(firstScriptReady);
       if (escaped.length > 0) {
         console.log(`[next harness] R3 MAJOR-1: ${escaped.length} pre-invitation tunnel request(s) from the frozen /login document refused by the server egress guard (set aside)`);
         writeFileSync(guardLog, guardAttempts().slice(0, guardBefore).map((l) => `${l}\n`).join(""));

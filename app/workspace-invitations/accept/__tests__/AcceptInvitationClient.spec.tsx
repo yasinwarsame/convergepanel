@@ -185,10 +185,26 @@ describe("POST-LOGIN RESTORE", () => {
       expect(replace).toHaveBeenCalledWith(INVITATION_ACCEPTANCE_ROUTE_PATH);
       expect(global.fetch).not.toHaveBeenCalled();
       expect(storage.backing.get(SESSION_STORAGE_KEY)).toBe(raw);
-      // only the presence check may touch the key; the token value never leaves storage in this document
+      // only the presence check may touch the key (it returns the raw string into JS memory; nothing parses or sends it)
       expect(getItem.mock.calls.length).toBeLessThanOrEqual(1);
       expect(renderer.root.findAllByType("h1")).toHaveLength(0); // never "Invitation unavailable"
       expect(renderer.root.findByType("p").props.children).toBe("Loading your invitation…");
+    } finally {
+      mockTelemetryFree.mockReturnValue(true);
+    }
+  });
+
+  it("review R4 NIT-2: a credential fragment in a telemetry-ENABLED document is never processed there: scrubbed, carried in the envelope, tab moved to a fresh acceptance document; no POST", async () => {
+    mockTelemetryFree.mockReturnValue(false);
+    try {
+      const { win, storage } = setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+      const replace = jest.fn();
+      (win.location as any).replace = replace;
+      await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+      expect(win.history.replaceState).toHaveBeenCalledWith(win.history.state, "", INVITATION_ACCEPTANCE_ROUTE_PATH);
+      expect(replace).toHaveBeenCalledWith(INVITATION_ACCEPTANCE_ROUTE_PATH);
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(JSON.parse(storage.backing.get(SESSION_STORAGE_KEY)!)).toMatchObject({ invitationId: INVITATION_ID, token: SENTINEL });
     } finally {
       mockTelemetryFree.mockReturnValue(true);
     }

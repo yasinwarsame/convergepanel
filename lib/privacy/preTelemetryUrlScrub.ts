@@ -96,9 +96,10 @@ function installBackForwardCacheGuard(win: ScrubWindow): void {
         if (!event?.persisted) return;
         if (isTelemetryFreeDocument(win as unknown as Parameters<typeof isTelemetryFreeDocument>[0])) return;
         if (!hasInvitationAcceptanceEnvelope(storageOf(win))) return;
-        // Registered before Sentry.init, so this runs first on restore, before any resumed timer task; no later
-        // pageshow listener (an SDK's included) runs in the restored document. Only its unload flush remains, which
-        // was queued before the restore.
+        // Registered before Sentry.init, so this runs first on restore and no later pageshow listener runs. The reload
+        // is asynchronous: the restored document (and its SDKs) keeps running until the new document commits and may
+        // send its last flush. That is defence in depth only: the token is never READ in a telemetry-enabled document
+        // (AcceptInvitationClient refuses the envelope there), which is the actual protection.
         event.stopImmediatePropagation?.();
         w.location.reload?.();
       } catch {

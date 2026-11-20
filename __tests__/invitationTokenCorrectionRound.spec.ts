@@ -246,6 +246,11 @@ describe("MINOR-2: a second invitation link by same-document fragment navigation
     env.location.pathname = ACCEPT;
     expect(env.fragmentNavigate("#")).toEqual(["popstate:propagated", "hashchange:propagated"]);
     expect(env.replaced).toEqual([]);
+    // review R4 NIT-4: an ordinary anchor on the acceptance page leaves an in-progress envelope alone
+    env.session.setItem(KEY, envelope(Date.now()));
+    expect(env.fragmentNavigate("#main")).toEqual(["popstate:propagated", "hashchange:propagated"]);
+    expect(env.replaced).toEqual([]);
+    expect(env.session.getItem(KEY)).toContain(TOKEN);
   });
 
   it("installed once even though the scrub runs twice (instrumentation-client and PostHogProvider)", () => {

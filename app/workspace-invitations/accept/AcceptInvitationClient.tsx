@@ -116,6 +116,17 @@ export default function AcceptInvitationClient() {
     // instrumentation file is appended rather than prepended) is captured and scrubbed here exactly as before.
     const parsed = hasHash ? parseInvitationFragment(rawHash) : captured;
 
+    // Review R4 NIT-2: a credential fragment in a telemetry-ENABLED document (no producer exists; defence in depth) is
+    // never processed there: scrubbed, carried in the existing envelope, and the tab moves to a fresh acceptance
+    // document (telemetry-free because the envelope is present), as the same-document fragment guard does.
+    if (hasHash && parsed && !isTelemetryFreeDocument()) {
+      scrubInvitationAcceptanceHistory(window.history, INVITATION_ACCEPTANCE_ROUTE_PATH);
+      if (parsed.kind === "valid") storeInvitationAcceptance(window.sessionStorage, { invitationId: parsed.invitationId, token: parsed.token }, Date.now());
+      else clearInvitationAcceptance(window.sessionStorage);
+      window.location.replace(INVITATION_ACCEPTANCE_ROUTE_PATH);
+      return;
+    }
+
     if (parsed) {
       if (hasHash) scrubInvitationAcceptanceHistory(window.history, INVITATION_ACCEPTANCE_ROUTE_PATH);
 

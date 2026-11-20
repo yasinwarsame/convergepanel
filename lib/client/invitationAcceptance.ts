@@ -187,6 +187,29 @@ export function captureInvitationCredentialFromLocation(location: { pathname: st
 }
 
 /**
+ * Correction round (review R2 NIT-1): a navigation entry whose fragment carries an invitation-credential-shaped key
+ * (`token` / `invitationId`, any case) makes the document telemetry-free whatever its path — e.g. a non-canonical
+ * spelling such as `/workspace-invitations/%61ccept#…` that the router still serves but `isAcceptancePath` does not
+ * match. Accepts a URL or a raw `location.hash`. Tolerant parse; an unparseable fragment that mentions either key also
+ * counts (fail closed).
+ */
+export function hasCredentialShapedFragment(url: string): boolean {
+  const i = url.indexOf("#");
+  if (i < 0) return false; // a raw location.hash always starts with "#"
+  const fragment = url.slice(i + 1);
+  if (fragment === "") return false;
+  try {
+    for (const key of new URLSearchParams(fragment).keys()) {
+      const k = key.toLowerCase();
+      if (k === "token" || k === "invitationid") return true;
+    }
+    return false;
+  } catch {
+    return /(^|[&;])\s*(token|invitationid)\s*=/i.test(fragment);
+  }
+}
+
+/**
  * GHSA-655j-5f43-92pw (correction round, MINOR-1): whether this tab's existing continuity envelope is present. Any
  * value under the key counts (it may hold a still-redeemable token even if malformed or past the client TTL). Read-only.
  * `false` when sessionStorage is unusable: the envelope is written only through this same tab storage, and an SDK in a
@@ -246,6 +269,9 @@ export function installInvitationFragmentNavigationGuard(win: GuardWindow | unde
       return;
     }
     if (rawHash.length <= 1) return;
+    // Review R4 NIT-4: an ordinary in-page anchor (e.g. "#main") is not an invitation link; leave it (and any
+    // in-progress verification / re-auth envelope) alone.
+    if (!hasCredentialShapedFragment(rawHash)) return;
     let parsed: ParsedInvitationFragment;
     try {
       parsed = parseInvitationFragment(rawHash);
