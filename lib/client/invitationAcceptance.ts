@@ -196,17 +196,26 @@ export function captureInvitationCredentialFromLocation(location: { pathname: st
 export function hasCredentialShapedFragment(url: string): boolean {
   const i = url.indexOf("#");
   if (i < 0) return false; // a raw location.hash always starts with "#"
-  const fragment = url.slice(i + 1);
+  let fragment = url.slice(i + 1);
   if (fragment === "") return false;
-  try {
-    for (const key of new URLSearchParams(fragment).keys()) {
-      const k = key.toLowerCase();
-      if (k === "token" || k === "invitationid") return true;
+  // Review R5 MINOR-1: percent-decode (up to 3 layers, tolerant) so an encoded key (`invitationId%3D…%26token%3D…`)
+  // or a key with surrounding whitespace is still recognised. Fail closed: any key-like `token=` / `invitationid=`.
+  for (let n = 0; n < 3; n++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(fragment.replace(/\+/g, " "));
+    } catch {
+      break;
     }
-    return false;
-  } catch {
-    return /(^|[&;])\s*(token|invitationid)\s*=/i.test(fragment);
+    if (next === fragment) break;
+    fragment = next;
   }
+  return /(^|[&;?#\s])\s*(token|invitationid)\s*=/i.test(fragment);
+}
+
+/** A plain in-page anchor (`#main`, `#section-2`): the only fragment shape the same-document guard leaves alone. */
+function isPlainAnchor(rawHash: string): boolean {
+  return /^#[A-Za-z][\w-]*$/.test(rawHash);
 }
 
 /**
@@ -269,9 +278,9 @@ export function installInvitationFragmentNavigationGuard(win: GuardWindow | unde
       return;
     }
     if (rawHash.length <= 1) return;
-    // Review R4 NIT-4: an ordinary in-page anchor (e.g. "#main") is not an invitation link; leave it (and any
-    // in-progress verification / re-auth envelope) alone.
-    if (!hasCredentialShapedFragment(rawHash)) return;
+    // Review R4 NIT-4 / R5 MINOR-1: only a strict plain anchor (e.g. "#main") is left alone (with any in-progress
+    // verification / re-auth envelope); every other fragment, encoded or not, is handled (invalid ones fail closed).
+    if (isPlainAnchor(rawHash) && !hasCredentialShapedFragment(rawHash)) return;
     let parsed: ParsedInvitationFragment;
     try {
       parsed = parseInvitationFragment(rawHash);

@@ -253,6 +253,17 @@ describe("MINOR-2: a second invitation link by same-document fragment navigation
     expect(env.session.getItem(KEY)).toContain(TOKEN);
   });
 
+  it("review R5 MINOR-1: an encoded or whitespace-padded credential fragment is NOT exempt: scrubbed, later listeners stopped, tab moved", () => {
+    for (const hash of [`#invitationId%3D${INV_ID2}%26token%3D${TOKEN2}`, `#%20token=${TOKEN2}`, `#invitationId=${INV_ID2};token=${TOKEN2}`, "#foo=bar"]) {
+      jest.resetModules();
+      const env = installWindow(ACCEPT);
+      boot();
+      expect(env.fragmentNavigate(hash)[0]).toBe("popstate:stopped");
+      expect(env.location.href).toBe(`https://convergepanel.com${ACCEPT}`);
+      expect(env.replaced).toEqual([ACCEPT]);
+    }
+  });
+
   it("installed once even though the scrub runs twice (instrumentation-client and PostHogProvider)", () => {
     const env = installWindow("/pricing");
     boot();

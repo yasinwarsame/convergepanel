@@ -83,6 +83,8 @@ describe("isTelemetryFreeDocument", () => {
       "https://convergepanel.com/workspace-invitations//accept#token=t",
       "https://convergepanel.com/pricing#TOKEN=t",
       "https://convergepanel.com/x#a=1&InvitationId=i",
+      "https://convergepanel.com/workspace-invitations/%61ccept#invitationId%3Di%26token%3Dt",
+      "https://convergepanel.com/pricing#%2520token%253Dt",
     ]) {
       expect(fresh().isTelemetryFreeDocument({ performance: nav(u) })).toBe(true);
     }

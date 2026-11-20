@@ -552,6 +552,8 @@ d("real Next.js production build (contained)", () => {
       // Review R4 MINOR-2: each set-aside entry must predate the moment the invitation document finished downloading
       // its FIRST script file: no telemetry code of that document (it has no inline SDK code) can have run before
       // then, so the entry can only come from L. The server logs the attempt after the browser sent the request.
+      // Review R5 NIT-1: the bound is taken from the invitation document itself (its navigation entry).
+      expect(await navName(run.page)).toBe(`${BASE}${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`);
       const firstScriptReady = await run.page.evaluate(() => {
         const ends = (performance.getEntriesByType("resource") as PerformanceResourceTiming[]).filter((e) => e.initiatorType === "script").map((e) => e.responseEnd);
         return ends.length > 0 ? performance.timeOrigin + Math.min(...ends) : 0;
@@ -560,7 +562,10 @@ d("real Next.js production build (contained)", () => {
       for (const line of escaped) expect(Date.parse(JSON.parse(line).at)).toBeLessThan(firstScriptReady);
       if (escaped.length > 0) {
         console.log(`[next harness] R3 MAJOR-1: ${escaped.length} pre-invitation tunnel request(s) from the frozen /login document refused by the server egress guard (set aside)`);
-        writeFileSync(guardLog, guardAttempts().slice(0, guardBefore).map((l) => `${l}\n`).join(""));
+        // Review R5 MINOR-2: remove exactly the lines checked above (once each); anything appended since stays.
+        const remaining = guardAttempts();
+        for (const line of escaped) remaining.splice(remaining.indexOf(line), 1);
+        writeFileSync(guardLog, remaining.map((l) => `${l}\n`).join(""));
       }
       await run.save();
       const before = await run.mark();
