@@ -95,8 +95,36 @@ function isValidEnvelopeShape(value: unknown): value is StoredInvitationAcceptan
   );
 }
 
-/** Best-effort write — a quota/private-mode exception leaves nothing stored, never throws. */
-export function storeInvitationAcceptance(storage: Pick<Storage, "setItem">, credential: InvitationAcceptanceCredential, now: number): void {
+/**
+ * GHSA-655j-5f43-92pw (review R6 MINOR-3): envelope OWNERSHIP. A document that hands the tab's credential to a fresh
+ * document (the same-document fragment guard, or the page's telemetry-on gates, which then `location.replace`) gives up
+ * write access to the envelope for the rest of its life: from then on `storeInvitationAcceptance`,
+ * `clearInvitationAcceptance` and `restoreInvitationAcceptance` are no-ops in it. So work this document started for an
+ * earlier credential A (a fetch that resolves or rejects later, an auth-state effect, a cleanup handler) can never
+ * restore A over the successor's credential B, clear B, or extend B's expiry. Enforced HERE, at the storage boundary,
+ * so it holds for every caller. One-way; module state of this document only.
+ */
+let envelopeOwnershipHandedOff = false;
+
+/** Whether this document has handed the invitation credential to a successor document (see above). */
+export function isInvitationDocumentSuperseded(): boolean {
+  return envelopeOwnershipHandedOff;
+}
+
+/**
+ * Hands the tab's invitation state to a successor document: valid → the envelope now holds `credential` (it replaces
+ * any earlier one); invalid → the envelope is cleared. Then this document loses envelope write access. The caller
+ * performs the `location.replace`. Never throws, never logs.
+ */
+export function handOffInvitationCredential(storage: Pick<Storage, "setItem" | "removeItem"> | null | undefined, parsed: ParsedInvitationFragment | null): void {
+  if (storage) {
+    if (parsed && parsed.kind === "valid") writeEnvelope(storage, { invitationId: parsed.invitationId, token: parsed.token }, Date.now());
+    else if (parsed) removeEnvelope(storage);
+  }
+  envelopeOwnershipHandedOff = true;
+}
+
+function writeEnvelope(storage: Pick<Storage, "setItem">, credential: InvitationAcceptanceCredential, now: number): void {
   const envelope: StoredInvitationAcceptanceEnvelope = { version: 1, invitationId: credential.invitationId, token: credential.token, storedAt: now };
   try {
     storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(envelope));
@@ -105,8 +133,23 @@ export function storeInvitationAcceptance(storage: Pick<Storage, "setItem">, cre
   }
 }
 
-/** Best-effort — never throws. Malformed, wrong-version, or expired records are cleared, not silently extended. */
+function removeEnvelope(storage: Pick<Storage, "removeItem">): void {
+  try {
+    storage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Best-effort.
+  }
+}
+
+/** Best-effort write — a quota/private-mode exception leaves nothing stored, never throws. No-op once superseded. */
+export function storeInvitationAcceptance(storage: Pick<Storage, "setItem">, credential: InvitationAcceptanceCredential, now: number): void {
+  if (envelopeOwnershipHandedOff) return;
+  writeEnvelope(storage, credential, now);
+}
+
+/** Best-effort — never throws. Malformed, wrong-version, or expired records are cleared, not silently extended. `null` once superseded. */
 export function restoreInvitationAcceptance(storage: Pick<Storage, "getItem" | "removeItem">, now: number): InvitationAcceptanceCredential | null {
+  if (envelopeOwnershipHandedOff) return null;
   let raw: string | null;
   try {
     raw = storage.getItem(SESSION_STORAGE_KEY);
@@ -137,12 +180,10 @@ export function restoreInvitationAcceptance(storage: Pick<Storage, "getItem" | "
   return { invitationId: parsed.invitationId, token: parsed.token };
 }
 
+/** No-op once superseded (it would clear the successor's credential). */
 export function clearInvitationAcceptance(storage: Pick<Storage, "removeItem">): void {
-  try {
-    storage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Best-effort.
-  }
+  if (envelopeOwnershipHandedOff) return;
+  removeEnvelope(storage);
 }
 
 export interface ScrubbableHistory {
@@ -187,30 +228,90 @@ export function captureInvitationCredentialFromLocation(location: { pathname: st
 }
 
 /**
- * Correction round (review R2 NIT-1): a navigation entry whose fragment carries an invitation-credential-shaped key
- * (`token` / `invitationId`, any case) makes the document telemetry-free whatever its path — e.g. a non-canonical
- * spelling such as `/workspace-invitations/%61ccept#…` that the router still serves but `isAcceptancePath` does not
- * match. Accepts a URL or a raw `location.hash`. Tolerant parse; an unparseable fragment that mentions either key also
- * counts (fail closed).
+ * GHSA-655j-5f43-92pw (review R6 MINOR-1 / MINOR-2): bounded, tolerant, FAIL-CLOSED detection of invitation-credential
+ * material anywhere in a URL — path, query and fragment — including non-canonical and e-mail-rewritten forms (a `#`
+ * rewritten to `%23` puts the fragment in the PATH; extra encoding layers; a stray `%`; mixed-case escapes; encoded key
+ * names; HTML-escaped `=`). Detection only: it decides that a document must not initialize telemetry. It never makes a
+ * URL acceptable or redeemable — acceptance still requires the exact path and `parseInvitationFragment`.
+ *
+ * Only well-formed `%XX` escapes are decoded (a stray `%` is left as is and never aborts the scan), repeated until the
+ * text stops changing, at most MAX_DECODE_LAYERS times. Anything the classifier cannot settle within its limits —
+ * input longer than MAX_CLASSIFIED_URL_LENGTH, escapes still present after the last layer, a URL that cannot be parsed
+ * — is classified as credential-bearing (suppress telemetry). Never throws, never logs, never stores.
+ */
+const MAX_CLASSIFIED_URL_LENGTH = 8192;
+const MAX_DECODE_LAYERS = 8;
+const WELL_FORMED_ESCAPE = /%([0-9a-fA-F]{2})/g;
+const HAS_WELL_FORMED_ESCAPE = /%[0-9a-fA-F]{2}/;
+// A credential key (any case) preceded by start-of-text or any non-alphanumeric separator, followed by `=` (also as
+// an HTML entity). Matches `token=`, `?Token =`, `/accept#invitationId=`, `x_token=` (over-matching is the safe side).
+const CREDENTIAL_KEY = /(^|[^a-z0-9])(token|invitation[\s_-]*id)\s*(=|&#0*61;?|&#x0*3d;?|&equals;?)/i;
+const ACCEPTANCE_PATH_PREFIX = INVITATION_ACCEPTANCE_ROUTE_PATH.toLowerCase();
+
+type Decoded = { text: string; settled: boolean };
+
+/** Decodes well-formed escapes (and `+`) layer by layer; `settled` is false when the layer limit was reached first. */
+function decodeBounded(input: string): Decoded {
+  let text = input;
+  for (let n = 0; n < MAX_DECODE_LAYERS; n++) {
+    const next = text.replace(/\+/g, " ").replace(WELL_FORMED_ESCAPE, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    if (next === text) return { text, settled: true };
+    text = next;
+  }
+  return { text, settled: !HAS_WELL_FORMED_ESCAPE.test(text) };
+}
+
+function classifyText(raw: string): boolean {
+  if (raw.length > MAX_CLASSIFIED_URL_LENGTH) return true; // too long to classify confidently: fail closed
+  const decoded = decodeBounded(raw);
+  if (!decoded.settled) return true; // still encoded after the layer limit: ambiguous, fail closed
+  return CREDENTIAL_KEY.test(raw) || CREDENTIAL_KEY.test(decoded.text);
+}
+
+/** Whether a decoded path is the acceptance route in any spelling (case, repeated slashes, trailing segments). */
+function isAcceptancePathPrefix(decodedPath: string): boolean {
+  const normalized = decodedPath.replace(/\\/g, "/").replace(/\/{2,}/g, "/").toLowerCase();
+  return normalized === ACCEPTANCE_PATH_PREFIX || normalized.startsWith(`${ACCEPTANCE_PATH_PREFIX}/`) || normalized.startsWith(ACCEPTANCE_PATH_PREFIX + "#") || normalized.startsWith(ACCEPTANCE_PATH_PREFIX + "?");
+}
+
+/**
+ * True when a URL (absolute, or a path) may carry an invitation credential, or cannot be classified confidently:
+ * the document it names must not initialize browser telemetry.
+ */
+export function isCredentialBearingUrl(url: string): boolean {
+  try {
+    if (typeof url !== "string") return true;
+    if (url === "") return false;
+    if (classifyText(url)) return true;
+    let pathname: string;
+    try {
+      pathname = new URL(url, "https://document.invalid").pathname;
+    } catch {
+      return true; // unparseable: fail closed
+    }
+    const decodedPath = decodeBounded(pathname);
+    if (!decodedPath.settled) return true;
+    return isAcceptancePathPrefix(decodedPath.text);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Correction round (review R2 NIT-1, R5 MINOR-1, R6 MINOR-1): whether the FRAGMENT of a URL (or a raw `location.hash`)
+ * carries an invitation-credential-shaped key, using the same bounded fail-closed classifier as
+ * `isCredentialBearingUrl`. `false` only when there is no fragment.
  */
 export function hasCredentialShapedFragment(url: string): boolean {
-  const i = url.indexOf("#");
-  if (i < 0) return false; // a raw location.hash always starts with "#"
-  let fragment = url.slice(i + 1);
-  if (fragment === "") return false;
-  // Review R5 MINOR-1: percent-decode (up to 3 layers, tolerant) so an encoded key (`invitationId%3D…%26token%3D…`)
-  // or a key with surrounding whitespace is still recognised. Fail closed: any key-like `token=` / `invitationid=`.
-  for (let n = 0; n < 3; n++) {
-    let next: string;
-    try {
-      next = decodeURIComponent(fragment.replace(/\+/g, " "));
-    } catch {
-      break;
-    }
-    if (next === fragment) break;
-    fragment = next;
+  try {
+    const i = url.indexOf("#");
+    if (i < 0) return false; // a raw location.hash always starts with "#"
+    const fragment = url.slice(i + 1);
+    if (fragment === "") return false;
+    return classifyText(fragment);
+  } catch {
+    return true;
   }
-  return /(^|[&;?#\s])\s*(token|invitationid)\s*=/i.test(fragment);
 }
 
 /** A plain in-page anchor (`#main`, `#section-2`): the only fragment shape the same-document guard leaves alone. */
@@ -261,7 +362,7 @@ let fragmentGuardInstalled = false;
  * handlers, so this listener runs first on `popstate` / `hashchange`. It:
  *   1. parses the fragment, then removes it from the address bar (replaceState) and stops later listeners;
  *   2. valid → writes it to the EXISTING tab envelope (the fragment is authoritative: it replaces any earlier one);
- *      invalid → clears the envelope;
+ *      invalid → clears the envelope; either way this document then loses envelope write access (R6 MINOR-3);
  *   3. replaces the document with a full load of the clean acceptance URL. That new document starts with the envelope
  *      present, so it never initializes telemetry (isTelemetryFreeDocument), and the page restores the credential.
  * Never logs. Idempotent.
@@ -270,6 +371,16 @@ export function installInvitationFragmentNavigationGuard(win: GuardWindow | unde
   if (fragmentGuardInstalled || !win || typeof win.addEventListener !== "function") return;
   fragmentGuardInstalled = true;
   const onNavigation = (event: Event) => {
+    // Review R6 NIT-1: once this document has handed the credential off it is leaving; no later popstate/hashchange
+    // (e.g. the hashchange that follows a handled popstate, whose newURL still holds the fragment) reaches any other
+    // listener. A further credential fragment is still handled below (the latest link wins).
+    if (envelopeOwnershipHandedOff) {
+      try {
+        event.stopImmediatePropagation();
+      } catch {
+        /* best effort */
+      }
+    }
     let rawHash = "";
     try {
       if (!isAcceptancePath(String(win.location.pathname))) return;
@@ -303,10 +414,7 @@ export function installInvitationFragmentNavigationGuard(win: GuardWindow | unde
     } catch {
       storage = null;
     }
-    if (storage) {
-      if (parsed.kind === "valid") storeInvitationAcceptance(storage, { invitationId: parsed.invitationId, token: parsed.token }, Date.now());
-      else clearInvitationAcceptance(storage);
-    }
+    handOffInvitationCredential(storage, parsed);
     try {
       win.location.replace(INVITATION_ACCEPTANCE_ROUTE_PATH);
     } catch {

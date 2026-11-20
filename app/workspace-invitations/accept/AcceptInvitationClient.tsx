@@ -42,7 +42,9 @@ import { clearServerSession } from "@/lib/client/sessionSync";
 import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
 import {
   clearInvitationAcceptance,
+  handOffInvitationCredential,
   hasInvitationAcceptanceEnvelope,
+  isInvitationDocumentSuperseded,
   parseInvitationFragment,
   restoreInvitationAcceptance,
   scrubInvitationAcceptanceHistory,
@@ -121,8 +123,7 @@ export default function AcceptInvitationClient() {
     // document (telemetry-free because the envelope is present), as the same-document fragment guard does.
     if (hasHash && parsed && !isTelemetryFreeDocument()) {
       scrubInvitationAcceptanceHistory(window.history, INVITATION_ACCEPTANCE_ROUTE_PATH);
-      if (parsed.kind === "valid") storeInvitationAcceptance(window.sessionStorage, { invitationId: parsed.invitationId, token: parsed.token }, Date.now());
-      else clearInvitationAcceptance(window.sessionStorage);
+      handOffInvitationCredential(window.sessionStorage, parsed);
       window.location.replace(INVITATION_ACCEPTANCE_ROUTE_PATH);
       return;
     }
@@ -149,6 +150,7 @@ export default function AcceptInvitationClient() {
     // load of the acceptance page, which starts with the envelope present and is therefore telemetry-free.
     if (!isTelemetryFreeDocument() && hasInvitationAcceptanceEnvelope(window.sessionStorage)) {
       // Stays in "capturing" (loading view): never "invalid_or_expired", never an acceptance attempt in this document.
+      handOffInvitationCredential(window.sessionStorage, null); // envelope untouched; this document loses write access
       window.location.replace(INVITATION_ACCEPTANCE_ROUTE_PATH);
       return;
     }
@@ -207,6 +209,8 @@ export default function AcceptInvitationClient() {
     } catch {
       inFlightRef.current = false;
       setIsAccepting(false);
+      // Review R6 MINOR-3: a later invitation took over this tab while A was in flight; A's failure is not B's.
+      if (isInvitationDocumentSuperseded()) return;
       if (successLatchRef.current) return;
       setViewState("temporarily_unavailable");
       return;
@@ -220,6 +224,14 @@ export default function AcceptInvitationClient() {
     }
 
     const next = classifyAcceptanceResponse(res.status, body);
+
+    // Review R6 MINOR-3: a later invitation (B) took over this tab while this request for A was in flight. A's outcome
+    // must not touch B's envelope (also enforced at the storage boundary) nor show a success/failure that reads as B's.
+    if (isInvitationDocumentSuperseded()) {
+      inFlightRef.current = false;
+      setIsAccepting(false);
+      return;
+    }
 
     // A success has already been latched — this response is stale/redundant
     // (e.g. a request that was in flight before a prior one committed).
@@ -295,6 +307,7 @@ export default function AcceptInvitationClient() {
   useEffect(() => {
     if (viewState !== "auth_loading") return;
     if (!authReady) return;
+    if (isInvitationDocumentSuperseded()) return; // review R6 MINOR-3: this document no longer owns the invitation
 
     const credential = credentialRef.current;
     if (!credential) {
@@ -319,7 +332,7 @@ export default function AcceptInvitationClient() {
 
   const handleRetry = useCallback(() => {
     const credential = credentialRef.current;
-    if (!credential) return;
+    if (!credential || isInvitationDocumentSuperseded()) return;
     // Never force-reset inFlightRef here — attemptAcceptance is the sole
     // owner of that lock's lifecycle. If a request is already in flight,
     // this call synchronously no-ops inside attemptAcceptance; if the
@@ -352,6 +365,7 @@ export default function AcceptInvitationClient() {
   }, [user, handleRetry]);
 
   const handleSwitchAccount = useCallback(async () => {
+    if (isInvitationDocumentSuperseded()) return; // review R6 MINOR-3
     const credential = credentialRef.current;
     if (credential) {
       storeInvitationAcceptance(window.sessionStorage, credential, Date.now());
@@ -361,6 +375,7 @@ export default function AcceptInvitationClient() {
     try {
       await clearServerSession();
       await signOut(auth);
+      if (isInvitationDocumentSuperseded()) return; // review R6 MINOR-3: a later invitation owns the tab now
       router.replace(LOGIN_REDIRECT_HREF);
     } catch {
       setAccountSwitchError(true);

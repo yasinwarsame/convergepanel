@@ -172,43 +172,9 @@ describe("POST-LOGIN RESTORE", () => {
     expect(storage.backing.has(SESSION_STORAGE_KEY)).toBe(false);
   });
 
-  it("correction round (review R3 MAJOR-1): in a telemetry-ENABLED document the envelope is never read or used: no POST, envelope untouched, the tab is moved to a fresh acceptance document", async () => {
-    mockTelemetryFree.mockReturnValue(false);
-    try {
-      const { win, storage } = setWindow({ hash: "" });
-      const replace = jest.fn();
-      (win.location as any).replace = replace;
-      const raw = JSON.stringify({ version: 1, invitationId: INVITATION_ID, token: SENTINEL, storedAt: Date.now() });
-      storage.backing.set(SESSION_STORAGE_KEY, raw);
-      const getItem = jest.spyOn(storage, "getItem");
-      const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
-      expect(replace).toHaveBeenCalledWith(INVITATION_ACCEPTANCE_ROUTE_PATH);
-      expect(global.fetch).not.toHaveBeenCalled();
-      expect(storage.backing.get(SESSION_STORAGE_KEY)).toBe(raw);
-      // only the presence check may touch the key (it returns the raw string into JS memory; nothing parses or sends it)
-      expect(getItem.mock.calls.length).toBeLessThanOrEqual(1);
-      expect(renderer.root.findAllByType("h1")).toHaveLength(0); // never "Invitation unavailable"
-      expect(renderer.root.findByType("p").props.children).toBe("Loading your invitation…");
-    } finally {
-      mockTelemetryFree.mockReturnValue(true);
-    }
-  });
-
-  it("review R4 NIT-2: a credential fragment in a telemetry-ENABLED document is never processed there: scrubbed, carried in the envelope, tab moved to a fresh acceptance document; no POST", async () => {
-    mockTelemetryFree.mockReturnValue(false);
-    try {
-      const { win, storage } = setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
-      const replace = jest.fn();
-      (win.location as any).replace = replace;
-      await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
-      expect(win.history.replaceState).toHaveBeenCalledWith(win.history.state, "", INVITATION_ACCEPTANCE_ROUTE_PATH);
-      expect(replace).toHaveBeenCalledWith(INVITATION_ACCEPTANCE_ROUTE_PATH);
-      expect(global.fetch).not.toHaveBeenCalled();
-      expect(JSON.parse(storage.backing.get(SESSION_STORAGE_KEY)!)).toMatchObject({ invitationId: INVITATION_ID, token: SENTINEL });
-    } finally {
-      mockTelemetryFree.mockReturnValue(true);
-    }
-  });
+  // The two telemetry-ENABLED-document gate tests (review R3 MAJOR-1, R4 NIT-2) moved to
+  // AcceptInvitationClientOwnership.spec.tsx: they hand envelope ownership to a successor document (one-way, per
+  // document), so each runs there in a fresh module registry (a fresh "document").
 
   it("enters invalid_or_expired when no hash and no restorable storage exist", async () => {
     setWindow({ hash: "" });

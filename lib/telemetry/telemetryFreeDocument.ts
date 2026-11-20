@@ -18,10 +18,10 @@
  * starts while the tab holds the invitation continuity envelope (sessionStorage)
  * is telemetry-free as well, whatever its URL. Dependency-free, never throws, never logs.
  */
-import { hasCredentialShapedFragment, hasInvitationAcceptanceEnvelope, INVITATION_ACCEPTANCE_ROUTE_PATH } from "@/lib/client/invitationAcceptance";
+import { hasInvitationAcceptanceEnvelope, isCredentialBearingUrl, INVITATION_ACCEPTANCE_ROUTE_PATH } from "@/lib/client/invitationAcceptance";
 
 type DocWindow = {
-  location?: { pathname?: string } | null;
+  location?: { pathname?: string; href?: string } | null;
   performance?: { getEntriesByType?: (type: string) => ArrayLike<{ name?: string }> } | null;
   sessionStorage?: Pick<Storage, "getItem"> | null;
 };
@@ -67,8 +67,14 @@ function decideFromDocumentUrl(win: DocWindow): boolean {
   } catch {
     navigationName = undefined;
   }
-  if (navigationName !== undefined) return isAcceptancePath(pathnameOf(navigationName)) || hasCredentialShapedFragment(navigationName);
+  // Review R6 MINOR-1/2: credential material anywhere in the original navigation URL (path, query or fragment; any
+  // encoding; e.g. a `#` rewritten to `%23`) or in the current URL, or a URL the bounded classifier cannot settle,
+  // makes the document telemetry-free. Detection only: such a URL is never thereby accepted.
+  if (navigationName !== undefined && (isAcceptancePath(pathnameOf(navigationName)) || isCredentialBearingUrl(navigationName))) return true;
   try {
+    const href = win.location?.href;
+    if (typeof href === "string" && href !== "" && isCredentialBearingUrl(href)) return true;
+    if (navigationName !== undefined) return false;
     return isAcceptancePath(String(win.location?.pathname ?? ""));
   } catch {
     return true; // cannot tell which document this is: no telemetry

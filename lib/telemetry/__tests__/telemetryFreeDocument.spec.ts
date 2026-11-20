@@ -88,7 +88,9 @@ describe("isTelemetryFreeDocument", () => {
     ]) {
       expect(fresh().isTelemetryFreeDocument({ performance: nav(u) })).toBe(true);
     }
-    for (const u of ["https://convergepanel.com/pricing#plans", "https://convergepanel.com/verify#text=abc", "https://convergepanel.com/pricing?token=x", "https://convergepanel.com/pricing#"]) {
+    // review R6 MINOR-2: a credential key in the QUERY now also makes the document telemetry-free (asserted below).
+    expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/pricing?token=x") })).toBe(true);
+    for (const u of ["https://convergepanel.com/pricing#plans", "https://convergepanel.com/verify#text=abc", "https://convergepanel.com/pricing#"]) {
       expect(fresh().isTelemetryFreeDocument({ performance: nav(u) })).toBe(false);
     }
   });
@@ -99,5 +101,9 @@ describe("isTelemetryFreeDocument", () => {
     expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations") })).toBe(false);
     const { isTelemetryFreeDocument } = fresh();
     expect(isTelemetryFreeDocument(undefined)).toBe(false);
+  });
+
+  it("review R6: a trailing-slash acceptance navigation is telemetry-free (exact-path rule and path-prefix classifier both cover it)", () => {
+    expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations/accept/") })).toBe(true);
   });
 });

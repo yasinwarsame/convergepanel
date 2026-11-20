@@ -219,7 +219,8 @@ describe("MINOR-2: a second invitation link by same-document fragment navigation
       const later: string[] = [];
       (env.listeners.popstate ??= []).push(() => later.push(String(g.window.location.href))); // e.g. an SDK handler
       const fired = env.fragmentNavigate(`#invitationId=${INV_ID2}&token=${TOKEN2}`);
-      expect(fired).toEqual(["popstate:stopped", "hashchange:propagated"]);
+      // review R6 NIT-1: the hashchange that follows the handled popstate is stopped too (its newURL holds the fragment).
+      expect(fired).toEqual(["popstate:stopped", "hashchange:stopped"]);
       expect(later).toEqual([]);
       expect(env.location.href).toBe(`https://convergepanel.com${ACCEPT}`);
       expect(env.replaced).toEqual([ACCEPT]);

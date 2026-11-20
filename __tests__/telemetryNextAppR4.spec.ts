@@ -563,8 +563,16 @@ d("real Next.js production build (contained)", () => {
       if (escaped.length > 0) {
         console.log(`[next harness] R3 MAJOR-1: ${escaped.length} pre-invitation tunnel request(s) from the frozen /login document refused by the server egress guard (set aside)`);
         // Review R5 MINOR-2: remove exactly the lines checked above (once each); anything appended since stays.
-        const remaining = guardAttempts();
-        for (const line of escaped) remaining.splice(remaining.indexOf(line), 1);
+        // Review R6 NIT-2: a checked line that is no longer in the log fails the test explicitly (never splice(-1)), and
+        // the rewrite is refused if the server appended to the log between the read and the write (nothing is lost).
+        const snapshot = readFileSync(guardLog, "utf8");
+        const remaining = snapshot.split("\n").filter(Boolean);
+        for (const line of escaped) {
+          const at = remaining.indexOf(line);
+          if (at < 0) throw new Error(`set-aside: a checked egress-guard entry is missing from the log: ${line}`);
+          remaining.splice(at, 1);
+        }
+        if (readFileSync(guardLog, "utf8") !== snapshot) throw new Error("set-aside: the egress-guard log changed while it was being rewritten");
         writeFileSync(guardLog, remaining.map((l) => `${l}\n`).join(""));
       }
       await run.save();
@@ -614,6 +622,120 @@ d("real Next.js production build (contained)", () => {
       expect(leakList(requestsContaining(all, INV_TOKEN))).toEqual([]);
       expect(leakList(requestsContaining(all, INV_ID))).toEqual([]);
     } finally {
+      await run.close();
+    }
+  });
+
+  // Review R6 (MINOR-1 / MINOR-2): rewritten, malformed and over-encoded invitation links. Each document must start
+  // WITHOUT telemetry (the classifier fails closed), must never accept the credential (detection is not acceptance),
+  // and no telemetry request may carry it. Then a clean full load restores telemetry.
+  const R6_CRED = `invitationId=${INV_ID}&token=${INV_TOKEN}`;
+  const layers = (v: string, n: number) => {
+    for (let i = 0; i < n; i++) v = encodeURIComponent(v);
+    return v;
+  };
+  const r6Links: Array<[string, string]> = [
+    ["`#` rewritten to %23: the credential is in the PATH", `${ACCEPT}%23${layers(R6_CRED, 1)}`],
+    ["stray `%` plus an encoded credential fragment (non-canonical path)", `/workspace-invitations/%61ccept#${layers(R6_CRED, 1)}%`],
+    ["credential fragment encoded 4 times (beyond the former 3-layer limit)", `/workspace-invitations/%61ccept#${layers(R6_CRED, 4)}`],
+    ["credential in the QUERY on a non-canonical path", `/workspace-invitations/%61ccept?${R6_CRED}`],
+    ["credential in the QUERY on an ordinary route", `/pricing?${R6_CRED}`],
+  ];
+  for (const [name, link] of r6Links) {
+    it(`R6: ${name} → that document never initializes telemetry, nothing is accepted, no telemetry request carries the credential; a clean load restores telemetry`, async () => {
+      const run = await open(link, "normal");
+      try {
+        expect(await navName(run.page)).toContain(INV_TOKEN); // the immutable entry holds it: the reason for the gate
+        await run.page.waitForTimeout(8_000);
+        await run.save();
+        const inDocument = (await run.all()).filter(isTelemetry);
+        console.log(`[next harness] R6 ${name}: ${inDocument.length} telemetry request(s); carrying token: ${requestsContaining(inDocument, INV_TOKEN).length}`);
+        expect(leakList(inDocument)).toEqual([]);
+        const state = await browserState(run.page);
+        expect(state.session).not.toContain(INV_TOKEN); // never accepted / carried from a rewritten link
+        expect(state.local).not.toContain(INV_TOKEN);
+        expect(state.cookie).not.toContain(INV_TOKEN);
+        // Restoration: a demonstrably clean new document (no envelope, clean navigation entry) runs telemetry again.
+        const beforeClean = await run.mark();
+        await run.page.goto(`${BASE}/pricing`, { waitUntil: "load" });
+        expect(await navName(run.page)).toBe(`${BASE}/pricing`);
+        await run.page.waitForTimeout(6_000);
+        await run.save();
+        const clean = await telemetryDuring(run, beforeClean);
+        expect(clean.length).toBeGreaterThan(0);
+        const all = await assertContained(run);
+        expect(leakList(requestsContaining(all.filter(isTelemetry), INV_TOKEN))).toEqual([]);
+        expect(leakList(requestsContaining(all.filter(isTelemetry), INV_ID))).toEqual([]);
+      } finally {
+        await run.close();
+      }
+    });
+  }
+
+  it("R6 MINOR-3: invitation A's page logic, released after a second link B took over the tab, cannot restore A or clear B; the fresh document carries B only", async () => {
+    const run = await open("/pricing", "normal");
+    const step = (m: string) => console.log(`[next harness] R6 MINOR-3 step: ${m}`);
+    let releaseChunk: () => void = () => undefined;
+    let releaseSuccessor: () => void = () => undefined;
+    try {
+      // Hold the acceptance page's own code (React page chunk) so the FIRST acceptance document's page logic for A runs
+      // only after B has been handed off; hold the successor document's request so A's logic gets to run at all.
+      const chunkHeld = new Promise<void>((r) => (releaseChunk = r));
+      const successorHeld = new Promise<void>((r) => (releaseSuccessor = r));
+      let documents = 0;
+      let chunkSeen = false;
+      await run.page.route(/\/_next\/static\/chunks\/app\/workspace-invitations\/accept\/page-[^/]+\.js/, async (route) => {
+        chunkSeen = true;
+        await chunkHeld;
+        await route.fallback();
+      });
+      await run.page.route((u) => u.pathname === ACCEPT, async (route) => {
+        if (route.request().resourceType() === "document" && ++documents === 2) await successorHeld;
+        await route.fallback();
+      });
+      step("routes installed");
+      await run.page.goto(`${BASE}${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`, { waitUntil: "commit" });
+      step("document A committed");
+      // The pre-SDK scrub has run (fragment gone) while the page chunk is still held.
+      await run.page.waitForFunction(() => location.hash === "" && location.pathname === "/workspace-invitations/accept", null, { timeout: 20_000 });
+      step(`scrub ran; chunk held: ${chunkSeen}`);
+      expect(chunkSeen).toBe(true);
+      // What each new document sees in this tab's sessionStorage at its very start (before any page script).
+      await run.page.addInitScript((key) => {
+        (window as any).__cpEnvelopeAtStart = sessionStorage.getItem(key) ?? "";
+      }, ENVELOPE_KEY);
+      // Second link B in the same tab (same-document fragment navigation). The guard hands off and requests the
+      // successor document, which is held; nothing is evaluated in the page while that navigation is pending.
+      await run.page.evaluate((h) => {
+        location.hash = h;
+      }, `invitationId=${INV_ID2}&token=${INV_TOKEN2}`);
+      const deadline = Date.now() + 10_000;
+      while (documents < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+      step(`second link set; documents requested: ${documents}`);
+      expect(documents).toBe(2); // the guard handed off and the successor document has been requested (held)
+      // Now release A's page logic in the still-live first document; it holds the in-memory credential A.
+      releaseChunk();
+      await new Promise((r) => setTimeout(r, 5_000));
+      step("A's page logic released and given 5 s");
+      releaseSuccessor();
+      step("successor released");
+      await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+      await run.page.waitForTimeout(2_000);
+      const atStart = String(await run.page.evaluate(() => (window as any).__cpEnvelopeAtStart ?? ""));
+      console.log(`[next harness] R6 MINOR-3: successor document started with envelope holding A: ${atStart.includes(INV_TOKEN)}, B: ${atStart.includes(INV_TOKEN2)}`);
+      expect(atStart).toContain(INV_TOKEN2); // B survived A's late page logic
+      expect(atStart).not.toContain(INV_TOKEN);
+      expect(await navName(run.page)).not.toContain(INV_TOKEN2);
+      const final = await browserState(run.page);
+      expect(final.session).toContain(INV_TOKEN2);
+      expect(final.session).not.toContain(INV_TOKEN);
+      await run.page.waitForTimeout(4_000);
+      await run.save();
+      const all = await assertContained(run);
+      for (const needle of [INV_TOKEN, INV_ID, INV_TOKEN2, INV_ID2]) expect(leakList(requestsContaining(all.filter(isTelemetry), needle))).toEqual([]);
+    } finally {
+      releaseChunk();
+      releaseSuccessor();
       await run.close();
     }
   });
