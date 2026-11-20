@@ -190,7 +190,9 @@ const INVENTORY: Array<[string, string, string, Expect]> = [
   ["R1", "middleware ?next=", `/login?next=%2Fadmin%2Fusers`, { url: `/login?next=%2Fadmin%2Fusers`, landing: "/admin/users" }],
   ["R2", "admin layout ?next=", `/login?next=/admin`, { url: `/login?next=/admin`, landing: "/admin" }],
   ["R3", "invitation login redirect", `/login?redirect=%2Fworkspace-invitations%2Faccept`, { url: `/login?redirect=%2Fworkspace-invitations%2Faccept`, landing: "/workspace-invitations/accept" }],
-  ["R4", "invitation fragment (pre-existing, out of scope)", `/workspace-invitations/accept#invitationId=inv_123&token=tok_ABC-9`, { url: `/workspace-invitations/accept#invitationId=inv_123&token=tok_ABC-9` }],
+  // GHSA-655j-5f43-92pw: the acceptance credential is NO LONGER kept in the URL. It is captured into memory
+  // (lib/client/invitationAcceptance.ts) and the fragment dropped before any SDK initializes.
+  ["R4", "invitation fragment (GHSA-655j-5f43-92pw: dropped)", `/workspace-invitations/accept#invitationId=inv_123&token=tok_ABC-9`, { url: `/workspace-invitations/accept` }],
   ["R5", "Stripe success_url", `/billing?success=true&session_id=cs_test_a1B2c3D4e5`, { url: `/billing?success=true&session_id=cs_test_a1B2c3D4e5` }],
   ["R5 cancel", "Stripe cancel_url", `/billing?canceled=true`, { url: `/billing?canceled=true` }],
   ["R7", "pricing -> billing", `/billing?plan=lite&interval=year&upgraded=1`, { url: `/billing?plan=lite&interval=year&upgraded=1` }],

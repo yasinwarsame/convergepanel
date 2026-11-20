@@ -5,6 +5,7 @@ import type { BeforeSendFn, CaptureResult } from "posthog-js";
 import { PostHogProvider as PHProvider } from "posthog-js/react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, Suspense } from "react";
+import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
 import { sanitizeUrl, sanitizeUrlsInText, scrubUrlFields } from "@/lib/privacy/sanitizeUrl";
 import { redactExceptionValue } from "@/lib/privacy/exceptionText";
 import { scrubUrlBeforeTelemetry } from "@/lib/privacy/preTelemetryUrlScrub";
@@ -116,6 +117,10 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
     // `/flags` request — both bypass `before_send`. The URL is made clean HERE,
     // synchronously, immediately before init; no effect ordering is relied on.
     scrubUrlBeforeTelemetry();
+    // Private advisory GHSA-655j-5f43-92pw: a document loaded as the invitation acceptance link never initializes
+    // PostHog (its navigation timing entry keeps the original URL for the document's lifetime). See
+    // lib/telemetry/telemetryFreeDocument.ts.
+    if (isTelemetryFreeDocument()) return;
     posthog.init(key, {
       api_host: "/ingest",
       ui_host: host,

@@ -327,15 +327,17 @@ describe("R5 review mutant pins", () => {
     }
   });
 
-  it("M4: a registered routing fragment is kept only when EVERY key is registered", () => {
-    const [routePath, keys] = Array.from(rules.ROUTING_FRAGMENT_KEYS.entries())[0];
-    const allRegistered = keys.map((k, i) => `${k}=r5v${i}`).join("&");
-    expect(scrubUrlParts({ pathname: routePath, search: "", hash: `#${allRegistered}` }).hash).toBe(`#${allRegistered}`);
-    for (const extra of [`text=${SENTINEL}`, `extra=${SENTINEL}`, `${enc(`claim ${SENTINEL}`)}`]) {
-      const mixed = scrubUrlParts({ pathname: routePath, search: "", hash: `#${keys[0]}=r5v0&${extra}` });
-      expect(mixed.hash).toBe("");
-      expect(mixed.captures).toEqual([]);
+  it("M4 (GHSA-655j-5f43-92pw): no key=value fragment is kept on any path — the former invitation routing exception is gone", () => {
+    expect((rules as Record<string, unknown>).ROUTING_FRAGMENT_KEYS).toBeUndefined();
+    const credential = `#invitationId=r5v0&token=${SENTINEL}`;
+    for (const path of ["/workspace-invitations/accept", "/workspace-invitations/accept/", "/", "/workspace"]) {
+      const out = scrubUrlParts({ pathname: path, search: "", hash: credential });
+      expect(out.hash).toBe("");
+      expect(out.captures).toEqual([]);
+      expect(out.changed).toBe(true);
     }
+    // A plain in-page anchor is still kept.
+    expect(scrubUrlParts({ pathname: "/workspace-invitations/accept", search: "", hash: "#faq" }).hash).toBe("#faq");
   });
 
   it("M1: a protocol-relative nested target (`//host/...`) is not a local path: dropped", () => {
