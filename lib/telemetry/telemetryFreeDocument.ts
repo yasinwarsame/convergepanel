@@ -14,13 +14,16 @@
  *
  * Decided once per document from the navigation entry (falls back to the current
  * pathname where the Performance API is unavailable; if both are unreadable,
- * telemetry stays off — fail closed). Dependency-free, never throws, never logs.
+ * telemetry stays off — fail closed). Correction round (MINOR-1): a document that
+ * starts while the tab holds the invitation continuity envelope (sessionStorage)
+ * is telemetry-free as well, whatever its URL. Dependency-free, never throws, never logs.
  */
-import { INVITATION_ACCEPTANCE_ROUTE_PATH } from "@/lib/client/invitationAcceptance";
+import { hasInvitationAcceptanceEnvelope, INVITATION_ACCEPTANCE_ROUTE_PATH } from "@/lib/client/invitationAcceptance";
 
 type DocWindow = {
   location?: { pathname?: string } | null;
   performance?: { getEntriesByType?: (type: string) => ArrayLike<{ name?: string }> } | null;
+  sessionStorage?: Pick<Storage, "getItem"> | null;
 };
 
 let decision: boolean | null = null;
@@ -37,7 +40,25 @@ function isAcceptancePath(pathname: string | null | undefined): boolean {
   return pathname === INVITATION_ACCEPTANCE_ROUTE_PATH || pathname === `${INVITATION_ACCEPTANCE_ROUTE_PATH}/`;
 }
 
+function envelopePresent(win: DocWindow): boolean {
+  let storage: Pick<Storage, "getItem"> | null = null;
+  try {
+    storage = win.sessionStorage ?? null; // the getter throws when site data is blocked
+  } catch {
+    storage = null;
+  }
+  return hasInvitationAcceptanceEnvelope(storage);
+}
+
 function decide(win: DocWindow): boolean {
+  // Correction round (MINOR-1): a document that starts while this tab still holds the invitation continuity envelope
+  // (a reload of /login mid-flow, a sign-in redirect return, a duplicated tab, any full-page navigation before the
+  // invitation is accepted, rejected or the envelope expires) can reach the raw token, so it is telemetry-free too.
+  if (envelopePresent(win)) return true;
+  return decideFromDocumentUrl(win);
+}
+
+function decideFromDocumentUrl(win: DocWindow): boolean {
   let navigationName: string | undefined;
   try {
     const entries = win.performance?.getEntriesByType?.("navigation");

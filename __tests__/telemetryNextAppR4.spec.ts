@@ -393,6 +393,110 @@ d("real Next.js production build (contained)", () => {
     });
   }
 
+  // Correction round (owner decision on review R2 MINOR-1 / MINOR-2).
+  const ENVELOPE_KEY = "convergepanel.invitationAcceptance.v1";
+  const INV_TOKEN2 = "ZQX7SECONDINVITETOKEN";
+  const INV_ID2 = "inv_ZQX7SECONDSYNTH";
+  const navName = (page: Page) => page.evaluate(() => (performance.getEntriesByType("navigation")[0] as PerformanceEntry | undefined)?.name ?? "");
+  const telemetryDuring = async (run: Awaited<ReturnType<typeof open>>, from: number) => (await run.all()).slice(from).filter(isTelemetry);
+  /** The acceptance POST exactly as AcceptInvitationClient sends it after restoring the envelope (signed-in branch; no Firebase in the harness). */
+  const acceptancePost = (page: Page) =>
+    page.evaluate(async (key) => {
+      const env = JSON.parse(sessionStorage.getItem(key) ?? "null");
+      if (!env) return "no-envelope";
+      const res = await fetch(`/api/workspace-invitations/${encodeURIComponent(env.invitationId)}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ token: env.token }),
+      });
+      return String(res.status);
+    }, ENVELOPE_KEY);
+
+  it("MINOR-1: invitation link → /login → full-page RELOAD with the envelope live → acceptance POST: that document never initializes telemetry; the credential reaches only the first-party POST; telemetry returns once the envelope is gone", async () => {
+    const run = await open(`${ACCEPT}#invitationId=${INV_ID}&token=${INV_TOKEN}`, "normal");
+    try {
+      await run.page.route("**/api/workspace-invitations/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, workspaceId: "ws_ZQX7SYNTH", alreadyMember: false }) }));
+      await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+      await run.page.waitForTimeout(2_000);
+      await run.save();
+      const before = (await run.all()).length;
+      await run.page.reload({ waitUntil: "load" });
+      // A NEW document whose own URL is /login (navigation entry is clean) but whose tab holds the raw-token envelope.
+      expect(await navName(run.page)).toBe(`${BASE}/login?redirect=${enc(ACCEPT)}`);
+      expect((await browserState(run.page)).session).toContain(INV_TOKEN);
+      await run.page.waitForTimeout(6_000);
+      expect(await acceptancePost(run.page)).toBe("200");
+      await run.page.waitForTimeout(6_000);
+      await run.save();
+      const reloadedTelemetry = await telemetryDuring(run, before);
+      console.log(`[next harness] MINOR-1 reloaded /login document: ${reloadedTelemetry.length} telemetry request(s); carrying token: ${requestsContaining(reloadedTelemetry, INV_TOKEN).length}; carrying invitation id: ${requestsContaining(reloadedTelemetry, INV_ID).length}`);
+      expect(leakList(reloadedTelemetry)).toEqual([]);
+      expect((await browserState(run.page)).local).not.toMatch(/(^|;)ph_/);
+      // Positive control: the credential DID travel — only in the one first-party acceptance POST body.
+      const carrying = requestsContaining(await run.all(), INV_TOKEN);
+      expect(carrying.map((r) => `${r.decision}:${new URL(r.url).pathname}`)).toEqual(expect.arrayContaining([`app:/api/workspace-invitations/${INV_ID}/accept`]));
+      expect(carrying.filter((r) => !new URL(r.url).pathname.startsWith("/api/workspace-invitations/"))).toEqual([]);
+      // Telemetry resumes: the page clears the envelope on success; the next clean full-page load is an ordinary document.
+      await run.page.evaluate((key) => sessionStorage.removeItem(key), ENVELOPE_KEY);
+      const beforeClean = (await run.all()).length;
+      await run.page.goto(`${BASE}/pricing`, { waitUntil: "load" });
+      await run.page.waitForTimeout(6_000);
+      await run.save();
+      const cleanTelemetry = await telemetryDuring(run, beforeClean);
+      expect(cleanTelemetry.length).toBeGreaterThan(0);
+      expect(requestsContaining(cleanTelemetry, INV_TOKEN)).toEqual([]);
+      const all = await assertContained(run);
+      expect(leakList(requestsContaining(all.filter(isTelemetry), INV_TOKEN))).toEqual([]);
+      expect(leakList(requestsContaining(all.filter(isTelemetry), INV_ID))).toEqual([]);
+    } finally {
+      await run.close();
+    }
+  });
+
+  for (const origin of ["acceptance", "ordinary"] as const) {
+    it(`MINOR-2: a second invitation link by same-document fragment navigation (${origin} document) is carried to a fresh telemetry-free document, never dropped; neither credential reaches telemetry`, async () => {
+      const run = await open(origin === "acceptance" ? ACCEPT : "/pricing", "normal");
+      try {
+        if (origin === "acceptance") {
+          // No fragment, no envelope: the acceptance document shows 'Invitation unavailable' and stays on the path.
+          await run.page.waitForSelector("text=Invitation unavailable", { timeout: 20_000 });
+        } else {
+          await run.page.waitForTimeout(6_000); // an ordinary, telemetry-ON document (both SDKs running)
+          await run.save();
+          expect((await run.all()).filter(isTelemetry).length).toBeGreaterThan(0);
+          await run.page.evaluate((p) => history.replaceState(history.state, "", p), ACCEPT); // now on the acceptance path, same document
+        }
+        await run.page.evaluate(() => ((window as any).__cpFirstDocument = true)); // marks THIS document
+        await run.save();
+        // Same-document fragment navigation (as when a second link is opened in this tab).
+        await run.page.evaluate((h) => {
+          location.hash = h;
+        }, `invitationId=${INV_ID2}&token=${INV_TOKEN2}`);
+        // Signed out (no Firebase): the fresh document restores it and goes to sign-in with the SECOND credential in the envelope.
+        await run.page.waitForURL(/\/login\?redirect=/, { timeout: 20_000 });
+        expect(await run.page.evaluate(() => (window as any).__cpFirstDocument ?? false)).toBe(false); // a NEW document
+        expect(await navName(run.page)).toBe(`${BASE}${ACCEPT}`); // a clean acceptance document (no fragment in its navigation entry)
+        const state = await browserState(run.page);
+        expect(state.session).toContain(INV_TOKEN2);
+        expect(state.session).toContain(INV_ID2);
+        expect(state.href).not.toContain(INV_TOKEN2);
+        expect(state.historyState).not.toContain(INV_TOKEN2);
+        await run.page.waitForTimeout(6_000);
+        await run.save();
+        const all = await assertContained(run);
+        expect(leakList(requestsContaining(all, INV_TOKEN2))).toEqual([]);
+        expect(leakList(requestsContaining(all, INV_ID2))).toEqual([]);
+        await run.page.goBack();
+        await run.page.waitForTimeout(1_500);
+        expect(await run.page.evaluate(() => location.href)).not.toContain(INV_TOKEN2);
+      } finally {
+        await run.close();
+      }
+    });
+  }
+
   it("positive control: Sentry traffic went through the /monitoring tunnel and was answered locally; the server guard log is empty", () => {
     const tunnel = allObserved.filter((r) => r.decision === "sentry-tunnel");
     expect(tunnel.length).toBeGreaterThan(0);

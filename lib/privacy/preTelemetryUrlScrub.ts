@@ -32,7 +32,11 @@
  * scripts ran. Dependency-light (no React, no Firebase). Never throws, never logs.
  */
 import { migrateContentFromUrl } from "@/lib/client/verifyPrefill";
-import { captureInvitationCredentialFromLocation } from "@/lib/client/invitationAcceptance";
+import {
+  captureInvitationCredentialFromLocation,
+  installInvitationFragmentNavigationGuard,
+  purgeStaleInvitationAcceptance,
+} from "@/lib/client/invitationAcceptance";
 import { sanitizeUrl } from "@/lib/privacy/sanitizeUrl";
 
 type ScrubWindow = {
@@ -73,6 +77,11 @@ export function scrubUrlBeforeTelemetry(win: ScrubWindow | undefined = typeof wi
   // GHSA-655j-5f43-92pw: hand the invitation acceptance credential to the page in memory FIRST; the scrub below then
   // drops that fragment like every other key=value fragment (no routing-fragment exception remains).
   captureInvitationCredentialFromLocation(win.location);
+  // Correction round: a stale envelope is removed before the per-document telemetry decision, and a credential that
+  // later arrives by a same-document fragment navigation is moved to a fresh, telemetry-free document. The guard is
+  // registered here, before Sentry.init installs its history handlers, so it runs first.
+  purgeStaleInvitationAcceptance(storageOf(win), Date.now());
+  installInvitationFragmentNavigationGuard(win as unknown as Parameters<typeof installInvitationFragmentNavigationGuard>[0]);
   try {
     migrateContentFromUrl({ location: win.location, history: win.history ?? null, storage: storageOf(win), currentUid: null });
   } catch {

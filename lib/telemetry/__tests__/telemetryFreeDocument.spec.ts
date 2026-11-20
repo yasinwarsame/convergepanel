@@ -59,6 +59,23 @@ describe("isTelemetryFreeDocument", () => {
     expect(isTelemetryFreeDocument(win)).toBe(true);
   });
 
+  it("correction round: a document whose tab holds the invitation envelope is telemetry-free whatever its URL; any value under the key counts; blocked storage reads as absent", () => {
+    const KEY = "convergepanel.invitationAcceptance.v1";
+    const store = (v: string | null) => ({ getItem: (k: string) => (k === KEY ? v : null) });
+    const login = nav("https://convergepanel.com/login?redirect=%2Fworkspace-invitations%2Faccept");
+    expect(fresh().isTelemetryFreeDocument({ performance: login, sessionStorage: store('{"version":1}') })).toBe(true);
+    expect(fresh().isTelemetryFreeDocument({ performance: login, sessionStorage: store("garbage") })).toBe(true);
+    expect(fresh().isTelemetryFreeDocument({ performance: login, sessionStorage: store(null) })).toBe(false);
+    const throwing = {
+      performance: login,
+      get sessionStorage(): never {
+        throw new Error("SecurityError");
+      },
+    } as unknown as Win;
+    expect(fresh().isTelemetryFreeDocument(throwing)).toBe(false);
+    expect(fresh().isTelemetryFreeDocument({ performance: login, sessionStorage: { getItem: () => { throw new Error("x"); } } })).toBe(false);
+  });
+
   it("covers the trailing-slash acceptance URL and no other path; no window → false (server render)", () => {
     expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations/accept/#x=1") })).toBe(true);
     expect(fresh().isTelemetryFreeDocument({ performance: nav("https://convergepanel.com/workspace-invitations/acceptance") })).toBe(false);

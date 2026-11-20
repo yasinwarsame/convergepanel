@@ -186,6 +186,106 @@ export function captureInvitationCredentialFromLocation(location: { pathname: st
   }
 }
 
+/**
+ * GHSA-655j-5f43-92pw (correction round, MINOR-1): whether this tab's existing continuity envelope is present. Any
+ * value under the key counts (it may hold a still-redeemable token even if malformed or past the client TTL). Read-only.
+ * `false` when sessionStorage is unusable: the envelope is written only through this same tab storage, and an SDK in a
+ * document where that storage is blocked cannot read it either.
+ */
+export function hasInvitationAcceptanceEnvelope(storage: Pick<Storage, "getItem"> | null | undefined): boolean {
+  try {
+    return !!storage && storage.getItem(SESSION_STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GHSA-655j-5f43-92pw (correction round, MINOR-1): removes an expired or malformed envelope before the telemetry
+ * decision, so a stale envelope does not keep later documents telemetry-free. A valid, in-TTL envelope is left as is.
+ */
+export function purgeStaleInvitationAcceptance(storage: Pick<Storage, "getItem" | "removeItem"> | null | undefined, now: number): void {
+  if (!storage) return;
+  try {
+    restoreInvitationAcceptance(storage, now); // clears malformed / wrong-version / expired records; never throws
+  } catch {
+    /* never throws */
+  }
+}
+
+type GuardWindow = {
+  location: Pick<Location, "pathname" | "search" | "hash" | "replace">;
+  history?: Pick<History, "replaceState" | "state"> | null;
+  sessionStorage?: Storage | null;
+  addEventListener?: (type: string, listener: (event: Event) => void) => void;
+};
+
+let fragmentGuardInstalled = false;
+
+/**
+ * GHSA-655j-5f43-92pw (correction round, MINOR-2): a credential fragment that arrives by a SAME-DOCUMENT navigation
+ * (a second invitation link opened in a tab already on the acceptance page) is never processed in that document and
+ * never silently dropped. Installed from the pre-telemetry scrub, i.e. before `Sentry.init` registers its history
+ * handlers, so this listener runs first on `popstate` / `hashchange`. It:
+ *   1. parses the fragment, then removes it from the address bar (replaceState) and stops later listeners;
+ *   2. valid → writes it to the EXISTING tab envelope (the fragment is authoritative: it replaces any earlier one);
+ *      invalid → clears the envelope;
+ *   3. replaces the document with a full load of the clean acceptance URL. That new document starts with the envelope
+ *      present, so it never initializes telemetry (isTelemetryFreeDocument), and the page restores the credential.
+ * Never logs. Idempotent.
+ */
+export function installInvitationFragmentNavigationGuard(win: GuardWindow | undefined): void {
+  if (fragmentGuardInstalled || !win || typeof win.addEventListener !== "function") return;
+  fragmentGuardInstalled = true;
+  const onNavigation = (event: Event) => {
+    let rawHash = "";
+    try {
+      if (!isAcceptancePath(String(win.location.pathname))) return;
+      rawHash = String(win.location.hash ?? "");
+    } catch {
+      return;
+    }
+    if (rawHash.length <= 1) return;
+    let parsed: ParsedInvitationFragment;
+    try {
+      parsed = parseInvitationFragment(rawHash);
+    } catch {
+      parsed = { kind: "invalid" };
+    }
+    try {
+      win.history?.replaceState(win.history.state, "", `${String(win.location.pathname)}${String(win.location.search ?? "")}`);
+    } catch {
+      /* the replace below still leaves this document */
+    }
+    try {
+      event.stopImmediatePropagation();
+    } catch {
+      /* best effort */
+    }
+    let storage: Storage | null = null;
+    try {
+      storage = win.sessionStorage ?? null;
+    } catch {
+      storage = null;
+    }
+    if (storage) {
+      if (parsed.kind === "valid") storeInvitationAcceptance(storage, { invitationId: parsed.invitationId, token: parsed.token }, Date.now());
+      else clearInvitationAcceptance(storage);
+    }
+    try {
+      win.location.replace(INVITATION_ACCEPTANCE_ROUTE_PATH);
+    } catch {
+      /* nothing else to do */
+    }
+  };
+  try {
+    win.addEventListener("popstate", onNavigation);
+    win.addEventListener("hashchange", onNavigation);
+  } catch {
+    /* best effort */
+  }
+}
+
 /** Returns the captured credential (valid or invalid) and forgets it; `null` when nothing was captured. */
 export function takeCapturedInvitationCredential(): ParsedInvitationFragment | null {
   const taken = capturedCredential;
