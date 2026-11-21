@@ -51,7 +51,7 @@
     "firebase-admin": "^12.7.0",
     "lucide-react": "^1.0.1",
     "mammoth": "^1.12.0",
-    "next": "^14.2.33",
+    "next": "^16.4.6",
     "openai": "^4.47.0",
     "pdfjs-dist": "^6.2.108",
     "posthog-js": "^1.379.1",
