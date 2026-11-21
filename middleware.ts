@@ -32,9 +32,14 @@ export function stripProxyCredentials(headers: Headers): Headers {
   return out;
 }
 
+/** `/ingest` (PostHog proxy) and `/monitoring` (Sentry tunnel), in ANY letter case (review F1). */
+export function isTelemetryProxyPath(pathname: string): boolean {
+  const p = pathname.toLowerCase();
+  return p === "/ingest" || p.startsWith("/ingest/") || p === "/monitoring" || p.startsWith("/monitoring/");
+}
+
 export function middleware(request: NextRequest) {
-  const path = request.nextUrl.pathname;
-  if (path === "/ingest" || path.startsWith("/ingest/")) {
+  if (isTelemetryProxyPath(request.nextUrl.pathname)) {
     return NextResponse.next({ request: { headers: stripProxyCredentials(request.headers) } });
   }
   // Gate /admin routes: redirect to login if no session cookie is present.
@@ -53,6 +58,13 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/ingest", "/ingest/:path*"],
+  // Case-insensitive matchers for the telemetry proxies (review F1); `/admin` gating is unchanged.
+  matcher: [
+    "/admin/:path*",
+    "/:p([iI][nN][gG][eE][sS][tT])",
+    "/:p([iI][nN][gG][eE][sS][tT])/:path*",
+    "/:p([mM][oO][nN][iI][tT][oO][rR][iI][nN][gG])",
+    "/:p([mM][oO][nN][iI][tT][oO][rR][iI][nN][gG])/:path*",
+  ],
 };
 

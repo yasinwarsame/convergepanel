@@ -31,6 +31,11 @@ const nextConfig = {
     ];
   },
   experimental: {
+    // Structural hardening (GHSA-655j-5f43-92pw follow-up): rewrites match case-insensitively by default, so
+    // `/INGEST/...` and `/Monitoring?o=&p=` reached the PostHog proxy and the SDK's Sentry tunnel rewrite (which
+    // forwards request headers, cookies included) past the case-sensitive middleware and the `/monitoring` route.
+    // Rewrites, redirects and header rules now match the exact case the app uses.
+    caseSensitiveRoutes: true,
     serverActions: {
       bodySizeLimit: "12mb",
     },

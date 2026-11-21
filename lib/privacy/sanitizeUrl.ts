@@ -64,7 +64,7 @@ export function sanitizeQueryString(query: string): string {
     const value = eq === -1 ? "" : safeDecode(pair.slice(eq + 1));
     if (isSafeParamValue(key, value)) {
       out.push(pair);
-    } else if (PLAIN_PARAM_NAME.test(key)) {
+    } else if (PLAIN_PARAM_NAME.test(key) && !hasCredentialShapedRun(key)) {
       out.push(`${rawKey}=${REDACTED}`);
     } else {
       out.push(REDACTED);
@@ -280,7 +280,7 @@ function sanitizeQueryValue(value: unknown): unknown {
       if (Array.isArray(pair) && pair.length >= 1) {
         const key = String(pair[0]);
         if (isSafeParamValue(key, String(pair[1] ?? ""))) return pair;
-        return PLAIN_PARAM_NAME.test(key) ? [key, REDACTED] : [REDACTED, REDACTED];
+        return PLAIN_PARAM_NAME.test(key) && !hasCredentialShapedRun(key) ? [key, REDACTED] : [REDACTED, REDACTED];
       }
       return REDACTED;
     });
@@ -289,7 +289,7 @@ function sanitizeQueryValue(value: unknown): unknown {
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
       if (isSafeParamValue(key, String(v ?? ""))) out[key] = v;
-      else if (PLAIN_PARAM_NAME.test(key)) out[key] = REDACTED;
+      else if (PLAIN_PARAM_NAME.test(key) && !hasCredentialShapedRun(key)) out[key] = REDACTED;
       else out[REDACTED] = REDACTED;
     }
     return out;
@@ -325,6 +325,15 @@ export function scrubUrlFields<T>(payload: T, options: { maxDepth?: number } = {
       return;
     }
     const record = node as Record<string, unknown>;
+    // Review F4: an object KEY that embeds a URL or path is renamed to its sanitized form.
+    for (const key of Object.keys(record)) {
+      const cleanKey = sanitizeUrlsInText(key);
+      if (cleanKey !== key) {
+        const v = record[key];
+        delete record[key];
+        record[cleanKey] = v;
+      }
+    }
     for (const key of Object.keys(record)) {
       const value = record[key];
       if (depth >= maxDepth && value && typeof value === "object") {
@@ -333,14 +342,19 @@ export function scrubUrlFields<T>(payload: T, options: { maxDepth?: number } = {
         continue;
       }
       if (isFragmentKey(key)) {
-        if (typeof value === "string") record[key] = REDACTED;
+        // Review F4: a fragment value of any type is replaced, not only a string.
+        if (value !== undefined && value !== null) record[key] = REDACTED;
       } else if (isQueryKey(key)) {
         record[key] = sanitizeQueryValue(value);
       } else if (isUrlKey(key)) {
         const codeLocation = isCodeLocationKey(key);
         if (typeof value === "string") record[key] = sanitizeUrl(value, { codeLocation });
-        else if (Array.isArray(value)) record[key] = value.map((v) => (typeof v === "string" ? sanitizeUrl(v, { codeLocation }) : v));
-        else walk(value, depth + 1);
+        else if (Array.isArray(value)) {
+          // Review F4: non-string elements under a URL key are walked, not passed through.
+          const mapped = value.map((v) => (typeof v === "string" ? sanitizeUrl(v, { codeLocation }) : v));
+          record[key] = mapped;
+          walk(mapped, depth + 1);
+        } else walk(value, depth + 1);
       } else if (typeof value === "string") {
         record[key] = sanitizeUrlsInText(value);
       } else {

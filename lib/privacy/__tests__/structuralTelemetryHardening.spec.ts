@@ -323,7 +323,7 @@ describe("S5 configuration wiring", () => {
 });
 
 describe("S6 the /ingest reverse proxy forwards no first-party credentials", () => {
-  const { middleware, config, PROXY_STRIPPED_REQUEST_HEADERS } = require("../../../middleware");
+  const { middleware, config, PROXY_STRIPPED_REQUEST_HEADERS, isTelemetryProxyPath } = require("../../../middleware");
   const { NextRequest } = require("next/server");
 
   const request = (path: string) =>
@@ -342,11 +342,71 @@ describe("S6 the /ingest reverse proxy forwards no first-party credentials", () 
   });
 
   it("the matcher covers the proxy; /admin gating is unchanged (control)", () => {
-    expect(config.matcher).toEqual(expect.arrayContaining(["/admin/:path*", "/ingest", "/ingest/:path*"]));
+    expect(config.matcher).toContain("/admin/:path*");
     const admin = middleware(new NextRequest(`${ORIGIN}/admin/users`));
     expect(admin.status).toBe(307);
     expect(admin.headers.get("location")).toContain("/login?next=%2Fadmin%2Fusers");
     const pricing = middleware(request("/admin/keys"));
     expect(pricing.headers.get("x-middleware-override-headers")).toBeNull();
+  });
+});
+
+describe("S7 review corrections (F1 case variants, F4 keys / nested values, F5 parameter names)", () => {
+  const { middleware, config, isTelemetryProxyPath } = require("../../../middleware");
+  const { NextRequest } = require("next/server");
+
+  // Next.js matcher strings use path-to-regexp; compile them the same way to prove case variants are matched.
+  const { pathToRegexp } = require("next/dist/compiled/path-to-regexp");
+  const matches = (path: string) => (config.matcher as string[]).some((m) => pathToRegexp(m).test(path));
+
+  it.each(["/INGEST/e/", "/Ingest/e/", "/iNgEsT", "/Monitoring", "/MONITORING/", "/monitoring", "/ingest/static/array.js"])(
+    "F1: %s is matched by the middleware and credentials are stripped",
+    (path) => {
+      expect(isTelemetryProxyPath(path)).toBe(true);
+      expect(matches(path)).toBe(true);
+      const res = middleware(new NextRequest(`${ORIGIN}${path}?o=1&p=2`, { headers: { cookie: "__session=SESSIONSENTINEL", authorization: "Bearer X", accept: "*/*" } }));
+      const overridden = String(res.headers.get("x-middleware-override-headers") ?? "").split(",");
+      expect(overridden).toContain("accept");
+      expect(overridden).not.toContain("cookie");
+      expect(overridden).not.toContain("authorization");
+    }
+  );
+
+  it("F1: unrelated paths are not telemetry proxies (control)", () => {
+    for (const p of ["/ingestion", "/monitor", "/api/ingest", "/pricing"]) expect(isTelemetryProxyPath(p)).toBe(false);
+    expect(matches("/pricing")).toBe(false);
+    expect(matches("/api/user/usage")).toBe(false);
+  });
+
+  it("F1: rewrites, redirects and header rules match case-sensitively", async () => {
+    jest.doMock("@sentry/nextjs", () => ({ withSentryConfig: (c: unknown) => c }));
+    let cfg: any;
+    jest.isolateModules(() => {
+      cfg = require("../../../next.config.js");
+    });
+    expect(cfg.experimental.caseSensitiveRoutes).toBe(true);
+  });
+
+  it("F4: object keys embedding URLs are renamed; objects under URL keys and fragment values of any type are sanitized", () => {
+    const p: any = {
+      [`${ORIGIN}/workspace/team/${WS}`]: 1,
+      urls: [{ x: `/workspace/team/${WS}` }, `/admin/users/${INV}`],
+      fragment: { v: TOK },
+      "url.fragment": [TOK],
+    };
+    scrubUrlFields(p);
+    expect(noSecret(JSON.stringify(p))).toBe(true);
+    expect(p[`${ORIGIN}/workspace/team/[workspaceId]`]).toBe(1);
+    expect(p.urls[0].x).toBe("/workspace/team/[workspaceId]");
+    expect(p.fragment).toBe(REDACTED);
+    expect(p["url.fragment"]).toBe(REDACTED);
+  });
+
+  it("F5: a credential-shaped query parameter NAME is collapsed", () => {
+    expect(sanitizeUrl(`/pricing?${TOK}`)).toBe(`/pricing?${REDACTED}`);
+    expect(sanitizeUrl(`/pricing?${TOK}=1&tab=x`)).toBe(`/pricing?${REDACTED}&tab=${REDACTED}`);
+    const q: any = { query_string: [[TOK, "1"]], "url.query": { [TOK]: "1" } };
+    scrubUrlFields(q);
+    expect(noSecret(JSON.stringify(q))).toBe(true);
   });
 });

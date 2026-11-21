@@ -327,7 +327,8 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
 
   // LAST: this test makes the app server attempt the PostHog proxy connection (refused by the egress guard).
   it("H5: the /ingest proxy forwards no Cookie or Authorization header to PostHog", async () => {
-    for (const path of ["/ingest/e/?ip=0", "/ingest/static/array.js", "/ingest/flags/?v=2"]) {
+    // Review F1: case variants of the PostHog proxy and of the SDK's Sentry tunnel rewrite (`/monitoring?o=&p=`).
+    for (const path of ["/ingest/e/?ip=0", "/ingest/static/array.js", "/ingest/flags/?v=2", "/INGEST/e/?ip=0", "/Ingest/e/", "/Monitoring?o=1&p=2", "/MONITORING/?o=1&p=2&r=de", "/monitoring?o=1&p=2"]) {
       await fetch(`${BASE}${path}`, {
         method: path.includes("static") ? "GET" : "POST",
         headers: {
@@ -341,9 +342,12 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
     await new Promise((r) => setTimeout(r, 2_000));
     const probes = readFileSync(probeLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { host: string; path: string; headerNames: string[] });
     const toPostHog = probes.filter((p) => /(^|\.)posthog\.com$/.test(p.host));
+    // No proxied request to ANY vendor host (PostHog or Sentry) carries first-party credentials.
+    const toVendors = probes.filter((p) => /(^|\.)(posthog\.com|sentry\.io)$/.test(p.host));
+    expect(toVendors.filter((p) => p.headerNames.includes("cookie") || p.headerNames.includes("authorization")).map((p) => `${p.host}${p.path}`)).toEqual([]);
     // Positive control: the proxy did try to forward each request (and the guard refused it).
     expect(new Set(toPostHog.map((p) => p.path.split("/").slice(0, 2).join("/"))).size).toBeGreaterThanOrEqual(2);
-    expect(guardAttempts().map((l) => JSON.parse(l).host).every((h: string) => /(^|\.)posthog\.com$/.test(h))).toBe(true);
+    expect(guardAttempts().map((l) => JSON.parse(l).host).every((h: string) => /(^|\.)(posthog\.com|sentry\.io)$/.test(h))).toBe(true);
     for (const p of toPostHog) {
       expect(p.headerNames).not.toContain("cookie");
       expect(p.headerNames).not.toContain("authorization");
