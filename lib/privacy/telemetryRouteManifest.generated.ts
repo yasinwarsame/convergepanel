@@ -163,6 +163,7 @@ export const TELEMETRY_ROUTE_PATTERNS: readonly string[] = [
   "/terms",
   "/use-cases",
   "/use-cases/[slug]",
+  "/vendor/pdfjs/6.3.289/pdf.worker.min.mjs",
   "/verify",
   "/video-verification.png",
   "/workspace",

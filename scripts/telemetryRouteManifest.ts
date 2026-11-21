@@ -25,6 +25,8 @@ function walk(dir: string, out: string[]): void {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) {
       if (name === "__tests__" || name === "node_modules" || name.startsWith("_") || name.startsWith("@")) continue;
+      // Build output materialized into public/ (git-ignored) is added deterministically below, not read from disk.
+      if (full.endsWith(join("public", "vendor", "pdfjs"))) continue;
       walk(full, out);
     } else {
       out.push(full);
@@ -72,6 +74,13 @@ export function collectRoutes(root: string): string[] {
   walk(join(root, "public"), publicFiles);
   for (const file of publicFiles) routes.add("/" + relative(join(root, "public"), file).split(sep).join("/"));
   for (const r of FRAMEWORK_ROUTES) routes.add(r);
+  // The pdf.js worker is copied into public/ by the build (scripts/pdfjs-worker/materialize.js); its served URL is
+  // derived from the locked package version, so the manifest does not depend on whether a build ran locally.
+  const pdfWorker = require("./pdfjs-worker/materialize.js") as {
+    resolveSource: (root: string) => { version: string };
+    servedWorkerUrl: (version: string) => string;
+  };
+  routes.add(pdfWorker.servedWorkerUrl(pdfWorker.resolveSource(root).version));
   return [...routes].sort();
 }
 

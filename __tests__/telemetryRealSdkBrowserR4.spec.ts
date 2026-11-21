@@ -48,7 +48,7 @@ afterAll(async () => {
 });
 
 async function settle(run: Awaited<ReturnType<typeof openPage>>) {
-  await run.page.waitForRequest((r) => r.url().includes("/ingest/flags"), { timeout: 15_000 }).catch(() => undefined);
+  await run.page.waitForRequest((r) => r.url().includes("/ingest/e"), { timeout: 15_000 }).catch(() => undefined);
   await run.page.waitForTimeout(4_000); // PostHog batch flush interval is 3 s
 }
 
@@ -88,9 +88,9 @@ d("real posthog-js + Sentry: no claim text in any request (extension #text= hand
         });
         await controlsAndUnload(run);
         const all = await run.all();
-        // The /flags request is actually observed at both layers (instrumentation is live)...
-        expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(true);
-        expect(all.some((r) => r.layer === "page" && r.url.includes("/ingest/flags"))).toBe(true);
+        // The /flags request is never made (structural hardening disables it); instrumentation liveness is shown by the controls below...
+        expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: /flags disabled
+        expect(all.some((r) => r.layer === "page" && r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: /flags disabled
         // The $pageleave sendBeacon on unload is observed too (beacon requests are instrumented).
         expect(all.some((r) => r.layer === "network" && r.kind === "ping" && r.url.includes("/ingest/"))).toBe(true);
         // ...and the CONTROL sentinel is found in decoded PostHog AND Sentry bodies (decoding is live).
@@ -127,7 +127,7 @@ d("real posthog-js + Sentry: legacy claim-bearing query links", () => {
           expect(href).toContain(UTM);
           await controlsAndUnload(run);
           const all = await run.all();
-          expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(true);
+          expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: /flags disabled
           expect(requestsContaining(all.filter((r) => r.url.includes("/ingest/")), CONTROL).length).toBeGreaterThan(0);
           // A legacy query link is a SERVER-VISIBLE URL: the document request itself, and the Referer of the
           // subresources the HTML parser requests before any script runs, carry it (documented residual,
@@ -156,7 +156,7 @@ d("real posthog-js: a same-origin referrer that carried claim text (full-page na
         await settle(run);
         await controlsAndUnload(run);
         const all = await run.all();
-        expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(true);
+        expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: /flags disabled
         expect(requestsContaining(all.filter((r) => r.url.includes("/ingest/")), CONTROL).length).toBeGreaterThan(0);
         // The browser sends the (test-supplied) Referer on the document request itself; nothing else may carry it.
         const leaks = requestsContaining(all, SENTINEL).filter((r) => !(r.layer === "network" && r.kind === "document"));

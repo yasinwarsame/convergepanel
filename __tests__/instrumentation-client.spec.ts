@@ -104,11 +104,11 @@ describe("instrumentation-client — Replay client-navigation scrub", () => {
     // into the sensitive route pushes a second, fragment-bearing entry.
     const fixture = {
       type: "replay_event",
-      initialUrl: "https://convergepanel.com/dashboard",
-      urls: ["https://convergepanel.com/dashboard", FRAGMENT_URL],
+      initialUrl: "https://convergepanel.com/pricing",
+      urls: ["https://convergepanel.com/pricing", FRAGMENT_URL],
     };
     const result = capturedProcessor!(fixture);
-    expect(result.urls).toEqual(["https://convergepanel.com/dashboard", SCRUBBED_URL]);
+    expect(result.urls).toEqual(["https://convergepanel.com/pricing", SCRUBBED_URL]);
     expect(JSON.stringify(result)).not.toContain(SENTINEL);
   });
 });
@@ -147,13 +147,13 @@ describe("instrumentation-client — ordinary event fields", () => {
   it("leaves non-fragment URLs and unrelated event data untouched", () => {
     load();
     const fixture = {
-      request: { url: "https://convergepanel.com/api/thing" },
-      urls: ["https://convergepanel.com/dashboard"],
+      request: { url: "https://convergepanel.com/api/user/usage" },
+      urls: ["https://convergepanel.com/pricing"],
       unrelatedField: "kept-exactly",
     };
     const result = capturedProcessor!(fixture);
-    expect(result.request.url).toBe("https://convergepanel.com/api/thing");
-    expect(result.urls).toEqual(["https://convergepanel.com/dashboard"]);
+    expect(result.request.url).toBe("https://convergepanel.com/api/user/usage");
+    expect(result.urls).toEqual(["https://convergepanel.com/pricing"]);
     expect(result.unrelatedField).toBe("kept-exactly");
   });
 
