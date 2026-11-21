@@ -36,6 +36,7 @@ const PORT = Number(process.env.CP_NEXT_HARNESS_PORT ?? "3998");
 const BASE = `http://127.0.0.1:${PORT}`;
 const GUARD = join(ROOT, "__tests__/helpers/egressGuard.cjs");
 const PROBE = join(ROOT, "__tests__/helpers/proxyHeaderProbe.cjs");
+const LOOPBACK = join(ROOT, "__tests__/helpers/posthogLoopback.cjs");
 // 43 base64url characters with both cases: the invitation token shape. Distinct sentinels per role.
 const TOK = "Zq7xK2mPvR9tLwB4nYc8HdJ3fGs6Ue1Ao5Ti0Vb-W_y";
 const INV = "INVSTRUCTSENTINEL0042";
@@ -91,11 +92,11 @@ beforeAll(async () => {
       PATH: process.env.PATH ?? "",
       NODE_ENV: "production",
       NEXT_TELEMETRY_DISABLED: "1",
-      NODE_OPTIONS: `--require ${GUARD} --require ${PROBE}`,
+      NODE_OPTIONS: `--require ${GUARD} --require ${PROBE} --require ${LOOPBACK}`,
       CP_EGRESS_GUARD_LOG: guardLog,
       CP_PROXY_PROBE_LOG: probeLog,
-      // Test-only upstream override (honoured only off Vercel and only for a loopback origin).
-      CP_TEST_ANALYTICS_PROXY_ORIGIN: `http://127.0.0.1:${echoPort}`,
+      // Test-only preload redirects the app's fetch() to the PostHog hosts to the loopback echo server.
+      CP_TEST_POSTHOG_LOOPBACK_PORT: String(echoPort),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

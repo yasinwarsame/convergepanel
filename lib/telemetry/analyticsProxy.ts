@@ -70,18 +70,12 @@ export function classifyTelemetryProxyPath(rawPathname: string): ProxyPathClass 
 
 const SAFE_SEGMENT = /^[A-Za-z0-9._~-]{1,200}$/;
 
-/** Test-only upstream override: honoured ONLY off Vercel and ONLY for a loopback http origin. */
-function testOverrideOrigin(env: Record<string, string | undefined>): string | null {
-  const v = env.CP_TEST_ANALYTICS_PROXY_ORIGIN;
-  if (!v || env.VERCEL) return null;
-  return /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(v) ? v : null;
-}
-
 /**
  * The upstream URL for a canonical `/ingest...` path (query string passed through), or null when the path is not
- * a canonical, well-formed PostHog proxy path.
+ * a canonical, well-formed PostHog proxy path. The host is a LITERAL prefix (no configuration, no environment
+ * variable can change it); tests redirect these hosts at the network layer instead (test preload).
  */
-export function upstreamUrlFor(rawPathname: string, search: string, env: Record<string, string | undefined> = process.env): string | null {
+export function upstreamUrlFor(rawPathname: string, search: string): string | null {
   if (classifyTelemetryProxyPath(rawPathname) !== "canonical") return null;
   if (rawPathname !== "/ingest" && !rawPathname.startsWith("/ingest/")) return null;
   const rest = rawPathname === "/ingest" ? "" : rawPathname.slice("/ingest/".length);
@@ -90,10 +84,9 @@ export function upstreamUrlFor(rawPathname: string, search: string, env: Record<
   const segments = trailing ? parts.slice(0, -1) : parts;
   if (!segments.every((s) => SAFE_SEGMENT.test(s) && s !== "." && s !== "..")) return null;
   const isAsset = segments[0] === "static" || segments[0] === "array";
-  const override = testOverrideOrigin(env);
-  const origin = override ? override + (isAsset ? "/__assets" : "/__api") : isAsset ? POSTHOG_ASSETS_ORIGIN : POSTHOG_API_ORIGIN;
+  const path = `${segments.join("/")}${trailing ? "/" : ""}`;
   const query = typeof search === "string" && search.startsWith("?") ? search : "";
-  return `${origin}/${segments.join("/")}${trailing ? "/" : ""}${query}`;
+  return isAsset ? `https://us-assets.i.posthog.com/${path}${query}` : `https://us.i.posthog.com/${path}${query}`;
 }
 
 /** The ONLY headers sent upstream: allowlisted names copied from the inbound request. */

@@ -3,8 +3,7 @@
  * and canonical-only paths. Synthetic dummy values only.
  *
  *   A1  path policy: exact canonical spellings pass; every case / encoding / slash / dot variant is a `variant`;
- *   A2  upstream mapping: fixed PostHog hosts, safe segments only, query passed through; test override only
- *       off Vercel and only for loopback;
+ *   A2  upstream mapping: literal PostHog hosts (no environment override), safe segments only, query passed through;
  *   A3  header isolation: the upstream request carries ONLY allowlisted headers (Cookie / Authorization in any
  *       case, and every other inbound header, are dropped); the response carries only allowlisted headers;
  *   A4  route handler: builds that request (fetch mocked), refuses variants and the disabled switch before fetch;
@@ -72,25 +71,29 @@ describe("A1 path policy", () => {
 });
 
 describe("A2 upstream mapping", () => {
-  const env = {};
   it("maps API and asset paths to the fixed PostHog hosts, passing the query through", () => {
-    expect(upstreamUrlFor("/ingest/e/", "?ip=0&_=1&ver=1.2", env)).toBe(`${POSTHOG_API_ORIGIN}/e/?ip=0&_=1&ver=1.2`);
-    expect(upstreamUrlFor("/ingest/i/v0/e/", "", env)).toBe(`${POSTHOG_API_ORIGIN}/i/v0/e/`);
-    expect(upstreamUrlFor("/ingest/static/array.js", "", env)).toBe(`${POSTHOG_ASSETS_ORIGIN}/static/array.js`);
-    expect(upstreamUrlFor("/ingest/array/phc_x/config.js", "", env)).toBe(`${POSTHOG_ASSETS_ORIGIN}/array/phc_x/config.js`);
+    expect(upstreamUrlFor("/ingest/e/", "?ip=0&_=1&ver=1.2")).toBe(`${POSTHOG_API_ORIGIN}/e/?ip=0&_=1&ver=1.2`);
+    expect(upstreamUrlFor("/ingest/i/v0/e/", "")).toBe(`${POSTHOG_API_ORIGIN}/i/v0/e/`);
+    expect(upstreamUrlFor("/ingest/static/array.js", "")).toBe(`${POSTHOG_ASSETS_ORIGIN}/static/array.js`);
+    expect(upstreamUrlFor("/ingest/array/phc_x/config.js", "")).toBe(`${POSTHOG_ASSETS_ORIGIN}/array/phc_x/config.js`);
   });
 
   it("refuses variants, monitoring paths and unsafe segments (no upstream request)", () => {
     for (const p of ["/INGEST/e/", "/%69ngest/e/", "/ingest//e/", "/ingest/a b", "/ingest/@evil.example/x", "/monitoring", "/ingest/e:80"]) {
-      expect([p, upstreamUrlFor(p, "", env)]).toEqual([p, null]);
+      expect([p, upstreamUrlFor(p, "")]).toEqual([p, null]);
     }
   });
 
-  it("the test override applies only off Vercel and only to a loopback http origin", () => {
-    expect(upstreamUrlFor("/ingest/e/", "", { CP_TEST_ANALYTICS_PROXY_ORIGIN: "http://127.0.0.1:4100" })).toBe("http://127.0.0.1:4100/__api/e/");
-    expect(upstreamUrlFor("/ingest/static/a.js", "", { CP_TEST_ANALYTICS_PROXY_ORIGIN: "http://127.0.0.1:4100" })).toBe("http://127.0.0.1:4100/__assets/static/a.js");
-    expect(upstreamUrlFor("/ingest/e/", "", { CP_TEST_ANALYTICS_PROXY_ORIGIN: "http://127.0.0.1:4100", VERCEL: "1" })).toBe(`${POSTHOG_API_ORIGIN}/e/`);
-    expect(upstreamUrlFor("/ingest/e/", "", { CP_TEST_ANALYTICS_PROXY_ORIGIN: "https://evil.example" })).toBe(`${POSTHOG_API_ORIGIN}/e/`);
+  it("the upstream host is a literal: no environment variable can redirect it", () => {
+    const saved = { ...process.env };
+    process.env.CP_TEST_ANALYTICS_PROXY_ORIGIN = "http://127.0.0.1:4100";
+    process.env.NEXT_PUBLIC_POSTHOG_HOST = "https://evil.example";
+    try {
+      expect(upstreamUrlFor("/ingest/e/", "")).toBe(`${POSTHOG_API_ORIGIN}/e/`);
+      expect(upstreamUrlFor("/ingest/static/a.js", "")).toBe(`${POSTHOG_ASSETS_ORIGIN}/static/a.js`);
+    } finally {
+      process.env = saved;
+    }
   });
 
   it("the fail-closed switch", () => {
