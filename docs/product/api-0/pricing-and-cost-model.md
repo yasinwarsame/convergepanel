@@ -60,7 +60,7 @@ charged  = min( estimate,
 | Included credits | e.g. 1,000 / month | Granted from the ledger at period start; unused credits do not roll over in the pilot |
 | Beyond included | **Hard stop** (`402 quota_exceeded`) | No overage, no metering |
 | Applications | 2 | |
-| Concurrent running jobs | 5 | Also bounded by CR-2 pools |
+| Concurrent running jobs | 5 | *Addendum 5/6:* this is the admission limit on accepted non-terminal jobs (queued and running together), counted in `apiOrgConcurrency/{orgId}`; provider concurrency is also bounded by CR-2 pools |
 | Max models per job | 5 | `min_models` 2 |
 | Synthesis | Allowed, `synthesis_credits` each | |
 | Retention | 30-day default (OD-10) | |

@@ -30,7 +30,7 @@
 | `mode` | `"live" \| "test"` | `test` results are fixtures (sandbox) |
 | `created_at`, `completed_at` | RFC 3339 | `completed_at` null until terminal |
 | `application_id` | `app_…` | |
-| `metadata` | object ≤ 20 string keys | Customer-supplied, echoed |
+| `metadata` | object ≤ 20 string keys | Customer-supplied, echoed. Key and value rules: `error-catalog.md` §4.3 (Addendum 2) |
 | `input` | `InputSummary` | Length, HMAC fingerprint, `retained` flag. Never the text unless `retain_input` and the result is fetched by an authorized key (§3.2) |
 | `research_schema` | `{ id, family } \| null` | Research only: the executed schema ID and its family (`dedicated` or `claims_matrix`, §4.0). `null` for claims and for research jobs that never executed a schema |
 | `verification_basis` | `VerificationBasis` | CR-1 top-level statement |
@@ -90,6 +90,8 @@ Section<T> = {
 
 `{ "char_count": 182, "context_char_count": 0, "fingerprint": "hmac256:<hex>", "retained": false }`. The fingerprint is `HMAC-SHA256(org-scoped key, normalized input)`, so it cannot be compared across orgs. It lets a customer prove a re-submission is the same input without ConvergePanel keeping the text.
 
+*Addendum 2 (2026-11-17):* `char_count` and `context_char_count` count Unicode code points of the NFC form, which is also the form the fingerprint is computed over (`error-catalog.md` §4.2). Under the discriminated request (`openapi.yaml` `CreateVerificationRequest`), `char_count` is the length of `input.claim` for a claim and of `input.question` for research; `context_char_count` is always 0 for a claim, which cannot carry `context`.
+
 ### 3.3 Verification basis (CR-1)
 
 ```json
@@ -142,6 +144,12 @@ The API therefore offers `type: "research"` **only while both switches are on**.
 
 A null field inside a `completed`/`partial` section always means "does not apply to this type". It never means "missing".
 
+*Addendum 3 (2026-11-17, owner ruling R3).* `computeClaimVerdict` (`lib/verification/claimVerdict.ts`) returns `disputed` when **every** usable model judged the claim inaccurate (no rule matches, and the function falls through to `disputed`). This is a documented defect. It is not corrected here: the Production web semantics are not changed by this PR, and the web impact needs its own assessment. For the API:
+- a unanimous (or agreeing) "inaccurate" panel must **not** be described to API customers as model disagreement; `label: disputed` alone never states whether the models disagreed;
+- the per-model verdict distribution must be preserved; per-model `verdict` values are already in `/models` (§4.9, from `AuditBundle.perModel[]`);
+- agreement that a claim is inaccurate, genuine disagreement, and independent factual verification (which consensus never establishes; `verification_basis.independent_source_check` is `not_performed`) are three distinct things;
+- the API needs a truthful, contract-compatible representation **without** a new verdict value and **without** re-scoring. Candidate representations are proposals only, not adopted (Addendum 3 §5). Until one is approved and tested, the claim `verdict` section is **not advertised as fully supported**.
+
 ### 4.2 Certainty (`CertaintyData`)
 
 | Field | Claim | Research `claims_matrix` | Research `dedicated` |
@@ -170,6 +178,8 @@ Neither `unknown` nor `not_applicable` is ever emitted as a value. As built toda
 | `selected_models` | `ConsensusSummary.modelCount` | `results.length` | `meta.totalModels` |
 | methodology | `cp.claim_consensus_score` | `cp.adaptive_consensus_level` | `cp.adaptive_consensus_level` |
 
+*Addendum 3 (2026-11-17, owner ruling R4).* `consensus` must have a defined, supported meaning **per schema**. It describes model agreement only where the computation actually supports that reading. It is never a substitute for factual accuracy, verification, evidence reliability or an unsupported confidence. Where no supported meaning exists for a type or schema, the section is `unavailable` with the approved availability state and a precise `reason`; no score is manufactured and no unrelated measure is substituted. The per-schema dispositions are proposals pending owner approval (Addendum 3 §5); until approved, no row of the table above is advertised as a supported consensus measure beyond what its methodology descriptor states.
+
 `ConsensusLevel` is `strong | moderate | weak | split | unscored`. `unscored` passes through verbatim as a level; it is not converted to a number. The section is `partial` with `reason.code: reduced_panel` whenever `usable_models < selected_models`.
 
 **Not in the contract:** run-level `agreeing_models` / `dissenting_models`. No existing function produces a run-level list of agreeing or dissenting models. `buildAgreementDisagreementDigest` returns agreement *text* and conflicting *pairs*, and the adaptive pipeline records stance per aligned claim. Deriving a run-level list would be a new formula, so these fields are omitted. They can be added only once a web function produces them.
@@ -192,11 +202,15 @@ Neither `unknown` nor `not_applicable` is ever emitted as a value. As built toda
 | Research `claims_matrix` | `synthesisReport.disagreements` (`AdaptiveDisagreement[]`): `topic` ← `topic`, `why_they_differ` ← `whyTheyDiffer` (model-generated, labelled by the descriptor), `stakes` ← `stakes`, `positions` ← `positions[] { model: modelId, position }` (the model's own excerpt), `models` ← the `modelId`s of `positions` (select). If `synthesisReport` is absent: `unavailable`, `inputs_missing` |
 | Research `dedicated` | `unavailable`, `not_produced`. Schema-native disagreement content, if any, stays inside `/report` `schema_result` |
 
+*Addendum 3 (2026-11-17, owner ruling R2).* `positions[].position` and `why_they_differ` carry model-authored text. Full raw model responses are excluded from the controlled beta. Limited attributed excerpts may be returned only where permitted by the customer contract, the data-processing terms, sanitization, the retention and deletion rules, and the customer's authorization and key scope; excerpts must never be combined to reconstruct a substantially complete response, and no evidence, finding or attribution may be fabricated. Until those conditions are recorded as met for the beta, these fields are not advertised as supported.
+
 ### 4.6 Synthesis (research only; summary on the main result, full on `/report`)
 
 `StructuredSynthesis` (`lib/synthesis/structuredSchema.ts`) from the extracted `executeSynthesis`. The web synthesis route (`app/api/synthesize-panel/route.ts`) synthesizes a research run's panel results. It has no claim input, so:
 - for `type: "claim"` the section is `unavailable` (`not_produced`), and `options.synthesis: true` is rejected at create (`422 synthesis_not_supported`);
 - for research with `synthesis: false` it is `not_requested`.
+
+*Addendum 3 (2026-11-17, owner ruling R1).* The controlled beta excludes this **optional** API synthesis feature. That exclusion does not mean that no synthesis-like or narrative processing happens: the research pipeline itself makes Gemini calls for classification, claim clustering, stance backfill, bias detection, coverage audit and narrative generation (`GeminiDiagnosticOperation`, `lib/connectors/types.ts`; `jobs-and-idempotency.md` §4.3), and the `/report` unified answer is built by the pipeline. These operations must be inventoried, distinguished from the optional synthesis feature, disclosed as auxiliary processing of customer content, and pass the D6 provider-processing controls. No additional provider call is authorized, and the shared web pipeline is not silently modified.
 
 Summary fields: `executive_summary`, `key_finding_count`, `open_question_count`, `methodology_text` (verbatim `StructuredSynthesis.methodology`). `/report` returns the full content (`keyFindings[]` with `support` and `evidenceQuality`, `disagreements[]`, `biasAndBlindSpots[]`, `openQuestions[]`), re-keyed to snake_case.
 
@@ -236,7 +250,7 @@ Compact by default.
 | `parse_status` | claim: `AuditBundle.perModel[].pipelineStatus`; research: `ModelTrustSummary.parseHealth` (`claims_matrix`) or `AdaptiveModelResult.ok` (`dedicated`) |
 | `verdict`, `confidence`, `parts` | claim only, from `AuditBundle.perModel[]` (`verdictLabel`, `confidence`, `counts`), which is `null` when the pipeline produced no parsed verdict. The API does **not** use `buildClaimModelEvidence`'s placeholder values for failed slots (`verdict: "failed"`, `confidence: "low"`) |
 | `summary_char_count` | `AuditBundle.perModel[].summaryLength` (claim); null for research |
-| `response_text` | `Section<string>`, `not_requested` unless the four OD-19 conditions hold (PRD §8.4) |
+| `response_text` | `Section<string>`, `not_requested` unless the four OD-19 conditions hold (PRD §8.4). *Addendum 3 (R2):* always `not_requested` in the controlled beta; full raw model responses are excluded |
 
 Error messages and `rawResponse` are never returned.
 
@@ -320,7 +334,7 @@ Claim execution and synthesis generation currently live inside `app/api/verify-c
 | Factual verification | `verification_basis.independent_source_check` | Independent confirmation against evidence. **Not performed in v1** |
 | Evidence | `evidence` | Citations the models reported. Not fetched or checked |
 
-`confirmed` means "the usable models' verdicts combine to accurate"; it never means "verified true". `disputed` means the models' verdicts combine to inaccurate or contested. Consumers that act automatically must combine `verdict`, `consensus`, `human_review_recommended` and `limitations`.
+`confirmed` means "the usable models' verdicts combine to accurate"; it never means "verified true". `disputed` means the models' verdicts combine to inaccurate or contested. *Addendum 3 (R3):* `disputed` therefore does **not** mean the models disagreed; it also covers a panel that agrees the claim is inaccurate (§4.1). Consensus never establishes factual accuracy (R4). Consumers that act automatically must combine `verdict`, `consensus`, `human_review_recommended` and `limitations`.
 
 ## 9. JSON Schema (draft 2020-12)
 

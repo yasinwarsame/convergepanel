@@ -1,10 +1,13 @@
 # DRAFT — NOT IMPLEMENTED. API-0 design artifact only (owner ruling OD-20, 2026-11-03).
 # No route, credential, host, queue or billing object described here exists.
 # Source of truth for result semantics: docs/product/api-0/result-schema.md.
+# Source of truth for error codes, request text rules and error precedence:
+# docs/product/api-0/error-catalog.md (Addendum 2, amended by Addendum 3). components.x-error-catalog
+# mirrors it (test-pinned).
 openapi: 3.1.0
 info:
   title: ConvergePanel Verification API (DRAFT)
-  version: 0.1.0-draft
+  version: 0.4.0-draft
   summary: Draft contract for claim and research verification. Not implemented.
   description: |
     **Status: DRAFT, NOT IMPLEMENTED.** This document is an API-0 design artifact.
@@ -14,6 +17,21 @@ info:
     provider-reported and are not fetched by ConvergePanel.
 
     First release scope: `type: claim` and `type: research` only.
+
+    0.3.0-draft (Owner Decision Addendum 2, 2026-11-17): the create request is a
+    discriminated union on `type` (`ClaimVerificationRequest` | `ResearchVerificationRequest`);
+    request text rules (NFC, code-point lengths, encoding, body size) and the normative
+    error precedence are in `error-catalog.md` §3 and §4; every error code is listed once in
+    `error-catalog.md` §2 and mirrored in `components.x-error-catalog`.
+
+    0.4.0-draft (Owner Decision Addendum 3, 2026-11-17, Quality Correction R2): request body cap
+    512 KiB (524,288 bytes); input text must contain at least one visible code point (zero-width
+    and other default-ignorable or format-only text is 400 `empty_input`); DEL and C1 controls are
+    400 `invalid_encoding`; metadata has an aggregate bound; documented rate limits with 429
+    `rate_limited` and `Retry-After` on every data-plane operation; the create precedence returns
+    an idempotent replay before any new-job-only check (`error-catalog.md` §3,
+    `jobs-and-idempotency.md` §5A). Patterns use Unicode property escapes and must be evaluated
+    in ECMAScript Unicode mode (`u` flag), as JSON Schema 2020-12 validators such as Ajv 8 do.
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -28,18 +46,86 @@ tags:
   - name: Models
 paths:
   /verifications:
+    get:
+      tags: [Verifications]
+      operationId: listVerifications
+      summary: List verifications (authorized history, cursor-paginated)
+      description: |
+        Added by owner decision D9 (Addendum 1, 2026-11-17). Requires `verifications:read`.
+        Results are always scoped to the authenticated key's organization AND mode (a test key
+        lists only test verifications, a live key only live ones). An app-scoped key (the
+        default) lists only its own application's verifications, and `application_id` can only
+        narrow that scope, never widen it. A sibling application's, another organization's or a
+        nonexistent ID in `application_id` returns a byte-identical empty list, never 403, so
+        existence cannot be probed.
+        Ordered by `created_at` descending, then `id` descending (stable tiebreak). The cursor is
+        opaque, HMAC-tagged, expires 24 hours after issue, and is bound to the organization,
+        application scope, mode and filter set that produced it; an expired or tampered cursor,
+        or one presented with a different scope, mode or filters, returns 400 `invalid_cursor`. Items are summaries: no input text, no result sections and no
+        model text. Deleted verifications are not listed.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          description: Opaque `next_cursor` from the previous page.
+          schema: { type: string, maxLength: 512 }
+        - name: status
+          in: query
+          description: 'Filter by a known public JobStatus value. An unknown value returns 400 `invalid_status`.'
+          schema: { type: string, enum: [queued, running, synthesizing, completed, partial, failed, canceled, expired] }
+        - name: type
+          in: query
+          schema: { type: string, enum: [claim, research] }
+        - name: application_id
+          in: query
+          description: Narrow to one application of the key's organization. Never widens an app-scoped key.
+          schema: { type: string }
+        - name: created_gte
+          in: query
+          schema: { type: string, format: date-time }
+        - name: created_lt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: One page of verification summaries.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationList'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     post:
       tags: [Verifications]
       operationId: createVerification
       summary: Create a verification job
       description: |
-        Validates, authorizes scope and applies the rate limit, then runs ONE Firestore
-        transaction that checks idempotency, org state, caps and the spend ceiling, reserves
-        credits, and writes the job (internal state pending_dispatch, reported as `queued`)
-        together with the idempotency record. The queue publish happens AFTER commit
+        Authenticates the key, applies the rate limit, checks organization state and scope,
+        then decodes and validates the body, then runs ONE Firestore transaction whose first read
+        is the idempotency record: a committed record with the same canonical request returns the
+        original 202 (`Idempotent-Replayed: true`) BEFORE any new-job-only check (Addendum 3, m3).
+        Only for a new job does the same transaction check beta options, type and model
+        availability, queue health, concurrency, caps and the spend ceiling, reserve credits, and
+        write the job (internal state pending_dispatch, reported as `queued`) together with the
+        idempotency record. The queue publish happens AFTER commit
         (transactional outbox); if it fails, a sweeper re-publishes, so the 202 never depends
         on it. Returns 202 with the job. With `Prefer: wait=60` on a claim, may return 200 with
         the completed result. Requires scope `verifications:write`.
+
+        Addendum 2 (0.3.0-draft): the body is `application/json` in UTF-8. Addendum 3
+        (0.4.0-draft): at most 524,288 bytes (512 KiB, owner-approved), counted from
+        `Content-Length` or the streamed byte count before any JSON parsing. The server applies NFC to every string, then
+        checks the text rules and the schema below; errors are evaluated in the normative order of
+        `error-catalog.md` §3. Examples named `invalid_*` are NEGATIVE examples: each carries
+        `x-expected-error` with the status and code the server returns, and must not validate.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/PreferWait'
@@ -49,9 +135,112 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateVerificationRequest'
+            examples:
+              claim_minimal:
+                summary: Claim, plan default panel
+                value:
+                  type: claim
+                  input: { claim: The EU AI Act entered into force in August 2024. }
+              claim_full:
+                summary: Claim with models, beta-compatible options and metadata
+                value:
+                  type: claim
+                  input: { claim: The EU AI Act entered into force in August 2024. }
+                  models: [chatgpt, claude, perplexity]
+                  options: { synthesis: false, allow_fallback: false, retain_input: false, retain_model_responses: false }
+                  metadata: { customer_ref: doc-4471, pipeline.stage: intake }
+              research_minimal:
+                summary: Research question only
+                value:
+                  type: research
+                  input: { question: What are the main evidence-based risks of intermittent fasting for adults over 65? }
+              research_with_context:
+                summary: Research with context and five models
+                value:
+                  type: research
+                  input:
+                    question: What are the main evidence-based risks of intermittent fasting for adults over 65?
+                    context: 'Audience: clinical content reviewers.'
+                  models: [chatgpt, claude, grok, perplexity, gemini]
+                  options: { synthesis: false }
+              claim_with_joiners_and_marks:
+                summary: 'Claim whose legitimate joiners, marks and variation selectors are accepted and preserved (Addendum 3, m4)'
+                description: 'A ZWJ emoji sequence, a ZWNJ inside a Persian word, a decomposed combining sequence (e + U+0301, NFC-normalized server-side to é) and a variation selector after a base. None is stripped.'
+                value:
+                  type: claim
+                  input: { claim: "The developer \U0001F469\u200D\U0001F4BB wrote \u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645 in a cafe\u0301 \u2764\uFE0F." }
+              invalid_claim_with_question:
+                summary: 'INVALID: a claim carries `question`'
+                x-expected-error: { status: 400, code: unknown_field, param: input.question }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level., question: Does it? }
+              invalid_claim_with_context:
+                summary: 'INVALID: a claim carries `context`'
+                x-expected-error: { status: 400, code: unknown_field, param: input.context }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level., context: Physics. }
+              invalid_research_with_claim:
+                summary: 'INVALID: research carries `claim` instead of `question`'
+                x-expected-error: { status: 400, code: unknown_field, param: input.claim }
+                value:
+                  type: research
+                  input: { claim: Water boils at 100 C at sea level. }
+              invalid_research_without_question:
+                summary: 'INVALID: research without `question`'
+                x-expected-error: { status: 400, code: missing_field, param: input.question }
+                value:
+                  type: research
+                  input: { context: Physics. }
+              invalid_claim_whitespace_only:
+                summary: 'INVALID: whitespace-only claim'
+                x-expected-error: { status: 400, code: empty_input, param: input.claim }
+                value:
+                  type: claim
+                  input: { claim: "  \t\n " }
+              invalid_unknown_top_level_field:
+                summary: 'INVALID: unknown top-level field'
+                x-expected-error: { status: 400, code: unknown_field, param: priority }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level. }
+                  priority: high
+              invalid_unknown_option:
+                summary: 'INVALID: unknown option'
+                x-expected-error: { status: 400, code: unknown_field, param: options.stream }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level. }
+                  options: { stream: true }
+              invalid_one_model:
+                summary: 'INVALID: one model (minimum is 2)'
+                x-expected-error: { status: 422, code: too_few_models, param: models }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level. }
+                  models: [claude]
+              invalid_claim_zero_width_only:
+                summary: 'INVALID: claim made only of zero-width and format characters (Addendum 3, m4)'
+                x-expected-error: { status: 400, code: empty_input, param: input.claim }
+                value:
+                  type: claim
+                  input: { claim: "\u200B\u200C\u200D\u2060\uFEFF" }
+              invalid_claim_with_del:
+                summary: 'INVALID: claim containing DEL (U+007F) (Addendum 3, reviewer exception 2)'
+                x-expected-error: { status: 400, code: invalid_encoding, param: input.claim }
+                value:
+                  type: claim
+                  input: { claim: "Water boils\u007F at 100 C." }
+              invalid_unknown_type:
+                summary: 'INVALID: a type outside the first release (video)'
+                x-expected-error: { status: 400, code: invalid_request, param: type }
+                value:
+                  type: video
+                  input: { claim: Water boils at 100 C at sea level. }
       responses:
         '200':
-          description: Synchronous wait succeeded (claims only).
+          description: 'Synchronous wait succeeded (claims only). Not available in the controlled beta (Addendum 1 P1, owner-confirmed): the header is ignored and 202 is returned.'
           headers:
             RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
             RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
@@ -85,6 +274,7 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '410': { $ref: '#/components/responses/Gone' }
         '413': { $ref: '#/components/responses/TooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/Unprocessable' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -113,6 +303,8 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     delete:
       tags: [Verifications]
       operationId: deleteVerification
@@ -122,6 +314,10 @@ paths:
         (b) customer-visible results and (d) auditable evidence for this verification,
         including model results and webhook delivery records. Class (c) billing records
         remain with no content. Idempotent. A queued or running job is canceled first.
+        Addendum 6: asynchronous. The 202 carries one deletion operation (`del_…`), reused by
+        every repeat call; its `status` stays `pending` until the job is terminal, its
+        concurrency admission released and its content purged, and only then is `completed`.
+        From acceptance, the owner's reads of the verification return 410.
       responses:
         '202':
           description: Deletion accepted. Completes asynchronously (target 24 h, placeholder).
@@ -132,6 +328,9 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /verifications/{id}/cancel:
     parameters:
       - $ref: '#/components/parameters/VerificationId'
@@ -142,6 +341,9 @@ paths:
       description: |
         Requires `verifications:write`. A queued job is canceled and its reservation released.
         A running job stops at its next step boundary and settles for work already done.
+        Addendum 4: the caller's own deleted verification returns 410 `verification_deleted`;
+        another organization's ID (deleted or not), a nonexistent and a malformed ID return the
+        same 404 `verification_not_found`. A non-deleted terminal job returns 409 `not_cancelable`.
       responses:
         '200':
           description: Cancellation recorded.
@@ -150,8 +352,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/VerificationAccepted'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /verifications/{id}/report:
     parameters:
       - $ref: '#/components/parameters/VerificationId'
@@ -168,8 +375,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/VerificationReport'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /verifications/{id}/models:
     parameters:
       - $ref: '#/components/parameters/VerificationId'
@@ -190,7 +401,7 @@ paths:
         - name: include
           in: query
           required: false
-          description: Set to `response_text` to request full text (see conditions above).
+          description: Set to `response_text` to request full text (see conditions above). In the controlled beta (Addendum 1 P3, owner-confirmed) the `response_text` section is returned as `not_requested`.
           schema:
             type: string
             enum: [response_text]
@@ -205,6 +416,9 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /usage:
     get:
       tags: [Usage]
@@ -220,6 +434,9 @@ paths:
                 $ref: '#/components/schemas/Usage'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /models:
     get:
       tags: [Models]
@@ -236,6 +453,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelList'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 webhooks:
   verificationEvent:
     post:
@@ -260,6 +481,60 @@ webhooks:
         '2XX':
           description: Any 2xx acknowledges. Other codes and timeouts (10 s) are retried.
 components:
+  x-error-catalog:
+    description: 'Mirror of error-catalog.md §2 (test-pinned). Keys are error codes. Addendum 3: each entry carries the fixed contract message and whether the code is in the PR #327 draft implementation (commit fa9146a); no code is active in Production.'
+    codes:
+      invalid_request: { status: 400, type: invalid_request_error, plane: both, beta: active, message: 'The request is invalid.', implemented_in_draft: true }
+      invalid_json: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'The request body is not valid JSON.', implemented_in_draft: false }
+      invalid_encoding: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'The request body contains characters that are not allowed.', implemented_in_draft: false }
+      missing_field: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'A required field is missing.', implemented_in_draft: false }
+      unknown_field: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'The request contains a field that is not recognized.', implemented_in_draft: false }
+      empty_input: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'The input text is empty.', implemented_in_draft: false }
+      input_too_long: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'The input text is too long.', implemented_in_draft: false }
+      invalid_model: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'A model ID is not valid.', implemented_in_draft: false }
+      invalid_cursor: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'The pagination cursor is not valid.', implemented_in_draft: false }
+      invalid_status: { status: 400, type: invalid_request_error, plane: data, beta: active, message: 'The status filter is not valid.', implemented_in_draft: false }
+      invalid_api_key: { status: 401, type: authentication_error, plane: data, beta: active, message: 'The API key is invalid.', implemented_in_draft: true }
+      api_key_not_accepted: { status: 401, type: authentication_error, plane: management, beta: active, message: 'API keys are not accepted on this endpoint.', implemented_in_draft: true }
+      session_required: { status: 401, type: authentication_error, plane: management, beta: active, message: 'A signed-in session is required.', implemented_in_draft: true }
+      quota_exceeded: { status: 402, type: billing_error, plane: data, beta: active, message: 'The credit quota for this period is used up.', implemented_in_draft: false }
+      spend_limit_reached: { status: 402, type: billing_error, plane: data, beta: active, message: 'The organization spend limit has been reached.', implemented_in_draft: false }
+      payment_required: { status: 402, type: billing_error, plane: data, beta: future, message: 'A payment is required to continue.', implemented_in_draft: false }
+      insufficient_scope: { status: 403, type: permission_error, plane: data, beta: active, message: 'The API key does not have the required scope.', implemented_in_draft: true }
+      org_suspended: { status: 403, type: permission_error, plane: data, beta: active, message: 'The organization is suspended.', implemented_in_draft: true }
+      live_key_requires_plan: { status: 403, type: permission_error, plane: data, beta: active, message: 'Live keys require an active API plan.', implemented_in_draft: true }
+      failed_job_threshold_exceeded: { status: 403, type: permission_error, plane: data, beta: active, message: 'Too many failed jobs; live creates are paused.', implemented_in_draft: false }
+      model_response_access_disabled: { status: 403, type: permission_error, plane: data, beta: future, message: 'Model response access is not enabled for this organization.', implemented_in_draft: false }
+      pipeline_processing_not_acknowledged: { status: 403, type: permission_error, plane: data, beta: active, message: 'Research requires a recorded pipeline-processing acknowledgement.', implemented_in_draft: false }
+      insufficient_role: { status: 403, type: permission_error, plane: management, beta: active, message: 'Your organization role does not allow this action.', implemented_in_draft: true }
+      fresh_session_required: { status: 403, type: permission_error, plane: management, beta: active, message: 'Sign in again to perform this action.', implemented_in_draft: true }
+      identity_not_verified: { status: 403, type: permission_error, plane: management, beta: active, message: 'Verify your email address to perform this action.', implemented_in_draft: true }
+      verification_not_found: { status: 404, type: not_found, plane: data, beta: active, message: 'Not found.', implemented_in_draft: false }
+      not_found: { status: 404, type: not_found, plane: management, beta: active, message: 'Not found.', implemented_in_draft: true }
+      idempotency_key_reused: { status: 409, type: idempotency_error, plane: data, beta: active, message: 'This idempotency key was used with a different request.', implemented_in_draft: false }
+      request_in_progress: { status: 409, type: idempotency_error, plane: data, beta: active, message: 'A request with this idempotency key is in progress; retry.', implemented_in_draft: false }
+      not_cancelable: { status: 409, type: invalid_request_error, plane: data, beta: active, message: 'The verification can no longer be canceled.', implemented_in_draft: false }
+      verification_deleted: { status: 410, type: gone, plane: data, beta: active, message: 'The verification was deleted.', implemented_in_draft: false }
+      request_too_large: { status: 413, type: request_too_large, plane: data, beta: active, message: 'The request body is too large.', implemented_in_draft: false }
+      unsupported_media_type: { status: 415, type: invalid_request_error, plane: data, beta: active, message: 'The request body must be UTF-8 application/json.', implemented_in_draft: false }
+      model_unavailable: { status: 422, type: unprocessable, plane: data, beta: active, message: 'A selected model is not available.', implemented_in_draft: false }
+      too_few_models: { status: 422, type: unprocessable, plane: data, beta: active, message: 'Select at least two models.', implemented_in_draft: false }
+      model_limit_exceeded: { status: 422, type: unprocessable, plane: data, beta: active, message: 'Too many models are selected.', implemented_in_draft: false }
+      type_unavailable: { status: 422, type: unprocessable, plane: data, beta: active, message: 'This verification type is not available.', implemented_in_draft: false }
+      synthesis_not_supported: { status: 422, type: unprocessable, plane: data, beta: active, message: 'Synthesis is not supported for claims.', implemented_in_draft: false }
+      synthesis_unavailable: { status: 422, type: unprocessable, plane: data, beta: beta-rejection, message: 'Synthesis is not available.', implemented_in_draft: false }
+      fallback_unavailable: { status: 422, type: unprocessable, plane: data, beta: beta-rejection, message: 'Provider fallback is not available.', implemented_in_draft: false }
+      option_unavailable_in_beta: { status: 422, type: unprocessable, plane: data, beta: beta-rejection, message: 'This option is not available in the beta.', implemented_in_draft: false }
+      repeated_failing_input: { status: 422, type: unprocessable, plane: data, beta: active, message: 'This input has failed repeatedly; try again later.', implemented_in_draft: false }
+      research_schema_unsupported: { status: 422, type: unprocessable, plane: data, beta: proposed, message: 'This kind of research question is not supported yet.', implemented_in_draft: false }
+      rate_limited: { status: 429, type: rate_limit_error, plane: data, beta: active, message: 'Too many requests; retry after the indicated time.', implemented_in_draft: false }
+      concurrency_limit: { status: 429, type: rate_limit_error, plane: data, beta: active, message: 'Too many concurrent jobs; retry after the indicated time.', implemented_in_draft: false }
+      internal_error: { status: 500, type: api_error, plane: both, beta: active, message: 'An internal error occurred.', implemented_in_draft: true }
+      api_unavailable: { status: 503, type: service_unavailable, plane: both, beta: active, message: 'The API is temporarily unavailable.', implemented_in_draft: true }
+      queue_unavailable: { status: 503, type: service_unavailable, plane: data, beta: active, message: 'The service cannot accept jobs right now; retry.', implemented_in_draft: false }
+      capacity_protection: { status: 503, type: service_unavailable, plane: data, beta: active, message: 'The service is protecting capacity; retry.', implemented_in_draft: false }
+      platform_spend_ceiling: { status: 503, type: service_unavailable, plane: data, beta: active, message: 'The service cannot accept jobs right now; retry.', implemented_in_draft: false }
+      maintenance: { status: 503, type: service_unavailable, plane: data, beta: active, message: 'The service is under maintenance; retry.', implemented_in_draft: false }
   securitySchemes:
     ApiKeyBearer:
       type: http
@@ -283,7 +558,12 @@ components:
         (organization, application, mode), so test and live keys never collide. Retained 24 h.
         Same key + same body replays the original 202 response; same key + different body
         returns 409 `idempotency_key_reused`. A request rejected before or inside the create
-        transaction stores nothing, so the key may be reused.
+        transaction stores nothing, so the key may be reused. Addendum 3 (m3): the replay is
+        returned to a caller that is authenticated and currently authorized, before any
+        new-job-only check (beta options, model or type availability, credits, queue health,
+        concurrency, capacity), so a changed dynamic condition never turns a replay into an
+        error or a second job. A revoked key, a removed scope or a suspended organization gets
+        its 401/403, never the replay (`jobs-and-idempotency.md` §5A).
       schema: { type: string, minLength: 1, maxLength: 255 }
     PreferWait:
       name: Prefer
@@ -309,42 +589,53 @@ components:
       schema: { type: string, pattern: '^req_[A-Za-z0-9]+$' }
   responses:
     BadRequest:
-      description: Invalid request.
+      description: 'Invalid request: `invalid_json`, `missing_field`, `input_too_long`, `invalid_model`, `invalid_cursor` (Addendum 1 D9: list cursor expired, tampered with, or not valid for this key scope, mode or filter set), `invalid_status`. Addendum 2 adds `invalid_encoding` (invalid UTF-8, a lone surrogate, or a C0 control other than tab, LF and CR; Addendum 3 adds DEL U+007F and the C1 controls U+0080..U+009F), `unknown_field` (any level; `param` is the dotted path), `empty_input` (whitespace-only text; Addendum 3: any text with no visible code point, such as text made only of zero-width, format, default-ignorable or combining characters) and the generic `invalid_request` (wrong JSON type, value out of range, `type` outside claim/research, metadata rules; always with `param`). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unauthorized:
-      description: '`invalid_api_key` for every key failure.'
+      description: '`invalid_api_key` for every key failure. The management-plane 401 codes (`api_key_not_accepted`, `session_required`) are not part of this API. Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     PaymentRequired:
-      description: '`quota_exceeded`, `spend_limit_reached`, `payment_required`.'
+      description: '`quota_exceeded`, `spend_limit_reached`, `payment_required`. Addendum 2: `payment_required` is a future capability (Stripe API plans, API-2S); not emitted in the controlled beta. Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Forbidden:
-      description: '`insufficient_scope`, `org_suspended`, `live_key_requires_plan` (authenticated live key, org without an active API plan; same response on every route), `failed_job_threshold_exceeded`, `model_response_access_disabled`.'
+      description: '`insufficient_scope`, `org_suspended`, `live_key_requires_plan` (authenticated live key, org without an active API plan; same response on every route), `failed_job_threshold_exceeded`, `model_response_access_disabled`, `pipeline_processing_not_acknowledged` (Addendum 1 D6: a research job needs auxiliary Gemini processing and the organization has not recorded an acknowledgement; nothing is written, nothing is sent to any provider). Addendum 2: `model_response_access_disabled` is never emitted in the controlled beta, because `retain_model_responses: true` is rejected first with 422 `option_unavailable_in_beta` (P3, precedence step 9 since Addendum 3). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
-      description: '`verification_not_found`. Also returned for other organizations'' IDs.'
+      description: '`verification_not_found`. Also returned for other organizations'' IDs. Addendum 2: also returned for a malformed ID and for another organization''s deleted verification, byte-identical except `request_id`; `verification_not_found` is the contract name (the generic `not_found` is the management-plane code). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Conflict:
-      description: '`idempotency_key_reused`; `request_in_progress` (the create transaction exhausted its contention retries on the idempotency record without reading a committed one; nothing was written; a retry gets the replay or creates the job); `not_cancelable`.'
+      description: '`idempotency_key_reused`; `request_in_progress` (the create transaction exhausted its contention retries on the idempotency record without reading a committed one; nothing was written; a retry gets the replay or creates the job); `not_cancelable`. Addendum 2: `not_cancelable` has type `invalid_request_error` (a state conflict, not an idempotency error). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Gone:
-      description: '`verification_deleted`.'
+      description: '`verification_deleted`. Addendum 2: only for a verification of the caller''s own organization and mode; otherwise 404 `verification_not_found`. Addendum 4: also returned by the cancel operation on the caller''s own deleted verification, and by a create replay under an unexpired deleted idempotency marker whatever the body (the marker keeps no request hash). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooLarge:
-      description: '`request_too_large` (body > 64 KB).'
+      description: '`request_too_large`. Addendum 3: the body as received is larger than 524,288 bytes (512 KiB, owner-approved), decided from `Content-Length` or the streamed byte count before any JSON parsing; evaluated before authentication (precedence step 1). Catalog and precedence: error-catalog.md (Addendum 2, amended by Addendum 3).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unprocessable:
-      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable`, `fallback_unavailable`, `repeated_failing_input`.'
-      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable` (also returned for every `options.allow_fallback: true` during the controlled beta, Addendum 1 P2), `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` requested during the controlled beta, Addendum 1 OQ-4; and `retain_model_responses`, Addendum 1 P3). Addendum 2: `too_few_models` / `model_limit_exceeded` are also the codes for the absolute 2..5 bounds; on a claim, `options.synthesis: true` returns `synthesis_not_supported` (beta and post-beta); `research_schema_unsupported` is PROPOSED, pending owner approval of the C-5 scope decision (rejected before job creation and credit reservation). Catalog and precedence: error-catalog.md (Addendum 2).'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { type: unprocessable, code: model_limit_exceeded, message: Too many models are selected., param: models, request_id: req_01HF3Z, doc_url: 'https://docs.convergepanel.com/errors#model_limit_exceeded' }
     TooManyRequests:
-      description: '`rate_limited`, `concurrency_limit`.'
+      description: '`rate_limited`, `concurrency_limit`. Addendum 3 (m2): `rate_limited` is returned on every data-plane operation, always with `Retry-After`, by the coarse edge limit (per source address, no lockout), the failed-authentication throttle per presented key ID (Addendum 4; a correct secret always authenticates), or the authenticated per-key and per-organization limits (error-catalog.md §3.4). It is decided before the request ID or body is looked at, so it never differs between a foreign and a nonexistent verification ID. Catalog and precedence: error-catalog.md (Addendum 2, amended by Addendum 3).'
       headers:
         Retry-After: { $ref: '#/components/headers/RetryAfter' }
-      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { type: rate_limit_error, code: rate_limited, message: Too many requests; retry after the indicated time., param: null, request_id: req_01HF3Y, doc_url: 'https://docs.convergepanel.com/errors#rate_limited' }
     InternalError:
-      description: '`internal_error`.'
+      description: '`internal_error`. Catalog and precedence: error-catalog.md (Addendum 2).'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    UnsupportedMediaType:
+      description: '`unsupported_media_type` (Addendum 2): the body is not `application/json`, or a `charset` other than `utf-8` is declared. Evaluated before authentication (precedence step 1). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     ServiceUnavailable:
-      description: '`queue_unavailable` (pre-write queue health check only; nothing written), `capacity_protection` (CR-2), `platform_spend_ceiling`, `maintenance`.'
+      description: '`queue_unavailable` (pre-write queue health check only; nothing written), `capacity_protection` (CR-2), `platform_spend_ceiling`, `maintenance`. Addendum 2 adds `api_unavailable` (the API is switched off or a dependency it needs failed; fails closed at any precedence step). Catalog and precedence: error-catalog.md (Addendum 2).'
       headers:
         Retry-After: { $ref: '#/components/headers/RetryAfter' }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -363,62 +654,146 @@ components:
                 Open enum. Known: invalid_request_error, authentication_error, billing_error,
                 permission_error, not_found, idempotency_error, gone, request_too_large,
                 unprocessable, rate_limit_error, api_error, service_unavailable.
-            code: { type: string }
+            code:
+              type: string
+              description: 'Open set. Every known code, with status, type, plane, stage and beta status, is listed once in error-catalog.md §2 and mirrored in components.x-error-catalog. Clients must handle an unknown code by its HTTP status and `type`.'
             message: { type: string }
             param: { type: [string, 'null'] }
             request_id: { type: string }
             doc_url: { type: string, format: uri }
     CreateVerificationRequest:
+      description: |
+        Discriminated on `type` (Addendum 2, C-1). `type: claim` requires `input.claim` and
+        forbids `input.question` and `input.context`; `type: research` requires
+        `input.question` and allows `input.context`, and forbids `input.claim`. Every object is
+        closed (`additionalProperties: false`): an unknown member at any level returns 400
+        `unknown_field` with `param` set to its dotted path (e.g. `input.question`).
+        Text rules applied by the server BEFORE this schema (`error-catalog.md` §4): NFC
+        normalization of every string; lengths in Unicode code points after NFC; input text
+        with no visible code point (only whitespace, zero-width, format, default-ignorable or
+        combining characters; Addendum 3) is 400 `empty_input`; invalid UTF-8, lone surrogates,
+        C0 controls other than tab, LF and CR, DEL (U+007F) and C1 controls (Addendum 3) are
+        400 `invalid_encoding`; `metadata` has an aggregate bound (Addendum 3). Schema-keyword-to-code mapping:
+        `error-catalog.md` §4.4. Limits are placeholders.
+      type: object
+      oneOf:
+        - $ref: '#/components/schemas/ClaimVerificationRequest'
+        - $ref: '#/components/schemas/ResearchVerificationRequest'
+      discriminator:
+        propertyName: type
+        mapping:
+          claim: '#/components/schemas/ClaimVerificationRequest'
+          research: '#/components/schemas/ResearchVerificationRequest'
+    ClaimVerificationRequest:
       type: object
       required: [type, input]
       additionalProperties: false
       properties:
-        type:
+        type: { type: string, const: claim }
+        input: { $ref: '#/components/schemas/ClaimInput' }
+        models: { $ref: '#/components/schemas/ModelSelection' }
+        options: { $ref: '#/components/schemas/VerificationOptions' }
+        metadata: { $ref: '#/components/schemas/RequestMetadata' }
+    ResearchVerificationRequest:
+      type: object
+      required: [type, input]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: research }
+        input: { $ref: '#/components/schemas/ResearchInput' }
+        models: { $ref: '#/components/schemas/ModelSelection' }
+        options: { $ref: '#/components/schemas/VerificationOptions' }
+        metadata: { $ref: '#/components/schemas/RequestMetadata' }
+    ClaimInput:
+      type: object
+      required: [claim]
+      additionalProperties: false
+      description: 'Claim input. `question` and `context` are not allowed (400 `unknown_field`).'
+      properties:
+        claim:
+          allOf: [{ $ref: '#/components/schemas/InputText' }]
+          maxLength: 4000
+          description: '1..4000 Unicode code points after NFC (placeholder). Text with no visible code point (whitespace, zero-width, format or combining characters only; Addendum 3) is 400 `empty_input`.'
+    ResearchInput:
+      type: object
+      required: [question]
+      additionalProperties: false
+      description: 'Research input. `claim` is not allowed (400 `unknown_field`).'
+      properties:
+        question:
+          allOf: [{ $ref: '#/components/schemas/InputText' }]
+          maxLength: 4000
+          description: '1..4000 Unicode code points after NFC (placeholder). Text with no visible code point (whitespace, zero-width, format or combining characters only; Addendum 3) is 400 `empty_input`.'
+        context:
+          allOf: [{ $ref: '#/components/schemas/NoControlCharacters' }]
           type: string
-          enum: [claim, research]
-        input:
-          type: object
-          additionalProperties: false
-          properties:
-            claim: { type: string, minLength: 1, maxLength: 4000 }
-            question: { type: string, minLength: 1, maxLength: 4000 }
-            context: { type: string, maxLength: 20000 }
-          description: '`claim` for type claim; `question` (+ optional `context`) for type research. Limits are placeholders.'
-        models:
-          type: array
-          minItems: 2
-          maxItems: 5
-          uniqueItems: true
-          items: { type: string }
-          description: IDs from GET /models. Defaults to the plan default panel.
-        options:
-          type: object
-          additionalProperties: false
-          properties:
-            synthesis:
-              type: boolean
-              default: false
-              description: Research only. `true` on a claim returns 422 `synthesis_not_supported`.
-            allow_fallback:
-              type: boolean
-              default: false
-              description: |
-                Opt in to provider fallback: DeepSeek substitution for a failed research slot and
-                the Claude synthesis fallback. Default false: a failed slot stays `failed` and the
-                content is never sent to a provider the customer did not select. A substituted slot
-                reports the provider that actually answered. Claim slots never fall back.
-            retain_input:
-              type: boolean
-              default: false
-              description: Keep input text for the result retention period (OD-10 class a). Org may forbid.
-            retain_model_responses:
-              type: boolean
-              default: false
-              description: Store full sanitized model text. Rejected with 403 `model_response_access_disabled` unless org model-response access is enabled (OD-19).
-        metadata:
-          type: object
-          maxProperties: 20
-          additionalProperties: { type: string, maxLength: 500 }
+          maxLength: 20000
+          description: 'Optional. 0..20000 Unicode code points after NFC (placeholder). An empty context is accepted.'
+    InputText:
+      description: 'Addendum 3 (m4): must contain at least one VISIBLE code point after NFC, i.e. one that is not White_Space, not Default_Ignorable_Code_Point, and not of general category Cc, Cf, Cs, Z* (Zs, Zl, Zp) or M* (Mn, Mc, Me). Text made only of zero-width, joiner, word-joiner, BOM, bidi-control, variation-selector, tag, Hangul-filler or combining characters is 400 `empty_input`. This is a check only: nothing is stripped, and the NFC text is processed unchanged. Evaluate `pattern` in ECMAScript Unicode mode (`u` flag). (0.3.0-draft required only one non-White_Space character, `pattern: \S`.)'
+      allOf: [{ $ref: '#/components/schemas/NoControlCharacters' }]
+      type: string
+      minLength: 1
+      pattern: '[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cf}\p{Cs}\p{Z}\p{M}]'
+    NoControlCharacters:
+      description: 'No C0 control character other than tab (U+0009), LF (U+000A) and CR (U+000D), no DEL (U+007F), no C1 control (U+0080..U+009F) and no lone surrogate (Addendum 3; 0.3.0-draft accepted DEL and C1). The server reports a violation as 400 `invalid_encoding` (checked before the schema). Evaluate `pattern` in ECMAScript Unicode mode (`u` flag), in which `[\uD800-\uDFFF]` matches only an unpaired surrogate.'
+      not: { type: string, pattern: '[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uD800-\uDFFF]' }
+    ModelSelection:
+      type: array
+      minItems: 2
+      maxItems: 5
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+      description: |
+        IDs from GET /models. Defaults to the plan default panel. 2..5 unique IDs; each ID is
+        1..64 characters of `[a-z0-9._-]` starting with a letter or digit. Fewer than 2 is 422
+        `too_few_models`; more than 5, or more than the plan allows, is 422
+        `model_limit_exceeded`; a malformed, duplicated or unknown ID is 400 `invalid_model`;
+        a known but disabled model is 422 `model_unavailable`.
+    VerificationOptions:
+      type: object
+      additionalProperties: false
+      description: 'Every option defaults to false. In the controlled beta only `false` (or omission) is accepted for each; `true` returns the 422 listed per option (Addendum 1 §4), evaluated at precedence step 9 (`error-catalog.md` §3.1, Addendum 3), only for a request that would create a new job.'
+      properties:
+        synthesis:
+          type: boolean
+          default: false
+          description: 'Research only. `true` on a claim returns 422 `synthesis_not_supported` (also during the beta, where it takes precedence over `synthesis_unavailable`). `true` on research during the controlled beta returns 422 `synthesis_unavailable` (Addendum 1 D4). Addendum 3 (reviewer exception 1): `true` is schema-valid ON PURPOSE for both types; the 422 is a semantic, release-stage rule evaluated only for a new job (`error-catalog.md` §3.1 step 9), so a schema-level 400 can never pre-empt the documented 422, and the schema does not change when the beta exclusion ends.'
+        allow_fallback:
+          type: boolean
+          default: false
+          description: |
+            Opt in to provider fallback: DeepSeek substitution for a failed research slot and
+            the Claude synthesis fallback. Default false: a failed slot stays `failed` and the
+            content is never sent to a provider the customer did not select. A substituted slot
+            reports the provider that actually answered. Claim slots never fall back.
+            `true` during the controlled beta returns 422 `fallback_unavailable` (Addendum 1 P2).
+        retain_input:
+          type: boolean
+          default: false
+          description: Keep input text for the result retention period (OD-10 class a). Org may forbid. `true` during the controlled beta returns 422 `option_unavailable_in_beta` (Addendum 1 OQ-4).
+        retain_model_responses:
+          type: boolean
+          default: false
+          description: Store full sanitized model text. Rejected with 403 `model_response_access_disabled` unless org model-response access is enabled (OD-19). During the controlled beta `true` returns 422 `option_unavailable_in_beta` (Addendum 1 P3), before the 403 is evaluated.
+    RequestMetadata:
+      type: object
+      maxProperties: 20
+      x-cp-max-total-code-points: 4000
+      propertyNames:
+        type: string
+        minLength: 1
+        maxLength: 40
+        pattern: '^[A-Za-z0-9_.-]{1,40}$'
+      additionalProperties:
+        allOf: [{ $ref: '#/components/schemas/NoControlCharacters' }]
+        type: string
+        maxLength: 500
+      description: 'Caller-supplied string map. At most 20 keys; key 1..40 characters of `[A-Za-z0-9_.-]`; value a string of 0..500 code points after NFC. Addendum 3: aggregate bound, the sum of the code points of every key and every value (NFC) is at most 4,000 (placeholder; vendor keyword `x-cp-max-total-code-points`, a server rule that standard validators ignore). Violations are 400 `invalid_request` with `param` `metadata` or `metadata.<key>`.'
     VerificationAccepted:
       type: object
       required: [object, id, status, type, format_version, usage]
@@ -645,6 +1020,35 @@ components:
         response_text:
           $ref: '#/components/schemas/Section'
           description: not_requested by default (OD-19).
+    VerificationSummary:
+      type: object
+      description: History list item (D9). Never contains input text, result sections or model text.
+      required: [object, id, type, status, mode, created_at, application_id]
+      additionalProperties: false
+      properties:
+        object: { const: verification_summary }
+        id: { type: string }
+        type: { type: string, enum: [claim, research] }
+        status: { $ref: '#/components/schemas/JobStatus' }
+        mode: { type: string, enum: [live, test] }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+        application_id: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+        credits_charged: { type: [integer, 'null'], minimum: 0 }
+    VerificationList:
+      type: object
+      required: [object, data, has_more, next_cursor]
+      additionalProperties: false
+      properties:
+        object: { const: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/VerificationSummary' }
+        has_more: { type: boolean }
+        next_cursor: { type: [string, 'null'] }
     ModelResultList:
       type: object
       required: [object, data]
