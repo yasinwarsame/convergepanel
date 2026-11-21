@@ -20,6 +20,7 @@
  * H4 PostHog's `/flags` request is never made.
  */
 import { spawn, type ChildProcess } from "child_process";
+import { createServer, type Server } from "http";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
@@ -48,6 +49,10 @@ let server: ChildProcess | null = null;
 let workDir = "";
 let guardLog = "";
 let probeLog = "";
+// Loopback stand-in for PostHog (containment hotfix): records method, path and header NAMES only, never values.
+let echo: Server | null = null;
+let echoPort = 0;
+const echoHits: Array<{ method: string; path: string; headerNames: string[] }> = [];
 let serverOutput = "";
 
 function guardAttempts(): string[] {
@@ -70,6 +75,16 @@ beforeAll(async () => {
   writeFileSync(guardLog, "");
   probeLog = join(workDir, "proxy-probe.log");
   writeFileSync(probeLog, "");
+  echo = createServer((req, res) => {
+    echoHits.push({ method: String(req.method), path: String(req.url).split("?")[0], headerNames: Object.keys(req.headers).map((k) => k.toLowerCase()).sort() });
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json", "set-cookie": "echo=1" });
+      res.end('{"status":1}');
+    });
+  });
+  await new Promise<void>((r) => echo!.listen(0, "127.0.0.1", () => r()));
+  echoPort = (echo.address() as { port: number }).port;
   server = spawn(process.execPath, [join(APP_DIR, "node_modules/next/dist/bin/next"), "start", "-p", String(PORT), "-H", "127.0.0.1"], {
     cwd: APP_DIR,
     env: {
@@ -79,6 +94,8 @@ beforeAll(async () => {
       NODE_OPTIONS: `--require ${GUARD} --require ${PROBE}`,
       CP_EGRESS_GUARD_LOG: guardLog,
       CP_PROXY_PROBE_LOG: probeLog,
+      // Test-only upstream override (honoured only off Vercel and only for a loopback origin).
+      CP_TEST_ANALYTICS_PROXY_ORIGIN: `http://127.0.0.1:${echoPort}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -101,6 +118,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (browser) await browser.close();
   if (server) server.kill("SIGTERM");
+  if (echo) echo.close();
   if (workDir) rmSync(workDir, { recursive: true, force: true });
 });
 
@@ -325,34 +343,40 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
     }
   });
 
-  // LAST: this test makes the app server attempt the PostHog proxy connection (refused by the egress guard).
-  it("H5: the /ingest proxy forwards no Cookie or Authorization header to PostHog", async () => {
-    // Review F1: case variants of the PostHog proxy and of the SDK's Sentry tunnel rewrite (`/monitoring?o=&p=`).
-    for (const path of ["/ingest/e/?ip=0", "/ingest/static/array.js", "/ingest/flags/?v=2", "/INGEST/e/?ip=0", "/Ingest/e/", "/Monitoring?o=1&p=2", "/MONITORING/?o=1&p=2&r=de", "/monitoring?o=1&p=2"]) {
-      await fetch(`${BASE}${path}`, {
-        method: path.includes("static") ? "GET" : "POST",
-        headers: {
-          cookie: `__session=SESSIONSENTINEL${RID}; ph_phc_synthetic_posthog=%7B%22u%22%3A%22${RID}%22%7D`,
-          authorization: `Bearer AUTHSENTINEL${RID}`,
-          "content-type": "application/json",
-        },
-        body: path.includes("static") ? undefined : "{}",
-      }).catch(() => undefined);
+  // Containment hotfix: the proxy is app code; the upstream is a loopback echo server, so the REAL route handler
+  // and middleware run and the headers that actually arrive upstream are observed (names only).
+  it("H5: canonical /ingest requests arrive upstream without Cookie or Authorization (any case); variants never reach it", async () => {
+    const dummy = (casing: "lower" | "upper" | "mixed") => {
+      const c = { lower: ["cookie", "authorization"], upper: ["COOKIE", "AUTHORIZATION"], mixed: ["Cookie", "Authorization"] }[casing];
+      return { [c[0]]: `__session=DUMMYSESSION${RID}; ph_phc_synthetic_posthog=x`, [c[1]]: `Bearer DUMMYBEARER${RID}`, "proxy-authorization": "Basic DUMMY", "x-firebase-appcheck": "DUMMY", "content-type": "text/plain" };
+    };
+    const canonical = ["/ingest/e/?ip=0", "/ingest/i/v0/e/", "/ingest/static/array.js", "/ingest/array/phc_synthetic/config.js"];
+    for (const casing of ["lower", "upper", "mixed"] as const) {
+      for (const path of canonical) {
+        const post = !path.includes("static") && !path.includes("array");
+        const before = echoHits.length;
+        const res = await fetch(`${BASE}${path}`, { method: post ? "POST" : "GET", headers: dummy(casing), body: post ? "payload" : undefined });
+        expect([casing, path, res.status]).toEqual([casing, path, 200]);
+        expect(res.headers.get("set-cookie")).toBeNull();
+        expect(echoHits.length).toBe(before + 1); // positive control: it really reached the upstream
+        const hit = echoHits[echoHits.length - 1];
+        expect(hit.headerNames).not.toContain("cookie");
+        expect(hit.headerNames).not.toContain("authorization");
+        expect(hit.headerNames).not.toContain("proxy-authorization");
+        expect(hit.headerNames).not.toContain("x-firebase-appcheck");
+      }
     }
-    await new Promise((r) => setTimeout(r, 2_000));
-    const probes = readFileSync(probeLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { host: string; path: string; headerNames: string[] });
-    const toPostHog = probes.filter((p) => /(^|\.)posthog\.com$/.test(p.host));
-    // No proxied request to ANY vendor host (PostHog or Sentry) carries first-party credentials.
-    const toVendors = probes.filter((p) => /(^|\.)(posthog\.com|sentry\.io)$/.test(p.host));
-    expect(toVendors.filter((p) => p.headerNames.includes("cookie") || p.headerNames.includes("authorization")).map((p) => `${p.host}${p.path}`)).toEqual([]);
-    // Positive control: the proxy did try to forward each request (and the guard refused it).
-    expect(new Set(toPostHog.map((p) => p.path.split("/").slice(0, 2).join("/"))).size).toBeGreaterThanOrEqual(2);
-    expect(guardAttempts().map((l) => JSON.parse(l).host).every((h: string) => /(^|\.)(posthog\.com|sentry\.io)$/.test(h))).toBe(true);
-    for (const p of toPostHog) {
-      expect(p.headerNames).not.toContain("cookie");
-      expect(p.headerNames).not.toContain("authorization");
+    const variants = ["/INGEST/e/", "/Ingest/static/array.js", "/iNgEsT/e/", "/ingest./e/", "//ingest/e/", "/ingest//e/", "/%69ngest/e/", "/ingest%2Fe", "/Monitoring?o=1&p=2", "/MONITORING/?o=1&p=2&r=de"];
+    const before = echoHits.length;
+    for (const path of variants) {
+      const res = await fetch(`${BASE}${path}`, { method: "POST", headers: dummy("mixed"), body: "payload", redirect: "manual" });
+      expect([path, res.status === 404 || res.status === 308]).toEqual([path, true]);
     }
+    expect(echoHits.length).toBe(before); // no variant reached the upstream
+    // Nothing tried to leave the machine (no rewrite to PostHog or Sentry exists any more for these paths).
+    expect(guardAttempts()).toEqual([]);
+    const allNames = [...new Set(echoHits.flatMap((h) => h.headerNames))].sort();
     // eslint-disable-next-line no-console
-    console.log(`[structural harness] proxied header names: ${JSON.stringify([...new Set(toPostHog.flatMap((p) => p.headerNames))])}`);
+    console.log(`[structural harness] upstream header names: ${JSON.stringify(allNames)}`);
   });
 });

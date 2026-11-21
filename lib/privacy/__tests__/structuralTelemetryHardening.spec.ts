@@ -361,18 +361,23 @@ describe("S7 review corrections (F1 case variants, F4 keys / nested values, F5 p
   const compiled: RegExp[] = getMiddlewareMatchers(config.matcher, { i18n: undefined }).map((m: { regexp: string }) => new RegExp(m.regexp));
   const matches = (path: string) => compiled.some((r) => r.test(path));
 
-  it.each(["/INGEST/e/", "/Ingest/e/", "/iNgEsT", "/Monitoring", "/MONITORING/", "/monitoring", "/ingest/static/array.js"])(
-    "F1: %s is matched by the middleware and credentials are stripped",
-    (path) => {
-      expect(isTelemetryProxyPath(path)).toBe(true);
-      expect(matches(path)).toBe(true);
-      const res = middleware(new NextRequest(`${ORIGIN}${path}?o=1&p=2`, { headers: { cookie: "__session=SESSIONSENTINEL", authorization: "Bearer X", accept: "*/*" } }));
-      const overridden = String(res.headers.get("x-middleware-override-headers") ?? "").split(",");
-      expect(overridden).toContain("accept");
-      expect(overridden).not.toContain("cookie");
-      expect(overridden).not.toContain("authorization");
-    }
-  );
+  // Containment hotfix: a case VARIANT is refused (404) before routing; the canonical spelling continues with
+  // credentials stripped. Both are matched by the middleware.
+  it.each(["/INGEST/e/", "/Ingest/e/", "/iNgEsT", "/Monitoring", "/MONITORING/"])("F1: %s is matched by the middleware and refused (404)", (path) => {
+    expect(isTelemetryProxyPath(path)).toBe(true);
+    expect(matches(path)).toBe(true);
+    const res = middleware(new NextRequest(`${ORIGIN}${path}?o=1&p=2`, { headers: { cookie: "__session=SESSIONSENTINEL", authorization: "Bearer X" } }));
+    expect(res.status).toBe(404);
+  });
+
+  it.each(["/monitoring", "/ingest/static/array.js", "/ingest/e/"])("F1: canonical %s continues with credentials stripped", (path) => {
+    expect(matches(path)).toBe(true);
+    const res = middleware(new NextRequest(`${ORIGIN}${path}?o=1&p=2`, { headers: { cookie: "__session=SESSIONSENTINEL", authorization: "Bearer X", accept: "*/*" } }));
+    const overridden = String(res.headers.get("x-middleware-override-headers") ?? "").split(",");
+    expect(overridden).toContain("accept");
+    expect(overridden).not.toContain("cookie");
+    expect(overridden).not.toContain("authorization");
+  });
 
   it("F1: unrelated paths are not telemetry proxies (control)", () => {
     for (const p of ["/ingestion", "/monitor", "/api/ingest", "/pricing"]) expect(isTelemetryProxyPath(p)).toBe(false);
