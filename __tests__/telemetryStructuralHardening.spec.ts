@@ -34,6 +34,7 @@ const APP_DIR = process.env.CP_NEXT_HARNESS_APP_DIR ?? "";
 const PORT = Number(process.env.CP_NEXT_HARNESS_PORT ?? "3998");
 const BASE = `http://127.0.0.1:${PORT}`;
 const GUARD = join(ROOT, "__tests__/helpers/egressGuard.cjs");
+const PROBE = join(ROOT, "__tests__/helpers/proxyHeaderProbe.cjs");
 // 43 base64url characters with both cases: the invitation token shape. Distinct sentinels per role.
 const TOK = "Zq7xK2mPvR9tLwB4nYc8HdJ3fGs6Ue1Ao5Ti0Vb-W_y";
 const INV = "INVSTRUCTSENTINEL0042";
@@ -46,6 +47,7 @@ let browser: Browser | null = null;
 let server: ChildProcess | null = null;
 let workDir = "";
 let guardLog = "";
+let probeLog = "";
 let serverOutput = "";
 
 function guardAttempts(): string[] {
@@ -66,9 +68,18 @@ beforeAll(async () => {
   workDir = mkdtempSync(join(tmpdir(), "cp-struct-harness-"));
   guardLog = join(workDir, "egress.log");
   writeFileSync(guardLog, "");
+  probeLog = join(workDir, "proxy-probe.log");
+  writeFileSync(probeLog, "");
   server = spawn(process.execPath, [join(APP_DIR, "node_modules/next/dist/bin/next"), "start", "-p", String(PORT), "-H", "127.0.0.1"], {
     cwd: APP_DIR,
-    env: { PATH: process.env.PATH ?? "", NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1", NODE_OPTIONS: `--require ${GUARD}`, CP_EGRESS_GUARD_LOG: guardLog },
+    env: {
+      PATH: process.env.PATH ?? "",
+      NODE_ENV: "production",
+      NEXT_TELEMETRY_DISABLED: "1",
+      NODE_OPTIONS: `--require ${GUARD} --require ${PROBE}`,
+      CP_EGRESS_GUARD_LOG: guardLog,
+      CP_PROXY_PROBE_LOG: probeLog,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.stdout?.on("data", (b) => (serverOutput += String(b)));
@@ -156,8 +167,10 @@ async function open(path: string) {
 }
 
 const isTelemetry = (r: Recorded) => r.decision === "sentry-tunnel" || r.decision === "posthog";
+// The browser's own Cookie header on same-origin requests is first-party; what the `/ingest` proxy forwards to
+// PostHog is checked server-side (H5). Every other header, the URL and every decoding of the body are checked.
 const carries = (r: Recorded, needles: string[]) => {
-  const hay = [r.url, ...Object.values(r.headers), ...r.bodies].join("\n");
+  const hay = [r.url, ...Object.entries(r.headers).filter(([k]) => k.toLowerCase() !== "cookie").map(([, v]) => v), ...r.bodies].join("\n");
   return needles.some((n) => hay.includes(n) || hay.includes(encodeURIComponent(n)));
 };
 const label = (r: Recorded) => `${r.kind} ${r.decision} ${r.url.slice(0, 140)}`;
@@ -198,7 +211,23 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
       const sameOrigin = all.filter((r) => r.decision !== "deny");
       expect(sameOrigin.filter((r) => r.headers["referer"] === `${BASE}/`).length).toBeGreaterThan(5); // the policy was exercised
       expect(badReferers(all)).toEqual([]);
-      expect(all.filter((r) => isTelemetry(r) && carries(r, [RID, TOK])).map(label)).toEqual([]);
+      const leaking = all.filter((r) => isTelemetry(r) && carries(r, [RID, TOK]));
+      if (process.env.CP_STRUCT_DEBUG) {
+        for (const r of leaking) {
+          const hay = [r.url, ...Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`), ...r.bodies].join("\n");
+          for (const n of [RID, TOK, encodeURIComponent(RID)]) {
+            let i = hay.indexOf(n);
+            let shown = 0;
+            while (i !== -1 && shown < 3) {
+              // eslint-disable-next-line no-console
+              console.log(`[debug] ${label(r)} :: ...${hay.slice(Math.max(0, i - 160), i + 40).replace(/\s+/g, " ")}...`);
+              i = hay.indexOf(n, i + 1);
+              shown++;
+            }
+          }
+        }
+      }
+      expect(leaking.map(label)).toEqual([]);
     } finally {
       await run.close();
     }
@@ -227,33 +256,42 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
     }
   });
 
+  // `flows`: ids that are not token-shaped -> telemetry is sent (positive control) and must carry only templates.
+  // A 43-character token-shaped component makes the whole document telemetry-free (#334, conservative): then NO
+  // telemetry may be sent at all.
   it.each([
-    ["unrelated route, credential-shaped id", `/workspace/team/${TOK}/members?openResearchRun=${RID}`, "/workspace/team/[workspaceId]/members"],
-    ["unrelated API-shaped id route", `/workspace/research/${RID}?token=${TOK}`, "/workspace/research/[runId]"],
-    ["unknown route", `/no-such-route/${TOK}/${INV}`, "/[unmatched]"],
-    ["unknown route, double-encoded", `/no-such-route/x%2523token%253D${TOK}`, "/[unmatched]"],
-    ["SEO slug that is not in the allowlist", `/learn/${TOK}`, "/learn/[slug]"],
-  ])("H3 %s: telemetry flows with templates and never carries the values", async (_name, path, template) => {
-    const run = await open(path);
+    ["unrelated route, sensitive ids", `/workspace/team/${INV}/members?openResearchRun=${RID}`, "/workspace/team/[workspaceId]/members", true],
+    ["unrelated route, ids in path and query", `/workspace/research/${RID}?workspace=${INV}`, "/workspace/research/[runId]", true],
+    ["unknown route, sensitive ids", `/no-such-route/${INV}/${RID}`, "/[unmatched]", true],
+    ["SEO slug not in the allowlist", `/learn/${RID.toLowerCase()}`, "/learn/[slug]", true],
+    ["unrelated route, token-shaped id", `/workspace/team/${TOK}/members?openResearchRun=${RID}`, "", false],
+    ["unknown route, token-shaped", `/no-such-route/${TOK}/${INV}`, "", false],
+    ["unknown route, double-encoded token", `/no-such-route/x%2523token%253D${TOK}`, "", false],
+  ])("H3 %s: telemetry carries only templates", async (_name, path, template, flows) => {
+    const run = await open(path as string);
     try {
       await run.page.waitForTimeout(8_000);
       const all = await run.all();
       await assertContained(all, run.websockets);
       const telemetry = all.filter(isTelemetry);
+      if (!flows) {
+        expect(telemetry.map(label)).toEqual([]);
+        return;
+      }
       // Positive control: PostHog events were sent (pageview), so the absence below is meaningful.
       expect(telemetry.filter((r) => r.decision === "posthog").length).toBeGreaterThan(0);
-      expect(telemetry.filter((r) => carries(r, [TOK, INV, RID])).map(label)).toEqual([]);
+      expect(telemetry.filter((r) => carries(r, [TOK, INV, RID, RID.toLowerCase()])).map(label)).toEqual([]);
       expect(badReferers(all)).toEqual([]);
       const bodies = telemetry.flatMap((r) => r.bodies).join("\n");
       // The page either stayed on the route (template present) or redirected to /login (redirect value redacted).
-      expect(bodies.includes(template) || bodies.includes("/login")).toBe(true);
+      expect(bodies.includes(template as string) || bodies.includes("/login")).toBe(true);
     } finally {
       await run.close();
     }
   });
 
   it("H3 Replay: the uncompressed recording is sent and its meta href is templated (sampling forced)", async () => {
-    const run = await open(`/workspace/team/${TOK}/members?openResearchRun=${RID}`);
+    const run = await open(`/workspace/team/${INV}/members?openResearchRun=${RID}`);
     try {
       await run.page.waitForTimeout(8_000);
       // Replay flushes on page hide; trigger it, then give the transport time.
@@ -264,12 +302,12 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
       await assertContained(all, run.websockets);
       const tunnel = all.filter((r) => r.decision === "sentry-tunnel");
       expect(tunnel.length).toBeGreaterThan(0); // positive control: Sentry traffic observed
-      expect(tunnel.filter((r) => carries(r, [TOK, INV, RID])).map(label)).toEqual([]);
+      expect(tunnel.filter((r) => carries(r, [INV, RID])).map(label)).toEqual([]);
       const recordings = tunnel.flatMap((r) => r.bodies).filter((b) => b.includes('"type":"replay_recording"'));
       expect(recordings.length).toBeGreaterThan(0);
       const hrefs = recordings.join("\n").match(/"href":"[^"]*"/g) ?? [];
       expect(hrefs.length).toBeGreaterThan(0);
-      for (const h of hrefs) expect(h).not.toMatch(new RegExp(`${TOK}|${RID}`));
+      for (const h of hrefs) expect(h).not.toMatch(new RegExp(`${INV}|${RID}`));
     } finally {
       await run.close();
     }
@@ -285,5 +323,32 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
     } finally {
       await run.close();
     }
+  });
+
+  // LAST: this test makes the app server attempt the PostHog proxy connection (refused by the egress guard).
+  it("H5: the /ingest proxy forwards no Cookie or Authorization header to PostHog", async () => {
+    for (const path of ["/ingest/e/?ip=0", "/ingest/static/array.js", "/ingest/flags/?v=2"]) {
+      await fetch(`${BASE}${path}`, {
+        method: path.includes("static") ? "GET" : "POST",
+        headers: {
+          cookie: `__session=SESSIONSENTINEL${RID}; ph_phc_synthetic_posthog=%7B%22u%22%3A%22${RID}%22%7D`,
+          authorization: `Bearer AUTHSENTINEL${RID}`,
+          "content-type": "application/json",
+        },
+        body: path.includes("static") ? undefined : "{}",
+      }).catch(() => undefined);
+    }
+    await new Promise((r) => setTimeout(r, 2_000));
+    const probes = readFileSync(probeLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { host: string; path: string; headerNames: string[] });
+    const toPostHog = probes.filter((p) => /(^|\.)posthog\.com$/.test(p.host));
+    // Positive control: the proxy did try to forward each request (and the guard refused it).
+    expect(new Set(toPostHog.map((p) => p.path.split("/").slice(0, 2).join("/"))).size).toBeGreaterThanOrEqual(2);
+    expect(guardAttempts().map((l) => JSON.parse(l).host).every((h: string) => /(^|\.)posthog\.com$/.test(h))).toBe(true);
+    for (const p of toPostHog) {
+      expect(p.headerNames).not.toContain("cookie");
+      expect(p.headerNames).not.toContain("authorization");
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[structural harness] proxied header names: ${JSON.stringify([...new Set(toPostHog.flatMap((p) => p.headerNames))])}`);
   });
 });

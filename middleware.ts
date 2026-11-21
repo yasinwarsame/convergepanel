@@ -17,7 +17,26 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
+/**
+ * Structural telemetry hardening (GHSA-655j-5f43-92pw follow-up): `/ingest/*` is a reverse proxy to PostHog
+ * (next.config.js rewrites), and a proxy forwards the browser's request headers. Same-origin requests carry every
+ * first-party cookie (`path: "/"`), including the httpOnly `__session` cookie and PostHog's own cookie with the raw
+ * landing URL. Credentials and cookies are removed before the request is proxied; PostHog authenticates events by
+ * the project key in the body, not by cookies.
+ */
+export const PROXY_STRIPPED_REQUEST_HEADERS = ["cookie", "authorization", "proxy-authorization", "x-firebase-appcheck"] as const;
+
+export function stripProxyCredentials(headers: Headers): Headers {
+  const out = new Headers(headers);
+  for (const name of PROXY_STRIPPED_REQUEST_HEADERS) out.delete(name);
+  return out;
+}
+
 export function middleware(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  if (path === "/ingest" || path.startsWith("/ingest/")) {
+    return NextResponse.next({ request: { headers: stripProxyCredentials(request.headers) } });
+  }
   // Gate /admin routes: redirect to login if no session cookie is present.
   // This prevents the admin page HTML from being served to unauthenticated visitors.
   // The real auth check (Firebase custom claims) still happens client-side in
@@ -34,6 +53,6 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*"],
+  matcher: ["/admin/:path*", "/ingest", "/ingest/:path*"],
 };
 

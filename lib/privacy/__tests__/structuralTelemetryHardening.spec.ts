@@ -8,6 +8,7 @@
  *   S3  every string anywhere in a telemetry payload is URL-sanitized, whatever its key;
  *   S4  the Sentry transmission boundary sanitizes every envelope item, including the Replay recording's meta
  *       `href` and DOM URL attributes, and drops what it cannot parse; the `dsn` header is untouched;
+ *   S6  the `/ingest` reverse proxy forwards no Cookie / Authorization header (middleware);
  *   S5  the SDK configuration wires the boundary, the no-referrer transport, Replay attribute masking, the span /
  *       log / metric hooks and the disabled PostHog `/flags` request; the site header is `strict-origin`.
  */
@@ -318,5 +319,34 @@ describe("S5 configuration wiring", () => {
     const rules: Array<{ source: string; headers: Array<{ key: string; value: string }> }> = await config.headers();
     const values = rules.flatMap((r) => r.headers.filter((h) => h.key.toLowerCase() === "referrer-policy").map((h) => `${r.source} ${h.value}`));
     expect(values).toEqual(["/:path* strict-origin"]);
+  });
+});
+
+describe("S6 the /ingest reverse proxy forwards no first-party credentials", () => {
+  const { middleware, config, PROXY_STRIPPED_REQUEST_HEADERS } = require("../../../middleware");
+  const { NextRequest } = require("next/server");
+
+  const request = (path: string) =>
+    new NextRequest(`${ORIGIN}${path}`, {
+      headers: { cookie: `__session=SESSIONSENTINEL; ph_x=${INV}`, authorization: "Bearer AUTHSENTINEL", "content-type": "application/json", "user-agent": "UA" },
+    });
+
+  it.each(["/ingest", "/ingest/e/?ip=0", "/ingest/static/array.js", "/ingest/flags/?v=2"])("%s: Cookie and Authorization are removed, other headers kept", (path) => {
+    const res = middleware(request(path));
+    const overridden = String(res.headers.get("x-middleware-override-headers") ?? "").split(",").map((h: string) => h.trim());
+    expect(overridden.length).toBeGreaterThan(0); // the request headers ARE overridden
+    for (const h of PROXY_STRIPPED_REQUEST_HEADERS) expect(overridden).not.toContain(h);
+    expect(overridden).toEqual(expect.arrayContaining(["content-type", "user-agent"]));
+    expect(res.headers.get("x-middleware-request-cookie")).toBeNull();
+    expect(res.headers.get("x-middleware-request-authorization")).toBeNull();
+  });
+
+  it("the matcher covers the proxy; /admin gating is unchanged (control)", () => {
+    expect(config.matcher).toEqual(expect.arrayContaining(["/admin/:path*", "/ingest", "/ingest/:path*"]));
+    const admin = middleware(new NextRequest(`${ORIGIN}/admin/users`));
+    expect(admin.status).toBe(307);
+    expect(admin.headers.get("location")).toContain("/login?next=%2Fadmin%2Fusers");
+    const pricing = middleware(request("/admin/keys"));
+    expect(pricing.headers.get("x-middleware-override-headers")).toBeNull();
   });
 });
