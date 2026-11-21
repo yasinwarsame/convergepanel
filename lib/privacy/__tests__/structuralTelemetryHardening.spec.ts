@@ -355,9 +355,11 @@ describe("S7 review corrections (F1 case variants, F4 keys / nested values, F5 p
   const { middleware, config, isTelemetryProxyPath } = require("../../../middleware");
   const { NextRequest } = require("next/server");
 
-  // Next.js matcher strings use path-to-regexp; compile them the same way to prove case variants are matched.
-  const { pathToRegexp } = require("next/dist/compiled/path-to-regexp");
-  const matches = (path: string) => (config.matcher as string[]).some((m) => pathToRegexp(m).test(path));
+  // Compile the matchers with Next.js's OWN build-time compiler (the middleware manifest stores case-sensitive
+  // regexps; plain path-to-regexp defaults to case-insensitive and would make this check vacuous).
+  const { getMiddlewareMatchers } = require("next/dist/build/analysis/get-page-static-info");
+  const compiled: RegExp[] = getMiddlewareMatchers(config.matcher, { i18n: undefined }).map((m: { regexp: string }) => new RegExp(m.regexp));
+  const matches = (path: string) => compiled.some((r) => r.test(path));
 
   it.each(["/INGEST/e/", "/Ingest/e/", "/iNgEsT", "/Monitoring", "/MONITORING/", "/monitoring", "/ingest/static/array.js"])(
     "F1: %s is matched by the middleware and credentials are stripped",
