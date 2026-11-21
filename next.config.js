@@ -87,7 +87,10 @@ module.exports = withSentryConfig(nextConfig, {
   project: "javascript-nextjs",
   silent: !process.env.CI,
   widenClientFileUpload: true,
-  tunnelRoute: "/monitoring",
+  // Containment (review MINOR-1): no `tunnelRoute`. It registered EXTERNAL rewrites from `/monitoring?o=&p=` to a
+  // Sentry ingest host chosen by the query (any org id), which forward request headers (cookies included) if
+  // ever matched. The client sets `tunnel: "/monitoring"` itself (instrumentation-client.ts) and
+  // app/monitoring/route.ts is the only tunnel: it forwards the envelope body with Content-Type only.
   treeshake: {
     removeDebugLogging: true,
   },

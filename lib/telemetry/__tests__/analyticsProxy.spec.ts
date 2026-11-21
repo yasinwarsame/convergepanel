@@ -153,7 +153,25 @@ describe("A4 route handler", () => {
     const sent = calls[0].init.headers as Headers;
     expect([...sent.keys()].every((n) => FORWARDED_REQUEST_HEADERS.includes(n))).toBe(true);
     expect(JSON.stringify([...sent.entries()])).not.toMatch(new RegExp(`${DUMMY_SESSION}|${DUMMY_BEARER}`));
-    expect(Buffer.from(calls[0].init.body as ArrayBuffer).toString()).toBe("payload");
+    expect(Buffer.from(calls[0].init.body as Uint8Array).toString()).toBe("payload");
+    expect(calls[0].init.redirect).toBe("manual"); // review MINOR-3: upstream redirects are never followed
+  });
+
+  it("review MINOR-3: an oversize body is refused with 413 before any upstream request", async () => {
+    const { POST } = handler();
+    const big = new Uint8Array(4 * 1024 * 1024 + 1);
+    const declared: Response = await POST(new Request("https://convergepanel.com/ingest/e/", { method: "POST", body: big, headers: { "content-length": String(big.byteLength) } }));
+    expect(declared.status).toBe(413);
+    const streamed: Response = await POST(
+      new Request("https://convergepanel.com/ingest/e/", {
+        method: "POST",
+        body: new ReadableStream({ start(c) { c.enqueue(big); c.close(); } }),
+        // @ts-expect-error Node fetch needs duplex for a stream body
+        duplex: "half",
+      })
+    );
+    expect(streamed.status).toBe(413);
+    expect(calls).toHaveLength(0);
   });
 
   it.each(["/INGEST/e/", "/ingest//e/", "/%69ngest/e/", "/ingest/%2e%2e/e"])("%s: 404 before any upstream request", async (p) => {
@@ -197,6 +215,10 @@ describe("A6 configuration: no external rewrite proxies analytics", () => {
     });
     const rewrites = await cfg.rewrites();
     const all = Array.isArray(rewrites) ? rewrites : [...(rewrites.beforeFiles ?? []), ...(rewrites.afterFiles ?? []), ...(rewrites.fallback ?? [])];
-    expect(all.filter((r: { destination: string }) => /posthog/i.test(r.destination))).toEqual([]);
+    expect(all.filter((r: { destination: string }) => /posthog|sentry/i.test(r.destination))).toEqual([]);
+    // withSentryConfig is mocked here, so its rewrites are checked on the real build (harness H6); the source must not
+    // configure `tunnelRoute`, which is what registers them.
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../../../next.config.js"), "utf8") as string;
+    expect(src).not.toMatch(/^\s*tunnelRoute\s*:/m);
   });
 });

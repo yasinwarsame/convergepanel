@@ -343,6 +343,13 @@ d("structural telemetry hardening: real Next.js production build (contained)", (
     }
   });
 
+  it("H6: the real build registers no rewrite to PostHog or Sentry (no external proxy forwards request headers)", () => {
+    const manifest = JSON.parse(readFileSync(join(APP_DIR, ".next/routes-manifest.json"), "utf8"));
+    const rw = manifest.rewrites;
+    const all: Array<{ source: string; destination: string }> = Array.isArray(rw) ? rw : [...(rw.beforeFiles ?? []), ...(rw.afterFiles ?? []), ...(rw.fallback ?? [])];
+    expect(all.filter((r) => /posthog|sentry/i.test(r.destination)).map((r) => `${r.source} -> ${r.destination}`)).toEqual([]);
+  });
+
   // Containment hotfix: the proxy is app code; the upstream is a loopback echo server, so the REAL route handler
   // and middleware run and the headers that actually arrive upstream are observed (names only).
   it("H5: canonical /ingest requests arrive upstream without Cookie or Authorization (any case); variants never reach it", async () => {

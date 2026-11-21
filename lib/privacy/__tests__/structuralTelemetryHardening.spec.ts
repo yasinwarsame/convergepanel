@@ -271,6 +271,7 @@ describe("S5 configuration wiring", () => {
   it("browser Sentry: no-referrer transport, envelope boundary, uncompressed Replay with URL attributes masked, span/log/metric hooks", async () => {
     loadClient();
     expect(initConfig.transportOptions.fetchOptions.referrerPolicy).toBe("no-referrer");
+    expect(initConfig.tunnel).toBe("/monitoring"); // review MINOR-1: the only tunnel is the route handler
     expect(replayOptions.useCompression).toBe(false);
     expect(replayOptions.maskAttributes).toEqual(REPLAY_MASKED_ATTRIBUTES);
     for (const a of ["href", "src", "srcset", "action", "title", "placeholder", "aria-label"]) expect(REPLAY_MASKED_ATTRIBUTES).toContain(a);

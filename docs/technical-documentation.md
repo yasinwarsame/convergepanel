@@ -156,7 +156,7 @@ The three `Sentry.init` surfaces (browser, Node server, edge) are additionally g
 
 **Isolated verification must assert that `SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_DSN` are both absent** from the environment it builds and runs with. Vercel's Development environment currently defines `SENTRY_DSN`; an isolated run that pulled that environment and ran `next build && next start` (`NODE_ENV=production`) would initialize server Sentry with it. Never use a Production DSN in an isolated build.
 
-`withSentryConfig({ tunnelRoute: "/monitoring" })` also registers SDK rewrites from `/monitoring?o=&p=` to Sentry ingest hosts; they are shadowed by `app/monitoring/route.ts`. Do not remove that route without also removing `tunnelRoute`, or `/monitoring` becomes an open relay.
+The client sets `tunnel: "/monitoring"` in `Sentry.init`; `withSentryConfig` is configured WITHOUT `tunnelRoute`, because that option registered external rewrites from `/monitoring?o=&p=` to a Sentry ingest host chosen by the query, which forward request headers. `app/monitoring/route.ts` is the only tunnel (envelope body + Content-Type only); do not re-add `tunnelRoute`.
 
 ## Telemetry URL sanitization (structural)
 
