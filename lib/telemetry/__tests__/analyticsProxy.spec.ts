@@ -74,6 +74,11 @@ describe("A2 upstream mapping", () => {
   it("maps API and asset paths to the fixed PostHog hosts, passing the query through", () => {
     expect(upstreamUrlFor("/ingest/e/", "?ip=0&_=1&ver=1.2")).toBe(`${POSTHOG_API_ORIGIN}/e/?ip=0&_=1&ver=1.2`);
     expect(upstreamUrlFor("/ingest/i/v0/e/", "")).toBe(`${POSTHOG_API_ORIGIN}/i/v0/e/`);
+    // posthog-js's real query shape survives the re-encoding unchanged.
+    expect(upstreamUrlFor("/ingest/e/", "?ip=0&_=1795280474271&ver=1.379.1&compression=gzip-js&beacon=1")).toBe(
+      `${POSTHOG_API_ORIGIN}/e/?ip=0&_=1795280474271&ver=1.379.1&compression=gzip-js&beacon=1`
+    );
+    expect(upstreamUrlFor("/ingest/e/", "?")).toBe(`${POSTHOG_API_ORIGIN}/e/`);
     expect(upstreamUrlFor("/ingest/static/array.js", "")).toBe(`${POSTHOG_ASSETS_ORIGIN}/static/array.js`);
     expect(upstreamUrlFor("/ingest/array/phc_x/config.js", "")).toBe(`${POSTHOG_ASSETS_ORIGIN}/array/phc_x/config.js`);
   });

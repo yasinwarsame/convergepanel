@@ -84,9 +84,25 @@ export function upstreamUrlFor(rawPathname: string, search: string): string | nu
   const segments = trailing ? parts.slice(0, -1) : parts;
   if (!segments.every((s) => SAFE_SEGMENT.test(s) && s !== "." && s !== "..")) return null;
   const isAsset = segments[0] === "static" || segments[0] === "array";
-  const path = `${segments.join("/")}${trailing ? "/" : ""}`;
-  const query = typeof search === "string" && search.startsWith("?") ? search : "";
+  // Every request-derived part is re-encoded (segments already match SAFE_SEGMENT, so valid paths are unchanged);
+  // the host stays a literal prefix.
+  const path = `${segments.map((s) => encodeURIComponent(s)).join("/")}${trailing ? "/" : ""}`;
+  const query = encodeQuery(search);
   return isAsset ? `https://us-assets.i.posthog.com/${path}${query}` : `https://us.i.posthog.com/${path}${query}`;
+}
+
+/** The query string, parsed and re-encoded pair by pair (`?a=b&c=d`), or "" when empty or unparseable. */
+function encodeQuery(search: string): string {
+  if (typeof search !== "string" || !search.startsWith("?") || search.length < 2) return "";
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(search);
+  } catch {
+    return "";
+  }
+  const pairs: string[] = [];
+  params.forEach((value, key) => pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`));
+  return pairs.length > 0 ? `?${pairs.join("&")}` : "";
 }
 
 /** The ONLY headers sent upstream: allowlisted names copied from the inbound request. */
