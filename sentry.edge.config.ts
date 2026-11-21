@@ -5,7 +5,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { resolveSentryDsn } from "./lib/telemetry/sentryDsn";
-import { scrubSentryBreadcrumb, scrubSentryEvent } from "./lib/privacy/sentryScrub";
+import { scrubSentryBreadcrumb, scrubSentryEvent, scrubSentryLogOrMetric, scrubSentrySpan } from "./lib/privacy/sentryScrub";
 
 // Telemetry isolation: only an explicitly configured SENTRY_DSN is used. Missing
 // or empty means Sentry is never initialized; there is no hard-coded fallback
@@ -28,5 +28,9 @@ if (dsn !== undefined) {
     beforeSend: (event) => scrubSentryEvent(event),
     beforeSendTransaction: (event) => scrubSentryEvent(event),
     beforeBreadcrumb: (breadcrumb) => scrubSentryBreadcrumb(breadcrumb),
+    // Structural hardening: spans, logs and metrics skip the hooks above; they are URL-sanitized the same way.
+    beforeSendSpan: (span) => scrubSentrySpan(span),
+    beforeSendLog: (log) => scrubSentryLogOrMetric(log),
+    beforeSendMetric: (metric) => scrubSentryLogOrMetric(metric),
   });
 }

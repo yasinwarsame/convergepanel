@@ -153,6 +153,10 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
       mask_personal_data_properties: true,
       custom_personal_data_properties: POSTHOG_CONTENT_PARAMS,
       before_send: beforeSend,
+      // Structural hardening: the `/flags` request sends `person_properties` built from the landing URL and
+      // referrer (`$initial_current_url`, `$initial_pathname`, ...) and bypasses `before_send`. The app evaluates no
+      // feature flags, so the request is not made at all.
+      advanced_disable_flags: true,
       loaded: (ph) => {
         if (process.env.NODE_ENV === "development") ph.debug();
       },

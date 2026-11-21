@@ -31,6 +31,11 @@ const nextConfig = {
     ];
   },
   experimental: {
+    // Structural hardening (GHSA-655j-5f43-92pw follow-up): rewrites match case-insensitively by default, so
+    // `/INGEST/...` and `/Monitoring?o=&p=` reached the PostHog proxy and the SDK's Sentry tunnel rewrite (which
+    // forwards request headers, cookies included) past the case-sensitive middleware and the `/monitoring` route.
+    // Rewrites, redirects and header rules now match the exact case the app uses.
+    caseSensitiveRoutes: true,
     serverActions: {
       bodySizeLimit: "12mb",
     },
@@ -71,7 +76,11 @@ const nextConfig = {
           { key: "Content-Security-Policy", value: cspDirectives.join("; ") },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Structural hardening (GHSA-655j-5f43-92pw follow-up): `strict-origin` sends only the origin on
+          // same-origin requests too. `strict-origin-when-cross-origin` sent the full URL (path, query) to our own
+          // endpoints, including `/ingest` and `/monitoring`, which forward request headers to PostHog / Sentry.
+          // Cross-origin behaviour is unchanged (origin only; nothing on HTTPS -> HTTP). No server code reads Referer.
+          { key: "Referrer-Policy", value: "strict-origin" },
           { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
         ],

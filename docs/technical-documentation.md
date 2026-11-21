@@ -158,6 +158,28 @@ The three `Sentry.init` surfaces (browser, Node server, edge) are additionally g
 
 `withSentryConfig({ tunnelRoute: "/monitoring" })` also registers SDK rewrites from `/monitoring?o=&p=` to Sentry ingest hosts; they are shadowed by `app/monitoring/route.ts`. Do not remove that route without also removing `tunnelRoute`, or `/monitoring` becomes an open relay.
 
+## Telemetry URL sanitization (structural)
+
+Every URL that reaches Sentry (browser, Node, edge) or PostHog passes through ONE sanitizer, `lib/privacy/sanitizeUrl.ts`:
+
+| Part | Rule |
+|---|---|
+| Origin | Kept; userinfo dropped; a credential-shaped host becomes `[redacted-host]` |
+| First-party path | Replaced by the **route template** of a route this deployment serves (`/workspace/team/[workspaceId]/members`); dynamic values are never emitted. Only enumerated SEO slugs (`/learn/[slug]`, `/solutions/[slug]`, `/use-cases/[slug]`) keep their value. Unknown paths become `/[unmatched]` (`lib/privacy/routeTemplates.ts`) |
+| Build assets | `/_next/static/...` kept byte-for-byte when every segment is a plain file name (source maps); stack-frame code locations likewise |
+| Third-party path | `/[external-path]` |
+| Query | Allowlist (`lib/privacy/urlParamRules.ts`): other values become `[redacted]` |
+| Fragment | Always dropped |
+| Opaque schemes | `blob:`, `data:`, `mailto:` ... become `scheme:[redacted]` |
+
+The route list is **generated** from `app/`, `public/` and the SEO slug data into `lib/privacy/telemetryRouteManifest.generated.ts`. `__tests__/telemetryRouteManifest.spec.ts` fails when it is stale: after adding or renaming a route, run `npm run generate:telemetry-routes` and commit the result.
+
+`scrubUrlFields` sanitizes every string in a payload, under any key. Hooks: Sentry `beforeSend`, `beforeSendTransaction`, `beforeSendSpan`, `beforeSendLog`, `beforeSendMetric`, `beforeBreadcrumb`, the shared event processor and Replay `beforeAddRecordingEvent`; PostHog `before_send`. The browser Sentry transport additionally sanitizes every envelope immediately before sending (`lib/privacy/sentryEnvelopeScrub.ts`). That is the only place the Replay recording's meta `href` and DOM URL attributes can be reached, so Replay runs with `useCompression: false` (a compressed recording would be dropped, not sent) and masks URL attributes at recording time (`REPLAY_MASKED_ATTRIBUTES`).
+
+Referer: the site sends `Referrer-Policy: strict-origin` (same-origin requests, including `/ingest` and `/monitoring` which forward headers to PostHog / Sentry, carry the origin only), and the Sentry transport sends no Referer at all. PostHog's `/flags` request (person properties built from the landing URL, outside `before_send`) is disabled: the app evaluates no feature flags. `/ingest/*` is a reverse proxy to PostHog, so `middleware.ts` removes `Cookie` and `Authorization` before the request is proxied (for `/ingest` and `/monitoring` in any letter case; `experimental.caseSensitiveRoutes` keeps case variants from reaching the rewrites at all): same-origin requests otherwise carry every first-party cookie (including `__session` and PostHog's own cookie) to the proxy target.
+
+Known limits: invitation acceptance documents never initialize telemetry (`lib/telemetry/telemetryFreeDocument.ts`); first-party request headers other than Referer (for example Next.js router state on RSC prefetches) are not telemetry and are not sanitized; PostHog keeps the raw landing URL in its own first-party storage, which is sanitized whenever it is sent (`$set_once`).
+
 ## Plans and Billing
 
 Plan configurations live in `lib/plans.ts` and `lib/billing/planConfig.ts`.

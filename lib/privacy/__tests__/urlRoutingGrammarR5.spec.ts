@@ -302,7 +302,7 @@ describe("every routing parameter in the rule source keeps the values its real g
       for (const v of values) {
         const search = `?${name}=${enc(v)}`;
         expect(scrubUrlParts({ pathname: "/x", search, hash: "" }).search).toBe(search);
-        expect(sanitizeUrl(`/x${search}`)).toBe(`/x?${name}=[redacted]`);
+        expect(sanitizeUrl(`/verify${search}`)).toBe(`/verify?${name}=[redacted]`);
       }
     });
   }

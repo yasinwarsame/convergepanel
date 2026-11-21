@@ -259,7 +259,7 @@ d("real Next.js production build (contained)", () => {
       expect(await textareaValue(run.page)).toBe(CLAIM); // sessionStorage hand-off survives the reload
       await run.page.waitForTimeout(6_000);
       const all = await assertContained(run);
-      expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(true);
+      expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: PostHog /flags is disabled
       expect(all.some((r) => r.url.includes("/ingest/e"))).toBe(true);
       expect(leakList(requestsContaining(all, SENTINEL))).toEqual([]);
     } finally {
@@ -284,7 +284,7 @@ d("real Next.js production build (contained)", () => {
         expect((await run.page.textContent("main"))?.toLowerCase()).toContain("paste the claim manually");
         await run.page.waitForTimeout(4_000);
         const all = await assertContained(run);
-        expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(true);
+        expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: PostHog /flags is disabled
         expect(leakList(requestsContaining(all, SENTINEL))).toEqual([]);
       } finally {
         await run.close();
@@ -316,7 +316,7 @@ d("real Next.js production build (contained)", () => {
           await run.page.waitForTimeout(7_000);
           await run.save();
           const all = await assertContained(run);
-          expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(true);
+          expect(all.some((r) => r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: PostHog /flags is disabled
           expect(leakList(requestsContaining(all.filter(isTelemetry), SENTINEL))).toEqual([]);
           // Server-visible URL (documented residual): the document request and the Referer of the parser-loaded
           // first-party assets carry it. Next 14 also keeps search params in the page segment of its router tree, which

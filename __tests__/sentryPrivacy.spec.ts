@@ -80,7 +80,7 @@ function transactionEvent(): any {
     request: { url: `https://convergepanel.com/verify?text=${enc}` },
     contexts: { trace: { op: "pageload", data: { "url.full": `https://convergepanel.com/verify?text=${enc}`, "http.query": `?text=${enc}` } } },
     spans: [
-      { op: "http.client", description: `GET https://convergepanel.com/api/x?q=${enc}`, data: { url: `/api/x?q=${enc}`, "http.method": "GET" } },
+      { op: "http.client", description: `GET https://convergepanel.com/api/verify-claim?q=${enc}`, data: { url: `/api/verify-claim?q=${enc}`, "http.method": "GET" } },
       { op: "navigation", description: `/?tab=research&q=${enc}`, data: { "http.target": `/?tab=research&q=${enc}` } },
     ],
   };
@@ -147,7 +147,7 @@ describe.each([
     const out = initConfig.beforeSendTransaction(transactionEvent(), {});
     assertClean(out);
     expect(out.transaction).toBe("/verify");
-    expect(out.spans[0].description).toBe("GET https://convergepanel.com/api/x?q=[redacted]");
+    expect(out.spans[0].description).toBe("GET https://convergepanel.com/api/verify-claim?q=[redacted]");
     expect(out.spans[0].data["http.method"]).toBe("GET");
     expect(out.spans[1].data["http.target"]).toBe("/?tab=research&q=[redacted]");
     expect(out.contexts.trace.op).toBe("pageload");
@@ -156,7 +156,7 @@ describe.each([
   it("beforeBreadcrumb: navigation and fetch breadcrumbs carry no claim", () => {
     load();
     const nav = initConfig.beforeBreadcrumb({ category: "navigation", data: { from: `/verify?text=${enc}`, to: `/?tab=verify&claim=${enc}` } }, {});
-    const xhr = initConfig.beforeBreadcrumb({ category: "xhr", data: { url: `/api/x?question=${enc}`, method: "POST", status_code: 500 } }, {});
+    const xhr = initConfig.beforeBreadcrumb({ category: "xhr", data: { url: `/api/verify-claim?question=${enc}`, method: "POST", status_code: 500 } }, {});
     assertClean([nav, xhr]);
     expect(nav.data.to).toBe("/?tab=verify&claim=[redacted]");
     expect(xhr.data.status_code).toBe(500);
@@ -210,11 +210,11 @@ describe("browser Sentry — Replay and the shared event processor", () => {
     const out = eventProcessor!({
       type: "replay_event",
       initialUrl: `https://convergepanel.com/verify?text=${enc}`,
-      urls: [`https://convergepanel.com/?tab=verify&claim=${enc}`, "https://convergepanel.com/dashboard"],
+      urls: [`https://convergepanel.com/?tab=verify&claim=${enc}`, "https://convergepanel.com/pricing"],
       ...errorEvent(),
     });
     assertClean(out);
-    expect(out.urls[1]).toBe("https://convergepanel.com/dashboard");
+    expect(out.urls[1]).toBe("https://convergepanel.com/pricing");
   });
 });
 

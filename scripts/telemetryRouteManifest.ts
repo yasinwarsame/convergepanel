@@ -1,0 +1,133 @@
+/**
+ * Structural telemetry hardening (private advisory GHSA-655j-5f43-92pw follow-up): builds the route
+ * manifest the shared telemetry URL sanitizer matches against (lib/privacy/telemetryRouteManifest.generated.ts).
+ *
+ * The manifest is derived from the REAL application, never written by hand:
+ *   - every `page.tsx` / `route.ts` under `app/` (route groups `(x)` and private `_x` folders follow Next.js rules);
+ *   - metadata routes (`app/robots.ts`, `app/sitemap.ts`, `app/icon.png`, ...);
+ *   - every file in `public/`;
+ *   - framework paths the app serves or proxies (`/_next/image`, the `/ingest` rewrite, the `/monitoring` tunnel);
+ *   - the exact slug values of the three SEO clusters (their pages call `notFound()` for any other slug).
+ *
+ * `__tests__/telemetryRouteManifest.spec.ts` regenerates this in memory and fails when the committed file drifts,
+ * so a new route cannot ship without being matched. Regenerate with `npm run generate:telemetry-routes`.
+ */
+import { readdirSync, statSync, writeFileSync } from "fs";
+import { join, relative, sep } from "path";
+
+export const MANIFEST_RELATIVE_PATH = "lib/privacy/telemetryRouteManifest.generated.ts";
+
+const ROUTE_FILE = /^(page|route)\.(tsx|ts|jsx|js)$/;
+const METADATA_FILE = /^(robots|sitemap|manifest)\.(ts|js)$|^(icon|apple-icon|favicon|opengraph-image|twitter-image)\.(png|ico|jpg|jpeg|svg|gif)$/;
+
+function walk(dir: string, out: string[]): void {
+  for (const name of readdirSync(dir).sort()) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) {
+      if (name === "__tests__" || name === "node_modules" || name.startsWith("_") || name.startsWith("@")) continue;
+      // Build output materialized into public/ (git-ignored) is added deterministically below, not read from disk.
+      if (full.endsWith(join("public", "vendor", "pdfjs"))) continue;
+      walk(full, out);
+    } else {
+      out.push(full);
+    }
+  }
+}
+
+/** `app/workspace/(group)/team/[workspaceId]/page.tsx` -> `/workspace/team/[workspaceId]`. */
+function routeOf(appDir: string, file: string): string {
+  const segments = relative(appDir, file).split(sep).slice(0, -1).filter((s) => !(s.startsWith("(") && s.endsWith(")")));
+  return "/" + segments.join("/");
+}
+
+function metadataPath(name: string): string {
+  if (name.startsWith("robots.")) return "/robots.txt";
+  if (name.startsWith("sitemap.")) return "/sitemap.xml";
+  if (name.startsWith("manifest.")) return "/manifest.webmanifest";
+  return "/" + name;
+}
+
+/** Framework / infrastructure paths that are not files under `app/` but are served by this deployment. */
+const FRAMEWORK_ROUTES = [
+  "/_next/image", // next/image optimizer (its `url` query value is redacted by the query allowlist)
+  "/ingest", // PostHog reverse proxy (next.config.js rewrites)
+  "/ingest/[...path]",
+  "/monitoring", // Sentry tunnel (next.config.js tunnelRoute)
+];
+
+export type ManifestInput = {
+  root: string;
+  slugs: Record<string, readonly string[]>;
+};
+
+export function collectRoutes(root: string): string[] {
+  const appDir = join(root, "app");
+  const files: string[] = [];
+  walk(appDir, files);
+  const routes = new Set<string>();
+  for (const file of files) {
+    const name = file.split(sep).pop() ?? "";
+    if (ROUTE_FILE.test(name)) routes.add(routeOf(appDir, file));
+    else if (METADATA_FILE.test(name) && relative(appDir, file) === name) routes.add(metadataPath(name));
+  }
+  const publicFiles: string[] = [];
+  walk(join(root, "public"), publicFiles);
+  for (const file of publicFiles) routes.add("/" + relative(join(root, "public"), file).split(sep).join("/"));
+  for (const r of FRAMEWORK_ROUTES) routes.add(r);
+  // The pdf.js worker is copied into public/ by the build (scripts/pdfjs-worker/materialize.js); its served URL is
+  // derived from the locked package version, so the manifest does not depend on whether a build ran locally.
+  const pdfWorker = require("./pdfjs-worker/materialize.js") as {
+    resolveSource: (root: string) => { version: string };
+    servedWorkerUrl: (version: string) => string;
+  };
+  routes.add(pdfWorker.servedWorkerUrl(pdfWorker.resolveSource(root).version));
+  return [...routes].sort();
+}
+
+/** Slug values per `[slug]` route, read from the same data the pages use for `generateStaticParams`. */
+export function loadSlugs(): Record<string, readonly string[]> {
+  const { LEARN_PAGES } = require("../lib/learn/pages") as { LEARN_PAGES: Array<{ slug: string }> };
+  const { PILLARS } = require("../lib/solutions/pages") as { PILLARS: Array<{ slug: string }> };
+  const { PAGES } = require("../lib/pseo/pages") as { PAGES: Array<{ slug: string }> };
+  const sorted = (xs: Array<{ slug: string }>) => [...new Set(xs.map((x) => x.slug))].sort();
+  return {
+    "/learn/[slug]": sorted(LEARN_PAGES),
+    "/solutions/[slug]": sorted(PILLARS),
+    "/use-cases/[slug]": sorted(PAGES),
+  };
+}
+
+export function buildManifestSource(input: ManifestInput): string {
+  const routes = collectRoutes(input.root);
+  for (const route of Object.keys(input.slugs)) {
+    if (!routes.includes(route)) throw new Error(`slug allowlist for a route that does not exist: ${route}`);
+  }
+  const lines = [
+    "/* eslint-disable */",
+    "// GENERATED by scripts/telemetryRouteManifest.ts. Do not edit by hand: run `npm run generate:telemetry-routes`.",
+    "// __tests__/telemetryRouteManifest.spec.ts fails when this file is out of date with app/, public/ or the slug data.",
+    "",
+    "/** Every path pattern this deployment serves (Next.js segment syntax). */",
+    "export const TELEMETRY_ROUTE_PATTERNS: readonly string[] = [",
+    ...routes.map((r) => `  ${JSON.stringify(r)},`),
+    "];",
+    "",
+    "/** `[slug]` routes whose values are public, enumerated page names (any other value is a 404). */",
+    "export const TELEMETRY_SLUG_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {",
+    ...Object.entries(input.slugs).flatMap(([route, slugs]) => [
+      `  ${JSON.stringify(route)}: [`,
+      ...slugs.map((s) => `    ${JSON.stringify(s)},`),
+      "  ],",
+    ]),
+    "};",
+    "",
+  ];
+  return lines.join("\n");
+}
+
+if (require.main === module) {
+  const root = join(__dirname, "..");
+  writeFileSync(join(root, MANIFEST_RELATIVE_PATH), buildManifestSource({ root, slugs: loadSlugs() }));
+  // eslint-disable-next-line no-console
+  console.log(`wrote ${MANIFEST_RELATIVE_PATH}`);
+}

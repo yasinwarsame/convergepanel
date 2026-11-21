@@ -46,7 +46,7 @@ describe("sanitizeUrl — sensitive params are redacted (value gone, name kept)"
   });
 
   it("keeps a plain identifier-shaped bare flag name (value-less)", () => {
-    expect(sanitizeUrl("/x?debug")).toBe(`/x?debug=${REDACTED}`);
+    expect(sanitizeUrl("/verify?debug")).toBe(`/verify?debug=${REDACTED}`);
   });
 
   it("drops the fragment entirely (Phase 8D.3.1 invitation tokens) and redacts the query", () => {
@@ -61,26 +61,27 @@ describe("sanitizeUrl — sensitive params are redacted (value gone, name kept)"
 
   it("handles a bare ?query and an empty query", () => {
     expect(sanitizeUrl(`?q=${enc}`)).toBe(`?q=${REDACTED}`);
-    expect(sanitizeUrl("/x?")).toBe("/x");
-    expect(sanitizeUrl("/x?&&")).toBe("/x");
+    expect(sanitizeUrl("/verify?")).toBe("/verify");
+    expect(sanitizeUrl("/verify?&&")).toBe("/verify");
   });
 
   it("decodes param names before the allowlist check (utm%5Fsource) and survives malformed escapes", () => {
-    expect(sanitizeUrl("/x?utm%5Fsource=a")).toBe("/x?utm%5Fsource=a");
-    expect(sanitizeUrl("/x?%E0%A4%A=1")).toBe(`/x?${REDACTED}`);
+    expect(sanitizeUrl("/verify?utm%5Fsource=a")).toBe("/verify?utm%5Fsource=a");
+    expect(sanitizeUrl("/verify?%E0%A4%A=1")).toBe(`/verify?${REDACTED}`);
   });
 
-  it("leaves a URL without query or fragment byte-for-byte unchanged (control)", () => {
-    for (const u of ["https://convergepanel.com/dashboard", "/workspace/team/ws-1/research/run-1", "", "not a url"]) {
-      expect(sanitizeUrl(u)).toBe(u);
-    }
+  it("structural hardening: a path is replaced by its route template; a non-URL word is left unchanged (control)", () => {
+    expect(sanitizeUrl("https://convergepanel.com/pricing")).toBe("https://convergepanel.com/pricing");
+    expect(sanitizeUrl("/workspace/team/ws-1/research/run-1")).toBe("/workspace/team/[workspaceId]/research/[runId]");
+    expect(sanitizeUrl("https://convergepanel.com/dashboard")).toBe("https://convergepanel.com/[unmatched]");
+    for (const u of ["", "not a url"]) expect(sanitizeUrl(u)).toBe(u);
   });
 
   it("keeps every allowlisted param's well-shaped value (control: non-sensitive telemetry still flows)", () => {
     const sample: Record<string, string> = { tab: "verify", page: "2", limit: "30", offset: "0", signedOut: "1", sessionClearFailed: "1", success: "true", canceled: "true", upgraded: "1" };
     for (const name of SAFE_QUERY_PARAMS) {
       const v = sample[name] ?? (name.startsWith("utm_") ? "spring-2026_news.letter" : "needs_review");
-      expect(sanitizeUrl(`/p?${name}=${v}`)).toBe(`/p?${name}=${v}`);
+      expect(sanitizeUrl(`/pricing?${name}=${v}`)).toBe(`/pricing?${name}=${v}`);
     }
   });
 
@@ -89,8 +90,8 @@ describe("sanitizeUrl — sensitive params are redacted (value gone, name kept)"
     // every OTHER allowlisted name must reject content-shaped values.
     for (const name of SAFE_QUERY_PARAMS) {
       if (name.startsWith("utm_")) continue;
-      const out = sanitizeUrl(`/p?${name}=${enc}`);
-      expect(out).toBe(`/p?${name}=${REDACTED}`);
+      const out = sanitizeUrl(`/pricing?${name}=${enc}`);
+      expect(out).toBe(`/pricing?${name}=${REDACTED}`);
     }
     expect(sanitizeUrl("/?tab=moon")).toBe(`/?tab=${REDACTED}`); // tab is enumerated
     expect(sanitizeUrl("/?page=2abc")).toBe(`/?page=${REDACTED}`);
@@ -124,16 +125,17 @@ describe("sanitizeQueryString / sanitizeUrlValue", () => {
 
 describe("sanitizeUrlsInText", () => {
   it("sanitizes absolute and relative URLs inside free text, leaving the rest", () => {
-    const text = `GET https://convergepanel.com/api/x?q=${enc} then "/verify?text=${enc}" done`;
+    const text = `GET https://convergepanel.com/api/verify-claim?q=${enc} then "/verify?text=${enc}" done`;
     const out = sanitizeUrlsInText(text);
-    expect(out).toBe(`GET https://convergepanel.com/api/x?q=${REDACTED} then "/verify?text=${REDACTED}" done`);
+    expect(out).toBe(`GET https://convergepanel.com/api/verify-claim?q=${REDACTED} then "/verify?text=${REDACTED}" done`);
   });
 
   it("round 2: uppercase schemes, scheme-less host/path?q=, bare ?q= and app:/// frames are sanitized", () => {
     const text = `HTTPS://CONVERGEPANEL.COM/verify?text=${enc} and convergepanel.com/verify?text=${enc} and ?q=${enc} at app:///_next/x.js?claim=${enc}`;
     const out = sanitizeUrlsInText(text);
     expect(out).not.toContain("cheese");
-    expect(out).toBe(`HTTPS://CONVERGEPANEL.COM/verify?text=${REDACTED} and convergepanel.com/verify?text=${REDACTED} and ?q=${REDACTED} at app:///_next/x.js?claim=${REDACTED}`);
+    // Structural hardening: a scheme-less `host/path` cannot be told apart from a relative path, so its path is replaced.
+    expect(out).toBe(`HTTPS://CONVERGEPANEL.COM/verify?text=${REDACTED} and [relative-path]?text=${REDACTED} and ?q=${REDACTED} at app:///_next/x.js?claim=${REDACTED}`);
   });
 
   it("leaves text with no URL unchanged (control)", () => {
@@ -149,17 +151,18 @@ describe("scrubUrlFields", () => {
       nested: { deeper: { href: `/signup?redirect=${enc}`, label: `keep ${CLAIM}?x=1` } },
       urls: [`/verify?text=${enc}`, 7],
       request: { query_string: `text=${enc}&tab=verify` },
-      spans: [{ description: `GET /api/x?q=${enc}`, data: { "url.full": `https://h/x?q=${enc}`, "http.query": `?q=${enc}` } }],
+      spans: [{ description: `GET /api/verify-claim?q=${enc}`, data: { "url.full": `https://h/x?q=${enc}`, "http.query": `?q=${enc}` } }],
       count: 3,
     };
     scrubUrlFields(payload);
     expect(payload.$current_url).toBe(`https://convergepanel.com/?claim=${REDACTED}`);
     expect(payload.nested.deeper.href).toBe(`/signup?redirect=${REDACTED}`);
-    expect(payload.nested.deeper.label).toBe(`keep ${CLAIM}?x=1`); // not a URL key: untouched (control)
+    // Structural hardening: every string is URL-sanitized, whatever its key (an un-named SDK field cannot carry a query).
+    expect(payload.nested.deeper.label).toBe(`keep ${CLAIM}?x=${REDACTED}`);
     expect(payload.urls).toEqual([`/verify?text=${REDACTED}`, 7]);
     expect(payload.request.query_string).toBe(`text=${REDACTED}&tab=verify`);
-    expect(payload.spans[0].description).toBe(`GET /api/x?q=${REDACTED}`);
-    expect(payload.spans[0].data["url.full"]).toBe(`https://h/x?q=${REDACTED}`);
+    expect(payload.spans[0].description).toBe(`GET /api/verify-claim?q=${REDACTED}`);
+    expect(payload.spans[0].data["url.full"]).toBe(`https://h/[external-path]?q=${REDACTED}`);
     expect(payload.spans[0].data["http.query"]).toBe(`q=${REDACTED}`);
     expect(payload.count).toBe(3);
   });
@@ -189,28 +192,28 @@ describe("scrubUrlFields", () => {
   });
 
   it("round 2: depth bound FAILS CLOSED — an object below the bound is replaced, never sent unscrubbed", () => {
-    let deep: any = { url: `/x?q=${enc}`, inner: { href: `/y?q=${enc}` } };
+    let deep: any = { url: `/verify?q=${enc}`, inner: { href: `/y?q=${enc}` } };
     for (let i = 0; i < 20; i++) deep = { child: deep };
     scrubUrlFields(deep); // default bound 12
     expect(JSON.stringify(deep)).not.toContain("cheese");
     expect(JSON.stringify(deep)).toContain(TRUNCATED);
-    const arr: any = { a: [[[[[[[[[[[[[{ url: `/x?q=${enc}` }]]]]]]]]]]]]] };
+    const arr: any = { a: [[[[[[[[[[[[[{ url: `/verify?q=${enc}` }]]]]]]]]]]]]] };
     scrubUrlFields(arr);
     expect(JSON.stringify(arr)).not.toContain("cheese");
   });
 
   it("is cycle-safe and honours maxDepth", () => {
-    const a: any = { url: `/x?q=${enc}` };
+    const a: any = { url: `/verify?q=${enc}` };
     a.self = a;
     expect(() => scrubUrlFields(a)).not.toThrow();
-    expect(a.url).toBe(`/x?q=${REDACTED}`);
+    expect(a.url).toBe(`/verify?q=${REDACTED}`);
 
-    let deep: any = { url: `/x?q=${enc}` };
+    let deep: any = { url: `/verify?q=${enc}` };
     for (let i = 0; i < 20; i++) deep = { child: deep };
     scrubUrlFields(deep, { maxDepth: 256 });
     let cursor = deep;
     while (cursor.child) cursor = cursor.child;
-    expect(cursor.url).toBe(`/x?q=${REDACTED}`);
+    expect(cursor.url).toBe(`/verify?q=${REDACTED}`);
   });
 });
 

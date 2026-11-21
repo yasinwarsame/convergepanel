@@ -149,7 +149,7 @@ d("real posthog-js + Sentry (Replay forced): every producer-inventory URL shape"
       it(`${label} [${mode}]`, async () => {
         const run = await openPage(path, { mode, forceReplaySampling: true });
         try {
-          await run.page.waitForRequest((r) => r.url().includes("/ingest/flags"), { timeout: 15_000 }).catch(() => undefined);
+          await run.page.waitForRequest((r) => r.url().includes("/ingest/e"), { timeout: 15_000 }).catch(() => undefined);
           await run.page.waitForTimeout(6_000); // Replay's first segment flush (min delay 5 s) + PostHog batch (3 s)
           const atInit: Array<{ href: string; referrer: string }> = await run.page.evaluate(() => (window as any).__cpAtInit ?? []);
           const href = await run.page.evaluate(() => window.location.href);
@@ -192,9 +192,9 @@ d("real posthog-js + Sentry (Replay forced): every producer-inventory URL shape"
             const u = new URL(href);
             expect(safeRedirect(u.searchParams.get("redirect") || u.searchParams.get("next"), "/")).toBe(landing);
           }
-          // Positive controls: Replay traffic, the /flags request, and the CONTROL sentinel in both SDKs' bodies.
+          // Positive controls: Replay traffic and the CONTROL sentinel in both SDKs' bodies; /flags must be absent.
           expect(all.some((r) => isSentryRequest(r) && r.bodies.some((b) => b.includes("replay_recording") || b.includes("replay_event")))).toBe(true);
-          expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(true);
+          expect(all.some((r) => r.layer === "network" && r.url.includes("/ingest/flags"))).toBe(false); // structural hardening: /flags disabled
           expect(requestsContaining(all.filter((r) => r.url.includes("/ingest/")), CONTROL).length).toBeGreaterThan(0);
           expect(requestsContaining(all.filter(isSentryRequest), CONTROL).length).toBeGreaterThan(0);
           // No request of any kind carries the claim.
@@ -225,7 +225,7 @@ d("real posthog-js + Sentry: routing hand-offs built by the real builders surviv
     it(`${label} [normal]`, async () => {
       const run2 = await openPage(path, { mode: "normal", forceReplaySampling: true });
       try {
-        await run2.page.waitForRequest((r) => r.url().includes("/ingest/flags"), { timeout: 15_000 }).catch(() => undefined);
+        await run2.page.waitForRequest((r) => r.url().includes("/ingest/e"), { timeout: 15_000 }).catch(() => undefined);
         const atInit: Array<{ href: string }> = await run2.page.evaluate(() => (window as any).__cpAtInit ?? []);
         const href = await run2.page.evaluate(() => window.location.href);
         expect(atInit.length).toBe(1);
