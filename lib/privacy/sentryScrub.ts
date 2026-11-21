@@ -88,6 +88,52 @@ export function scrubSentryBreadcrumb<B>(breadcrumb: B): B {
 }
 
 /**
+ * Structural hardening: `beforeSendSpan` body. Child spans and standalone spans (INP / web-vital spans are sent as
+ * their own envelopes and never pass through `beforeSendTransaction` or event processors) carry `description` and
+ * `data` attributes with URLs and route names. Every string in the span JSON is URL-sanitized.
+ */
+export function scrubSentrySpan<S>(span: S): S {
+  if (!span || typeof span !== "object") return span;
+  scrubUrlFields(span);
+  return span;
+}
+
+/**
+ * Structural hardening: `beforeSendLog` / `beforeSendMetric` body. Logs and metrics are separate pipelines that skip
+ * `beforeSend`; their message and attributes are URL-sanitized the same way. (No code calls `Sentry.logger` or
+ * `Sentry.metrics` today; this keeps a future call from bypassing the sanitizer.)
+ */
+export function scrubSentryLogOrMetric<L>(item: L): L {
+  if (!item || typeof item !== "object") return item;
+  scrubUrlFields(item);
+  return item;
+}
+
+/**
+ * Structural hardening: element attributes Session Replay masks in DOM snapshots (in addition to the SDK default
+ * `title`, `placeholder`, `aria-label`). Full and incremental DOM snapshots never pass through any hook, so link
+ * targets (`href="/workspace/team/<id>"`), image sources and form actions are masked at recording time.
+ */
+export const REPLAY_MASKED_ATTRIBUTES: string[] = [
+  "title",
+  "placeholder",
+  "aria-label",
+  "href",
+  "src",
+  "srcset",
+  "action",
+  "formaction",
+  "xlink:href",
+  "poster",
+  "data",
+  "cite",
+  "ping",
+  "background",
+  "content",
+  "value",
+];
+
+/**
  * Replay `beforeAddRecordingEvent` body. Recording events never pass through
  * `beforeSend` or event processors. The SDK calls this hook for CUSTOM events
  * only (breadcrumb and performance-span payloads, e.g. `navigation.push`

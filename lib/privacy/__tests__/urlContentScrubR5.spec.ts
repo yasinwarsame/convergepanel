@@ -307,7 +307,7 @@ describe("one rule source for the telemetry sanitizer and the pre-init scrub", (
     // Routing values stay in the address bar but are NEVER transmitted: the sanitizer redacts them.
     for (const name of Array.from(rules.ROUTING_PARAM_SHAPES.keys()) as string[]) {
       expect(SAFE_QUERY_PARAMS.has(name)).toBe(false);
-      expect(sanitizeUrl(`/x?${name}=abc`)).toBe(`/x?${name}=[redacted]`);
+      expect(sanitizeUrl(`/verify?${name}=abc`)).toBe(`/verify?${name}=[redacted]`);
     }
     for (const name of [...rules.NESTED_TARGET_PARAMS, ...rules.CONTENT_PARAMS] as string[]) {
       expect(SAFE_QUERY_PARAMS.has(name)).toBe(false);

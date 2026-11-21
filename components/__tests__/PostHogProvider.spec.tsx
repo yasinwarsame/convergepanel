@@ -98,9 +98,9 @@ describe("PostHogProvider — before_send wiring", () => {
     render();
     const result = capturedInitConfig.before_send({
       event: "$pageview",
-      properties: { $current_url: "https://convergepanel.com/dashboard" },
+      properties: { $current_url: "https://convergepanel.com/pricing" },
     });
-    expect(result.properties.$current_url).toBe("https://convergepanel.com/dashboard");
+    expect(result.properties.$current_url).toBe("https://convergepanel.com/pricing");
   });
 
   it("passes through an event with no $current_url unchanged", () => {

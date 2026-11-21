@@ -4,9 +4,19 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { resolveSentryDsn } from "./lib/telemetry/sentryDsn";
-import { scrubReplayRecordingEvent, scrubSentryBreadcrumb, scrubSentryEvent } from "./lib/privacy/sentryScrub";
+import {
+  REPLAY_MASKED_ATTRIBUTES,
+  scrubReplayRecordingEvent,
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+  scrubSentryLogOrMetric,
+  scrubSentrySpan,
+} from "./lib/privacy/sentryScrub";
 import { scrubUrlBeforeTelemetry } from "./lib/privacy/preTelemetryUrlScrub";
+import { scrubSentryEnvelope } from "./lib/privacy/sentryEnvelopeScrub";
 import { isTelemetryFreeDocument } from "./lib/telemetry/telemetryFreeDocument";
+
+type FetchTransport = ReturnType<typeof Sentry.makeFetchTransport>;
 
 // PR #329 R4/R5 (review MAJOR-1): FIRST, before any SDK reads the URL. Moves claim
 // text (`#text=`, legacy `?text=` / `?claim=` / `?q=`, and the same nested in
@@ -41,6 +51,9 @@ if (dsn !== undefined && !telemetryFreeDocument) {
         maskAllText: true,
         maskAllInputs: true,
         blockAllMedia: true,
+        // Structural hardening: DOM snapshots bypass every hook, so URL-bearing attributes (link targets with
+        // workspace / run ids, image sources, form actions) are masked when recorded.
+        maskAttributes: REPLAY_MASKED_ATTRIBUTES,
         // No network request/response bodies or headers in replays.
         networkDetailAllowUrls: [],
         // Applies to Replay CUSTOM events only (breadcrumb / performance-span
@@ -50,6 +63,10 @@ if (dsn !== undefined && !telemetryFreeDocument) {
         // URL is already clean when Sentry.init starts Replay — see
         // scrubUrlBeforeTelemetry() above.
         beforeAddRecordingEvent: scrubReplayRecordingEvent,
+        // Structural hardening: the recording reaches the transport as JSON so the meta event `href` (the raw page
+        // URL, which no hook can reach) and DOM URL attributes are sanitized at transmission
+        // (lib/privacy/sentryEnvelopeScrub.ts). A compressed recording would be dropped there, not sent.
+        useCompression: false,
       }),
     ],
     tracesSampleRate: 0.1,
@@ -63,6 +80,22 @@ if (dsn !== undefined && !telemetryFreeDocument) {
     beforeSend: (event) => scrubSentryEvent(event),
     beforeSendTransaction: (event) => scrubSentryEvent(event),
     beforeBreadcrumb: scrubSentryBreadcrumb,
+    // Structural hardening: standalone spans (INP / web vitals), logs and metrics skip the hooks above.
+    beforeSendSpan: (span) => scrubSentrySpan(span),
+    beforeSendLog: (log) => scrubSentryLogOrMetric(log),
+    beforeSendMetric: (metric) => scrubSentryLogOrMetric(metric),
+    // Structural hardening: the SDK's own transport sends `Referrer-Policy: strict-origin`; envelopes (events,
+    // transactions and Replay segments, through the `/monitoring` tunnel) carry no Referer at all.
+    transportOptions: { fetchOptions: { referrerPolicy: "no-referrer" } },
+    // Structural hardening: the transmission boundary. Every envelope (events, transactions, spans, Replay segments,
+    // logs) is URL-sanitized immediately before the fetch transport serializes it (lib/privacy/sentryEnvelopeScrub.ts).
+    transport: (transportOptions: Parameters<typeof Sentry.makeFetchTransport>[0]): FetchTransport => {
+      const inner = Sentry.makeFetchTransport(transportOptions);
+      return {
+        send: (envelope) => inner.send(scrubSentryEnvelope(envelope)),
+        flush: (timeout) => inner.flush(timeout),
+      };
+    },
   });
 }
 
