@@ -77,11 +77,8 @@ export function collectRoutes(root: string): string[] {
 
 /** Slug values per `[slug]` route, read from the same data the pages use for `generateStaticParams`. */
 export function loadSlugs(): Record<string, readonly string[]> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { LEARN_PAGES } = require("../lib/learn/pages") as { LEARN_PAGES: Array<{ slug: string }> };
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { PILLARS } = require("../lib/solutions/pages") as { PILLARS: Array<{ slug: string }> };
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { PAGES } = require("../lib/pseo/pages") as { PAGES: Array<{ slug: string }> };
   const sorted = (xs: Array<{ slug: string }>) => [...new Set(xs.map((x) => x.slug))].sort();
   return {

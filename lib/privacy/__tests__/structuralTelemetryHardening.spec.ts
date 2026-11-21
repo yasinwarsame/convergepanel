@@ -312,7 +312,6 @@ describe("S5 configuration wiring", () => {
     jest.doMock("@sentry/nextjs", () => ({ withSentryConfig: (c: unknown) => c }));
     let config: any;
     jest.isolateModules(() => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       config = require("../../../next.config.js");
     });
     if (typeof config === "function") config = await config("phase-production-server", { defaultConfig: {} });
