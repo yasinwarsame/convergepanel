@@ -46,8 +46,21 @@ const POSITIVE_CONTROLS = {
  *     generate entry code whose imports are resolved through the same NormalModuleFactory (Layer A).
  */
 const NEXT_ENTRY_LOADERS = new Set(["next:next-app-loader", "next:next-flight-client-entry-loader", "next:next-client-pages-loader", "next:next-middleware-loader", "next:next-route-loader", "next:next-flight-action-entry-loader", "next:next-edge-app-route-loader", "next:next-edge-function-loader", "next:next-edge-ssr-loader", "next:next-flight-server-reference-proxy-loader"]);
+/**
+ * Webpack's empty "ignored" placeholder that Next 14 substitutes for its client-side rewrite resolver when the app
+ * declares NO rewrites (the analytics proxy is app code, not a rewrite). It carries no code. Exactly this identifier,
+ * under this checkout's own node_modules (as given, or its real path); any other RawModule fails closed.
+ */
+function nextIgnoredRewriteResolverIds() {
+  const ids = new Set();
+  for (const nm of [path.join(ROOT, "node_modules")].concat((() => { try { return [fs.realpathSync(path.join(ROOT, "node_modules"))]; } catch { return []; } })())) {
+    ids.add(`ignored|${path.join(nm, "next/dist/shared/lib/router")}|./utils/resolve-rewrites`);
+  }
+  return ids;
+}
 function classifyResourceless(o) {
   if (o.moduleType === "runtime") return null;
+  if (o.type === "RawModule") return nextIgnoredRewriteResolverIds().has(o.id) ? null : `unrecognised RawModule ${o.id}`;
   if (o.type === "CssModule") return null;
   if (o.type === "ContextModule") return o.context ? null : "context module without a directory";
   if (o.type === "NormalModule") {
