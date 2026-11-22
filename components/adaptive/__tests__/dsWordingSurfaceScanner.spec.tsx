@@ -771,21 +771,28 @@ describe("wiring", () => {
     );
   });
 
+  // Item 6A (F5, owner-authorized 2026-11-23): the personal and Team review pages render their Receipt card through an
+  // exported presentational section (PersonalReviewReceiptSection / TeamReviewReceiptSection) so its markup can be
+  // rendered in tests. The page hands the run's own schemaId and Receipt to the section, which forwards them unchanged.
+  const PERSONAL_SECTION = "<PersonalReviewReceiptSection schemaId={data.schemaId} receipt={data.decisionReceipt} />";
+  const TEAM_SECTION = "<TeamReviewReceiptSection schemaId={data.review.schemaId} receipt={data.review.decisionReceipt} />";
   it("the three receipt surfaces route their source flag through ReceiptSourcesFlag with the run's own schema", () => {
-    expect(src("components/personalReview/PersonalReviewDetail.tsx")).toContain("<ReceiptSourcesFlag schemaId={data.schemaId} sourceBacked={data.decisionReceipt.sourceBacked} />");
-    expect(src("components/teamGovernance/AdaptiveReviewDetail.tsx")).toContain(
-      "<ReceiptSourcesFlag schemaId={data.review.schemaId} sourceBacked={data.review.decisionReceipt.sourceBacked} />"
-    );
+    expect(src("components/personalReview/PersonalReviewDetail.tsx")).toContain(PERSONAL_SECTION);
+    expect(src("components/personalReview/PersonalReviewDetail.tsx")).toContain("<ReceiptSourcesFlag schemaId={schemaId} sourceBacked={receipt.sourceBacked} />");
+    expect(src("components/teamGovernance/AdaptiveReviewDetail.tsx")).toContain(TEAM_SECTION);
+    expect(src("components/teamGovernance/AdaptiveReviewDetail.tsx")).toContain("<ReceiptSourcesFlag schemaId={schemaId} sourceBacked={receipt.sourceBacked} />");
     expect(src("components/teamGovernance/AdaptiveReviewListItem.tsx")).toContain("<ReceiptSourcesFlag schemaId={item.schemaId} sourceBacked={item.sourceBacked} />");
   });
 
   it("the three receipt surfaces route review wording and the D-9 disclosure through DsReceiptWording with the run's own schema", () => {
     const personal = src("components/personalReview/PersonalReviewDetail.tsx");
-    expect(personal).toContain("<ReceiptReviewFlag schemaId={data.schemaId} humanReviewNeeded={data.decisionReceipt.humanReviewNeeded} />");
-    expect(personal).toContain("<ReceiptGroupingDisclosure schemaId={data.schemaId}");
+    expect(personal).toContain(PERSONAL_SECTION);
+    expect(personal).toContain("<ReceiptReviewFlag schemaId={schemaId} humanReviewNeeded={receipt.humanReviewNeeded} />");
+    expect(personal).toContain("<ReceiptGroupingDisclosure schemaId={schemaId}");
     const team = src("components/teamGovernance/AdaptiveReviewDetail.tsx");
-    expect(team).toContain("<ReceiptReviewFlag schemaId={data.review.schemaId} humanReviewNeeded={data.review.decisionReceipt.humanReviewNeeded} />");
-    expect(team).toContain("<ReceiptGroupingDisclosure schemaId={data.review.schemaId}");
+    expect(team).toContain(TEAM_SECTION);
+    expect(team).toContain("<ReceiptReviewFlag schemaId={schemaId} humanReviewNeeded={receipt.humanReviewNeeded} />");
+    expect(team).toContain("<ReceiptGroupingDisclosure schemaId={schemaId}");
     const list = src("components/teamGovernance/AdaptiveReviewListItem.tsx");
     expect(list).toContain("<ReceiptReviewFlag schemaId={item.schemaId} humanReviewNeeded={item.humanReviewNeeded} />");
     expect(list).toContain("<ReceiptGroupingDisclosure schemaId={item.schemaId}");
@@ -806,8 +813,10 @@ describe("wiring", () => {
   });
 
   it("the four receipt surfaces render their conclusion through ReceiptConclusion with the run's own schema", () => {
-    expect(src("components/personalReview/PersonalReviewDetail.tsx")).toContain("<ReceiptConclusion schemaId={data.schemaId} conclusion={data.decisionReceipt.conclusion}");
-    expect(src("components/teamGovernance/AdaptiveReviewDetail.tsx")).toContain("<ReceiptConclusion schemaId={data.review.schemaId} conclusion={data.review.decisionReceipt.conclusion}");
+    expect(src("components/personalReview/PersonalReviewDetail.tsx")).toContain(PERSONAL_SECTION);
+    expect(src("components/personalReview/PersonalReviewDetail.tsx")).toContain("<ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion}");
+    expect(src("components/teamGovernance/AdaptiveReviewDetail.tsx")).toContain(TEAM_SECTION);
+    expect(src("components/teamGovernance/AdaptiveReviewDetail.tsx")).toContain("<ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion}");
     expect(src("components/teamGovernance/AdaptiveReviewListItem.tsx")).toContain("<ReceiptConclusion schemaId={item.schemaId} conclusion={item.receiptConclusion}");
     expect(src("components/workspace/projects/TeamResearchReviewSummary.tsx")).toContain("<ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion}");
   });

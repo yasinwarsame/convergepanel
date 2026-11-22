@@ -57,6 +57,19 @@ const jsonExportResultSchema = z.discriminatedUnion("schemaFamily", [
     schemaId: z.string(),
     result: z.unknown(),
     decisionReceipt: z.unknown().optional(),
+    // Item 6A (F2/F6): optional, additive, derived at render time (see jsonExport.ts); absent on every unaffected export.
+    derivedCriteriaProvenanceDisclosure: z
+      .object({
+        derivedAtExport: z.literal(true),
+        derivedRule: z.literal("request_text_v1"),
+        note: z.string(),
+        resultProvenanceMarker: z.union([z.literal("request_text_v1"), z.null()]),
+        storedReceiptHasLegacyUserProvidedLabels: z.boolean(),
+        criteria: z.array(
+          z.object({ id: z.string(), label: z.string(), recordedSource: z.enum(["user", "model"]), derivedProvenance: z.enum(["user", "model", "unverified_legacy"]) })
+        ),
+      })
+      .optional(),
   }),
   z.object({
     schemaFamily: z.literal("legacy"),

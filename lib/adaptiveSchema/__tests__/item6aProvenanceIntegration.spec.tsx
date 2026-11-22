@@ -24,7 +24,7 @@ import { buildAdaptiveGovernanceRecord } from "@/lib/adaptiveSchema/governanceRe
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { evaluateAdaptiveGovernance } from "@/lib/governance/evaluateAdaptiveGovernance";
 import { routeAdaptiveTeamReview } from "@/lib/governance/adaptiveTeamReview";
-import { LEGACY_FROZEN_RECEIPT_NOTICE, LEGACY_PROVENANCE_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
+import { LEGACY_FROZEN_RECEIPT_NOTICE, LEGACY_PROVENANCE_LIMITATION, LEGACY_RESULT_NOTICE } from "@/lib/adaptiveSchema/criterionProvenance";
 import DecisionSupportView from "@/components/adaptive/DecisionSupportView";
 import DecisionReceiptSection from "@/components/workspace/DecisionReceiptSection";
 import LegacyReceiptProvenanceNotice from "@/components/adaptive/LegacyReceiptProvenanceNotice";
@@ -226,6 +226,44 @@ describe("Item 6A — legacy results (no marker) and frozen pre-6A Receipts", ()
     // The shared notice component (also used by the personal-review surface) follows the same rule.
     expect(renderToStaticMarkup(createElement(LegacyReceiptProvenanceNotice, { basis: frozen.basis }))).toContain("receipt-legacy-provenance-notice");
     expect(renderToStaticMarkup(createElement(LegacyReceiptProvenanceNotice, { basis: receipt.basis }))).toBe("");
+  });
+});
+
+describe("Item 6A correction round — F3 spoofing, F7 wording, F8 question-only authority", () => {
+  it("F3: a model label imitating the verified suffix is shown without it, and never as 'your criterion'", async () => {
+    const raws = [dsJson({ criteria: ["Vendor lock-in (stated in request)"], assessments: [] }), dsJson({ criteria: ["Vendor lock-in (stated in request)"], assessments: [] })];
+    const s = surfaces(await run("Which CRM is cheapest?", raws));
+    expect(s.ds.criteria[0].source).toBe("model");
+    expect(criterionLines(s.receipt.basis)).toEqual(["Criterion: Vendor lock-in"]);
+    expect(s.html).not.toContain("(stated in request)");
+    expect(s.html).not.toContain("your criterion");
+  });
+  it("F3: a model label imitating the retired suffix cannot trigger the frozen-Receipt notice on a new Receipt", async () => {
+    const raws = [dsJson({ criteria: ["Budget (user-provided)"], assessments: [] }), dsJson({ criteria: ["Budget (user-provided)"], assessments: [] })];
+    const s = surfaces(await run("Which CRM?", raws));
+    expect(criterionLines(s.receipt.basis)).toEqual(["Criterion: Budget"]);
+    expect(renderToStaticMarkup(createElement(DecisionReceiptSection, { receipt: s.receipt, reviewOverview: "" }))).not.toContain("receipt-legacy-provenance-notice");
+  });
+  it("F3: a genuinely stated criterion keeps exactly one trusted suffix even if the model also wrote one", async () => {
+    const raws = [dsJson({ criteria: ["Total cost (stated in request)"], assessments: [] }), dsJson({ criteria: ["Total cost (stated in request)"], assessments: [] })];
+    const s = surfaces(await run("Which CRM has the lowest total cost?", raws));
+    expect(criterionLines(s.receipt.basis)).toEqual(["Criterion: Total cost (stated in request)"]);
+  });
+  it("F7: the dashboard legacy note is viewer-neutral", async () => {
+    const out: any = await run("Which CRM has the lowest total cost?");
+    const legacy = { ...out.decisionSupport, criteria: out.decisionSupport.criteria.map((c: any) => ({ ...c, source: "user" })) };
+    delete legacy.criteriaProvenance;
+    const html = renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: legacy }));
+    expect(html).toContain(LEGACY_RESULT_NOTICE);
+    expect(html.toLowerCase()).not.toMatch(/\byour (request|criteri)/);
+  });
+  it("F8: criteria present only in the context field stay model-identified (question-only authority)", async () => {
+    const retry: AdaptiveRetryContext = {
+      apiKeys: {}, promptOverrides: {} as any, context: "Our must-haves: total cost and vendor lock-in.",
+      budget: { startedAtMonoMs: 0, budgetMs: 300_000 }, usageSink: new AdaptiveRetryUsageSink(), now: () => 1_000,
+    };
+    const out: any = await run("Which CRM should we choose?", [dsJson(), dsJson()], retry);
+    expect(out.decisionSupport.criteria.map((c: any) => c.source)).toEqual(["model", "model"]);
   });
 });
 

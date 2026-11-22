@@ -6,6 +6,8 @@
  */
 import {
   classifyCriterionProvenance,
+  criterionDisplayLabel,
+  UNLABELLED_CRITERION,
   CRITERIA_PROVENANCE_RULE,
   hasUnverifiedLegacyCriteria,
   LEGACY_RECEIPT_SUFFIX_USER_PROVIDED,
@@ -111,5 +113,65 @@ describe("Receipt suffixes and frozen-Receipt recognition", () => {
     expect(receiptHasLegacyUserProvidedCriteria(["Criterion: Total cost (stated in request)", "Criterion: Speed"])).toBe(false);
     expect(receiptHasLegacyUserProvidedCriteria(["Basis note (user-provided)"])).toBe(false);
     expect(receiptHasLegacyUserProvidedCriteria([])).toBe(false);
+  });
+});
+
+// ── Item 6A correction round (R1 F3/F4) ─────────────────────────────────────────────────────────────────────────────
+
+describe("F4 — invisible format characters never split a word", () => {
+  it.each([
+    ["soft hyphen", "cost­ume budget"],
+    ["zero-width space", "cost​ume budget"],
+    ["zero-width non-joiner", "cost‌ume budget"],
+    ["zero-width joiner", "cost‍ume budget"],
+    ["word joiner", "cost⁠ume budget"],
+    ["BOM", "cost﻿ume budget"],
+  ])("%s inside 'costume' does not yield 'cost'", (_l, request) => {
+    model("Cost", request);
+    user("Costume budget", request);
+  });
+  it("a format character inside the LABEL is ignored the same way", () => user("Total­ cost", "minimize total cost"));
+});
+
+describe("F4 — numeric expressions stay whole", () => {
+  it.each([
+    ["decimal", "5 years", "payback in 2.5 years"],
+    ["decimal comma", "5 years", "payback in 2,5 years"],
+    ["thousands", "000 users", "serves 1,000 users"],
+    ["range", "15 seats", "needs 10-15 seats"],
+    ["en-dash range", "15 seats", "needs 10–15 seats"],
+    ["fraction", "4 of budget", "uses 3/4 of budget"],
+    ["time", "30 deadline", "by 10:30 deadline"],
+    ["version", "0 rollout", "the v2.0 rollout"],
+  ])("%s: a fragment of a larger number is not a match", (_l, label, request) => model(label, request));
+  it.each([
+    ["decimal", "2.5 years", "payback in 2.5 years"],
+    ["thousands", "1,000 users", "serves 1,000 users"],
+    ["range", "10-15 seats", "needs 10-15 seats"],
+    ["plain number", "5 years", "within 5 years, ideally"],
+    ["alphanumeric", "Q3 revenue", "Q3 revenue matters"],
+  ])("%s: the whole numeric expression matches", (_l, label, request) => user(label, request));
+  it("a separator between letters still splits (unchanged)", () => user("Ease of integration", "ease-of-integration"));
+  it("sentence punctuation after a number still splits", () => user("5 options", "We have 5 options. Choose one."));
+});
+
+describe("F3 — model-written labels cannot carry trusted provenance markers", () => {
+  it.each([
+    ["Total cost (stated in request)", "Total cost"],
+    ["Total cost (provenance unverified)", "Total cost"],
+    ["Total cost (user-provided)", "Total cost"],
+    ["Total cost (User Provided)", "Total cost"],
+    ["Total cost [stated in request]", "Total cost"],
+    ["Total cost （user-provided）", "Total cost"],
+    ["Total cost (user​-provided)", "Total cost"],
+    ["Total cost (user-provided) (stated in request)", "Total cost"],
+    ["(user-provided)", UNLABELLED_CRITERION],
+  ])("%s → %s", (label, shown) => expect(criterionDisplayLabel(label)).toBe(shown));
+  it("labels without a reserved trailing marker are returned byte for byte", () => {
+    for (const l of ["Total cost", "Cost (USD)", "Integration (user-facing API)", "Ｆｕｌｌ ｗｉｄｔｈ", "stated in request"]) expect(criterionDisplayLabel(l)).toBe(l);
+  });
+  it("a spoofed suffix never makes a criterion user-provided by itself", () => {
+    model("Vendor lock-in (stated in request)", "Which CRM is cheapest?");
+    user("Total cost (stated in request)", "Which CRM has the lowest total cost?"); // the real phrase is in the request
   });
 });

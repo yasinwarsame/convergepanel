@@ -26,6 +26,7 @@ import AdaptiveReviewAssignmentSection from "./AdaptiveReviewAssignmentSection";
 import AdaptiveMultiReviewerPanelSection from "./AdaptiveMultiReviewerPanelSection";
 import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
 import { ReceiptConclusion, ReceiptGroupingDisclosure, ReceiptReviewFlag } from "@/components/adaptive/DsReceiptWording";
+import LegacyReceiptProvenanceNotice from "@/components/adaptive/LegacyReceiptProvenanceNotice";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
@@ -60,6 +61,29 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/** Item 6A (F5): the Decision Receipt card exactly as the page renders it, exported so its markup can be rendered in tests. */
+export function TeamReviewReceiptSection({ schemaId, receipt }: { schemaId: string; receipt: { conclusion: string; basis: string[]; assumptions: string[]; uncertainties: string[]; limitations: string[]; sourceBacked: boolean; humanReviewNeeded: boolean } }) {
+  return (
+    <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
+      <h2 className="text-base font-bold text-cp-text">Decision Receipt</h2>
+      <ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion} className="mt-3 text-sm leading-relaxed text-cp-text" />
+      <ReceiptGroupingDisclosure schemaId={schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
+        <ReceiptSourcesFlag schemaId={schemaId} sourceBacked={receipt.sourceBacked} />
+        <ReceiptReviewFlag schemaId={schemaId} humanReviewNeeded={receipt.humanReviewNeeded} />
+      </div>
+      {/* Item 6A (F1): frozen pre-6A Receipt shown as recorded; read-only notice only. */}
+      <LegacyReceiptProvenanceNotice basis={receipt.basis} />
+      <div className="mt-4 space-y-3">
+        <CollapsibleList title="Basis" items={receipt.basis} />
+        <CollapsibleList title="Assumptions" items={receipt.assumptions} />
+        <CollapsibleList title="Uncertainties" items={receipt.uncertainties} />
+        <CollapsibleList title="Limitations" items={receipt.limitations} />
+      </div>
+    </section>
   );
 }
 
@@ -205,21 +229,7 @@ export default function AdaptiveReviewDetail({ runId }: { runId: string }) {
             {refreshNotice ? <p className="mt-2 text-xs text-amber-400">{refreshNotice}</p> : null}
           </header>
 
-          <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
-            <h2 className="text-base font-bold text-cp-text">Decision Receipt</h2>
-            <ReceiptConclusion schemaId={data.review.schemaId} conclusion={data.review.decisionReceipt.conclusion} className="mt-3 text-sm leading-relaxed text-cp-text" />
-            <ReceiptGroupingDisclosure schemaId={data.review.schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
-              <ReceiptSourcesFlag schemaId={data.review.schemaId} sourceBacked={data.review.decisionReceipt.sourceBacked} />
-              <ReceiptReviewFlag schemaId={data.review.schemaId} humanReviewNeeded={data.review.decisionReceipt.humanReviewNeeded} />
-            </div>
-            <div className="mt-4 space-y-3">
-              <CollapsibleList title="Basis" items={data.review.decisionReceipt.basis} />
-              <CollapsibleList title="Assumptions" items={data.review.decisionReceipt.assumptions} />
-              <CollapsibleList title="Uncertainties" items={data.review.decisionReceipt.uncertainties} />
-              <CollapsibleList title="Limitations" items={data.review.decisionReceipt.limitations} />
-            </div>
-          </section>
+          <TeamReviewReceiptSection schemaId={data.review.schemaId} receipt={data.review.decisionReceipt} />
 
           <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
             <h2 className="text-base font-bold text-cp-text">Automated Governance</h2>

@@ -18,7 +18,7 @@
  */
 
 import { AggregatedDecisionAssessment, AggregatedDecisionCriterion, AggregatedDecisionOption, DecisionRecommendationAction, DecisionSupportResult } from "@/lib/adaptiveSchema/types";
-import { hasUnverifiedLegacyCriteria, readCriterionProvenance } from "@/lib/adaptiveSchema/criterionProvenance";
+import { criterionDisplayLabel, hasUnverifiedLegacyCriteria, LEGACY_RESULT_NOTICE, readCriterionProvenance } from "@/lib/adaptiveSchema/criterionProvenance";
 import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 import {
   DS_GROUPING_BASIS,
@@ -198,7 +198,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
             <p className="mb-1.5 text-xs text-slate-500">{DS_STRENGTH_CAPTION}</p>
             {hasUnverifiedLegacyCriteria(decisionSupport) && (
               <p className="mb-1.5 text-xs text-slate-500" data-testid="ds-legacy-provenance-note">
-                For this earlier run, criteria the models reported as yours could not be checked against your request, so they are marked unverified.
+                {LEGACY_RESULT_NOTICE}
               </p>
             )}
             <div className="overflow-x-auto">
@@ -217,7 +217,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
                   {criteria.map((criterion) => (
                     <tr key={criterion.id}>
                       <th className="border-b border-slate-100 p-2 align-top text-sm font-medium text-slate-700 whitespace-nowrap">
-                        {criterion.label}
+                        {criterionDisplayLabel(criterion.label)}
                         {readCriterionProvenance(decisionSupport, criterion) === "user" && (
                           <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-sky-600">your criterion</span>
                         )}

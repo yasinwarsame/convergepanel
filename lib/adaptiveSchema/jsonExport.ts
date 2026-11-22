@@ -58,6 +58,7 @@ import { AdaptiveExportGeneratedBy } from "./exportGeneratedBy";
 import { readFrozenRunProvenance } from "./exportRunProvenance";
 import type { AdaptiveExportRunProvenance } from "./researchExport";
 import { isAdaptiveRetryOutcome } from "./retryCorrection";
+import { deriveCriteriaProvenanceDisclosure, type DerivedCriteriaProvenanceDisclosure } from "./criterionProvenance";
 
 export const ADAPTIVE_RESEARCH_JSON_EXPORT_FORMAT_VERSION = "1" as const;
 
@@ -69,6 +70,8 @@ export type AdaptiveResearchJsonExportResult =
       result: unknown;
       /** Absent when no governance record existed for this run at export time — never fabricated. */
       decisionReceipt?: AdaptiveDecisionReceipt;
+      /** Item 6A (F2/F6): DERIVED at render time, never historical — present only for a Decision Support export whose criterion provenance cannot be established (see criterionProvenance.ts). `result` and `decisionReceipt` stay verbatim. */
+      derivedCriteriaProvenanceDisclosure?: DerivedCriteriaProvenanceDisclosure;
     }
   | {
       schemaFamily: "legacy";
@@ -270,6 +273,7 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
           schemaId: snapshot.milestone2.schemaId,
           result: snapshot.milestone2.result,
           ...(omitIfNull(snapshot.milestone2.decisionReceipt) !== undefined ? { decisionReceipt: snapshot.milestone2.decisionReceipt! } : {}),
+          ...((d) => (d ? { derivedCriteriaProvenanceDisclosure: d } : {}))(deriveCriteriaProvenanceDisclosure(snapshot.milestone2.schemaId, snapshot.milestone2.result, snapshot.milestone2.decisionReceipt)),
         }
       : record.schemaFamily === "legacy" && snapshot.legacy
         ? {

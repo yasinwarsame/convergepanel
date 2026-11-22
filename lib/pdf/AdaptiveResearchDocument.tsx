@@ -53,6 +53,7 @@ import {
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
 import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
+import { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from "@/lib/adaptiveSchema/criterionProvenance";
 
 /**
  * A bulleted list. Each row is mark + text side by side. The text paginates
@@ -467,6 +468,8 @@ function Milestone2Content({ record }: { record: AdaptiveResearchExportV1 }) {
       </SectionCard>
       {r.basis.length > 0 && (
         <SectionCard label="Basis">
+          {/* Item 6A (F2, owner-authorized frozen-renderer exception): a stored pre-6A Receipt is rendered as recorded; only this read-only notice is added, and only when a basis line carries the retired "(user-provided)" suffix. */}
+          {receiptHasLegacyUserProvidedCriteria(r.basis) ? <Text style={[pdfStyles.mutedText, { marginBottom: 6 }]}>{LEGACY_FROZEN_RECEIPT_NOTICE}</Text> : null}
           <Bullets items={r.basis} closing={CARD_CLOSING_PADDING} />
         </SectionCard>
       )}

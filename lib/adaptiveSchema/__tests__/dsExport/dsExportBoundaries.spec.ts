@@ -23,8 +23,10 @@ const UNCHANGED: [string, string][] = [
   ["app/api/workspaces/[workspaceId]/runs/[runId]/export/route.ts", "47126e77a577c2c0a6cc7d367c9ced0c941e6bd79964726f084ab59eb4f81aef"],
   ["app/api/workspaces/[workspaceId]/runs/[runId]/exports/[exportId]/route.ts", "ad9bee82d655d17d13cc3032242f06eff81d944d2881ee87da17760bc54799a5"],
   ["app/api/workspaces/[workspaceId]/runs/[runId]/exports/route.ts", "b154a3baba388617a01d91e882458ae9a50afab19874cc0df05306fac94f8edf"],
-  ["lib/adaptiveSchema/jsonExport.ts", "5619af6ce06c319a6e91821d3b92108d81c78fce74fad384b01f21ee4dad827c"],
-  ["lib/adaptiveSchema/jsonExportSchema.ts", "e50f144b619e0c81faf78bbc61adc71ac27ab944795649cb9fdbc864bb6aeacb"],
+  // ITEM6A-REPIN lib/adaptiveSchema/jsonExport.ts: sha256 5619af6ce06c319a6e91821d3b92108d81c78fce74fad384b01f21ee4dad827c → 8170a0a3f24e95e139e2e450938c8bdd009174be2d61fca0e4a76e413b93dde0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  ["lib/adaptiveSchema/jsonExport.ts", "8170a0a3f24e95e139e2e450938c8bdd009174be2d61fca0e4a76e413b93dde0"],
+  // ITEM6A-REPIN lib/adaptiveSchema/jsonExportSchema.ts: sha256 e50f144b619e0c81faf78bbc61adc71ac27ab944795649cb9fdbc864bb6aeacb → 464993af33e23b81d11f00d1c6a686a8614649457f3fcf7c3bfe53661664af07. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  ["lib/adaptiveSchema/jsonExportSchema.ts", "464993af33e23b81d11f00d1c6a686a8614649457f3fcf7c3bfe53661664af07"],
   ["lib/pdf/renderAdaptiveResearchPdf.ts", "efc6da0857c4a3734cf0eb97f5387d1eadd6319330e4b61202d5c3ca46f266fd"],
   ["lib/docx/renderAdaptiveResearchDocx.ts", "80fb811d7df16b2c303f1583b748f68d98e0b283c300d128a9ffd87ce575fec1"],
   // OWNER EXACT-FILE EXCEPTION (2026-11-03, research deletion integrity). This file was byte-identical to 0249a4e5,
@@ -34,8 +36,8 @@ const UNCHANGED: [string, string][] = [
   // No other frozen file changes.
   ["lib/firestore/adaptiveExports.ts", "8e3a4199885f339d308abeb9555858a92681b59ef2ce7ce8b400c0160325aecf"],
   ["lib/firestore/sanitizeForFirestore.ts", "323a430eab2314603ca4c878df5b29f1bc310f9f86c92dee96cb847bb17ba28a"],
-  // ITEM6A-REPIN lib/adaptiveSchema/decisionReceiptBuilder.ts: sha256 6a5f8c1e2830611dfa59b24152a3ddbf2da1b915a2c14c199c01753f0a3402d7 → a0fd4b2101f3a8b61728be6a18bf4607cc06be6a6f6be64f5311434f19ae7842. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
-  ["lib/adaptiveSchema/decisionReceiptBuilder.ts", "a0fd4b2101f3a8b61728be6a18bf4607cc06be6a6f6be64f5311434f19ae7842"],
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionReceiptBuilder.ts: sha256 6a5f8c1e2830611dfa59b24152a3ddbf2da1b915a2c14c199c01753f0a3402d7 → 1f1983e88904207726231113e7946679af23e475a0a0e2c3c7eb676874f981c8. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
+  ["lib/adaptiveSchema/decisionReceiptBuilder.ts", "1f1983e88904207726231113e7946679af23e475a0a0e2c3c7eb676874f981c8"],
   // ITEM6A-REPIN lib/adaptiveSchema/decisionSupportAlignment.ts: sha256 792f32ebd5fbe43881a34466e8dc8cae1c083caee6af19f712c70bbe43bd9462 → fdbfc70443e845744207dd3c317ec545b84d1fa888f4fa60b70deb3a7b7a4c53. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
   ["lib/adaptiveSchema/decisionSupportAlignment.ts", "fdbfc70443e845744207dd3c317ec545b84d1fa888f4fa60b70deb3a7b7a4c53"],
   ["lib/adaptiveSchema/reportSummary.ts", "3acc265a3cc1ddf994d94bc09a48666b5a366980d7fe6e1f399778bbc12e948d"],
@@ -71,8 +73,10 @@ const CHANGED_IMPORTS: Record<string, string[]> = {
   "lib/adaptiveSchema/researchExport.ts": ["../types", "./exportGeneratedBy", "./governanceRecord", "./persistedOutput", "./reportStatus", "./reportSummary", "./types"],
   "lib/adaptiveSchema/exportSnapshot.ts": ["../types", "./decisionReceiptBuilder", "./dsLabelWording", "./exportRunProvenance", "./gatePresentation", "./governanceRecord", "./persistedOutput", "./reportStatus", "./reportSummary", "./researchExport", "server-only"],
   "lib/adaptiveSchema/dsLabelWording.ts": ["./types"],
-  "lib/pdf/AdaptiveResearchDocument.tsx": ["./theme", "@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/types", "@react-pdf/renderer", "react"],
-  "lib/docx/AdaptiveResearchDocxDocument.ts": ["@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/types", "docx"],
+  // Item 6A F2 (owner-authorized 2026-11-23): + "@/lib/adaptiveSchema/criterionProvenance" for the read-only legacy-provenance notice only.
+  "lib/pdf/AdaptiveResearchDocument.tsx": ["./theme", "@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/criterionProvenance", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/types", "@react-pdf/renderer", "react"],
+  // Item 6A F2 (owner-authorized 2026-11-23): + "@/lib/adaptiveSchema/criterionProvenance" for the read-only legacy-provenance notice only.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": ["@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/criterionProvenance", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/types", "docx"],
 };
 const importsOf = (file: string) => Array.from(new Set(Array.from(readFileSync(path.join(ROOT, file), "utf8").matchAll(/(?:from|import)\s+"([^"]+)"/g), (m) => m[1]))).sort();
 
@@ -83,6 +87,13 @@ describe("S-E.2 boundaries", () => {
 
   it.each(Object.keys(CHANGED_IMPORTS))("%s imports exactly its 0249a4e5 modules plus the wording module", (file) => {
     expect(importsOf(file)).toEqual([...CHANGED_IMPORTS[file]].sort());
+  });
+
+  it("Item 6A: the provenance module the renderers import stays free of side effects (no process.env, fetch, storage, flags, server-only)", () => {
+    // Comments are stripped first: the module's own doc comment says it must stay free of server-only dependencies.
+    const src = readFileSync(path.join(ROOT, "lib/adaptiveSchema/criterionProvenance.ts"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    for (const forbidden of [/process\.env/, /\bfetch\(/, /adminDb/, /firebase/i, /DS_PROVENANCE/, /server-only/, /localStorage|sessionStorage/]) expect([String(forbidden), forbidden.test(src)]).toEqual([String(forbidden), false]);
+    expect(Array.from(src.matchAll(/(?:from|import)\s+"([^"]+)"/g), (m) => m[1])).toEqual(["./types"]);
   });
 
   it("the wording module stays free of side effects: no process.env, fetch, storage or flag access", () => {
