@@ -45,6 +45,7 @@ import {
   RiskLevel,
 } from "./types";
 import { dedupeTextList, hasIdenticalTokenSet, normalizeSlug, textsAreNearDuplicates, UnionFind } from "./textSimilarity";
+import { classifyCriterionProvenance, CRITERIA_PROVENANCE_RULE } from "./criterionProvenance";
 
 /** Criteria are short labels ("Total cost", "Ease of integration") — tight bar, avoids merging distinct criteria that merely share vocabulary. Same bar causalAlignment.ts uses for factor labels. */
 const CRITERION_DEDUP_THRESHOLDS = { levenshteinMaxRatio: 0.25, tokenOverlapMin: 0.7 };
@@ -100,6 +101,7 @@ export interface DecisionSupportFields {
   decisionQuestion: string;
   options: string[];
   criteria: string[];
+  /** Model self-report, still parsed for schema compatibility but NEVER used for provenance (Item 6A; see criterionProvenance.ts). */
   userProvidedCriteria: string[];
   assessments: DecisionAssessment[];
   recommendationAction: string;
@@ -171,7 +173,7 @@ interface RawText {
   text: string;
 }
 
-/** Clusters a flat list of {modelId, text} entries (or a subtype carrying extra per-entry data) via union-find + a pairwise matcher, deduping same-model repeats within a cluster before counting coverage. Generic so criteria entries can carry an extra `isUserProvided` flag through clustering untouched. */
+/** Clusters a flat list of {modelId, text} entries (or a subtype carrying extra per-entry data) via union-find + a pairwise matcher, deduping same-model repeats within a cluster before counting coverage. Generic so entries can carry extra per-entry data through clustering untouched. */
 function clusterRawTexts<T extends RawText>(entries: T[], matches: (a: string, b: string) => boolean): { label: string; entries: T[]; coverageCount: number; firstSeenIndex: number }[] {
   if (entries.length === 0) return [];
   const uf = new UnionFind(entries.length);
@@ -253,7 +255,9 @@ function mergeEnumRead<T extends string>(valuesByModel: Map<ModelId, T>, unknown
 export function buildDecisionSupportResult(
   perModel: { modelId: ModelId; fields: DecisionSupportFields }[],
   totalModels: number = perModel.length,
-  riskLevel?: RiskLevel
+  riskLevel?: RiskLevel,
+  /** Item 6A: the user's ORIGINAL submitted request — the sole authority for "user" criterion provenance. Never the model-written decisionQuestion. Missing/empty fails closed to "model". */
+  originalRequest?: string | null
 ): DecisionSupportResult {
   if (perModel.length === 0) {
     return {
@@ -277,6 +281,7 @@ export function buildDecisionSupportResult(
       sourceBacked: false,
       sources: [],
       totalModels,
+      criteriaProvenance: CRITERIA_PROVENANCE_RULE,
     };
   }
 
@@ -296,17 +301,15 @@ export function buildDecisionSupportResult(
   const sortedOptionClusters = [...optionClusters].sort((a, b) => b.coverageCount - a.coverageCount || a.firstSeenIndex - b.firstSeenIndex);
   const options: AggregatedDecisionOption[] = stripAxisInternals(sortedOptionClusters) as AggregatedDecisionOption[];
 
-  // ── Criteria axis (with user-vs-model provenance) ──
+  // ── Criteria axis. Provenance (Item 6A) is NOT taken from any model's
+  // userProvidedCriteria self-report: it is classified once, below, from the
+  // DISPLAYED cluster label against the user's original request only. ──
   const usedCriterionIds = new Set<string>();
   let criterionIndex = 0;
   const criterionRaw: RawText[] = [];
-  const userProvidedFlagByEntry = new Map<number, boolean>();
   for (const { modelId, fields } of perModel) {
-    const userSet = new Set(fields.userProvidedCriteria.map((c) => c.trim()));
     for (const text of fields.criteria) {
-      const idx = criterionIndex++;
-      criterionRaw.push({ index: idx, modelId, text });
-      userProvidedFlagByEntry.set(idx, userSet.has(text.trim()));
+      criterionRaw.push({ index: criterionIndex++, modelId, text });
     }
   }
   const criterionClustersRaw = clusterRawTexts(criterionRaw, criteriaMatch);
@@ -324,9 +327,8 @@ export function buildDecisionSupportResult(
     (a, b) => b.coverageCount - a.coverageCount || a.firstSeenIndex - b.firstSeenIndex
   );
   const criteria: AggregatedDecisionCriterion[] = sortedCriterionClusters.map((c) => {
-    const isUserProvided = c.entries.some((e) => userProvidedFlagByEntry.get(e.index) === true);
     const { firstSeenIndex, entries, ...rest } = c;
-    return { ...rest, source: isUserProvided ? "user" : "model" };
+    return { ...rest, source: classifyCriterionProvenance(c.label, originalRequest) };
   });
 
   // ── Assessments: match each raw (optionLabel, criterionLabel) pair against the canonical axes above; drop unresolvable references rather than inventing a new axis entry. ──
@@ -544,5 +546,6 @@ export function buildDecisionSupportResult(
     sourceBacked,
     sources,
     totalModels,
+    criteriaProvenance: CRITERIA_PROVENANCE_RULE,
   };
 }

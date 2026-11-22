@@ -112,9 +112,21 @@ describe("unchanged-main renderer and runtime", () => {
     // per-slot recorded outcome / D-5 facts and the version marker — into every record it builds. The 413e14b records
     // were frozen at version 1, so the comparison reads the identity facts (readFrozenRunProvenance, the JSON export's
     // projection) and separately requires every BASE record to carry the version-2 fields.
+    // Item 6A controlled exception (owner-authorized, 2026-11-22): a freshly aggregated Decision Support result carries
+    // the provenance-generation marker criteriaProvenance "request_text_v1", absent from the 413e14b records. Only that
+    // key, only with that exact value, only on a DS result object (has `criteria`), is removed before comparing.
+    const withoutItem6aMarker = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(withoutItem6aMarker);
+      if (v && typeof v === "object") {
+        const o = v as Record<string, unknown>;
+        const isMarkedDsResult = Array.isArray(o.criteria) && o.criteriaProvenance === "request_text_v1";
+        return Object.fromEntries(Object.entries(o).filter(([k]) => !(isMarkedDsResult && k === "criteriaProvenance")).map(([k, x]) => [k, withoutItem6aMarker(x)]));
+      }
+      return v;
+    };
     const strip = (r: Record<string, unknown>) => {
       const snapshot = r.reportSnapshot as Record<string, unknown>;
-      return { ...r, exportMetadata: { ...(r.exportMetadata as object), fileHash: null }, reportSnapshot: { ...snapshot, ...("runProvenance" in snapshot ? { runProvenance: readFrozenRunProvenance(snapshot.runProvenance) } : {}) } };
+      return withoutItem6aMarker({ ...r, exportMetadata: { ...(r.exportMetadata as object), fileHash: null }, reportSnapshot: { ...snapshot, ...("runProvenance" in snapshot ? { runProvenance: readFrozenRunProvenance(snapshot.runProvenance) } : {}) } });
     };
     const common = Object.keys(OLD_RECORDS);
     expect(common.length).toBe(105);

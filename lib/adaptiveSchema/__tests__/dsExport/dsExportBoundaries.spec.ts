@@ -34,8 +34,10 @@ const UNCHANGED: [string, string][] = [
   // No other frozen file changes.
   ["lib/firestore/adaptiveExports.ts", "8e3a4199885f339d308abeb9555858a92681b59ef2ce7ce8b400c0160325aecf"],
   ["lib/firestore/sanitizeForFirestore.ts", "323a430eab2314603ca4c878df5b29f1bc310f9f86c92dee96cb847bb17ba28a"],
-  ["lib/adaptiveSchema/decisionReceiptBuilder.ts", "6a5f8c1e2830611dfa59b24152a3ddbf2da1b915a2c14c199c01753f0a3402d7"],
-  ["lib/adaptiveSchema/decisionSupportAlignment.ts", "792f32ebd5fbe43881a34466e8dc8cae1c083caee6af19f712c70bbe43bd9462"],
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionReceiptBuilder.ts: sha256 6a5f8c1e2830611dfa59b24152a3ddbf2da1b915a2c14c199c01753f0a3402d7 → a0fd4b2101f3a8b61728be6a18bf4607cc06be6a6f6be64f5311434f19ae7842. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
+  ["lib/adaptiveSchema/decisionReceiptBuilder.ts", "a0fd4b2101f3a8b61728be6a18bf4607cc06be6a6f6be64f5311434f19ae7842"],
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionSupportAlignment.ts: sha256 792f32ebd5fbe43881a34466e8dc8cae1c083caee6af19f712c70bbe43bd9462 → fdbfc70443e845744207dd3c317ec545b84d1fa888f4fa60b70deb3a7b7a4c53. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
+  ["lib/adaptiveSchema/decisionSupportAlignment.ts", "fdbfc70443e845744207dd3c317ec545b84d1fa888f4fa60b70deb3a7b7a4c53"],
   ["lib/adaptiveSchema/reportSummary.ts", "3acc265a3cc1ddf994d94bc09a48666b5a366980d7fe6e1f399778bbc12e948d"],
   ["lib/adaptiveSchema/exportContentDerivation.ts", "4f520bf8c61cba47e8508da6211f155dd281886d624037239f746bd215e4d298"],
   ["lib/adaptiveSchema/reportStatus.ts", "88dc403ded11dc7a52811d9a7102aa7f697abb69ccc5a19d52e639369ca5d957"],

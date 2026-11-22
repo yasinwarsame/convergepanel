@@ -706,7 +706,9 @@ export async function finalizeAdaptiveRun(
     const perModelFields = adaptiveResults
       .filter((r) => r.ok && r.data)
       .map((r) => ({ modelId: r.modelId, fields: extractDecisionSupportFields(r.data!) }));
-    const decisionSupport = buildDecisionSupportResult(perModelFields, adaptiveResults.length, classification?.riskLevel);
+    // Item 6A: `question` is the user's original request (finalizeAdaptiveRun's caller passes trimmedQuestion) and is
+    // the only authority for "user" criterion provenance; the corrective retry above re-asks models but never changes it.
+    const decisionSupport = buildDecisionSupportResult(perModelFields, adaptiveResults.length, classification?.riskLevel, question);
     const envelope = attachAdaptiveEnvelope("decision_support", schema, classification, results, adaptiveResults, decisionSupport);
     return { schemaId: schema.id, adaptiveResults, decisionSupport, ...envelope };
   }

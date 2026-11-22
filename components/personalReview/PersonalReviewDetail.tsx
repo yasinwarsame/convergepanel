@@ -20,6 +20,7 @@ import AdaptiveReviewDecisionForm from "@/components/teamGovernance/AdaptiveRevi
 import { ReviewHistory } from "@/components/adaptive/ReviewGovernanceSection";
 import PersonalReviewStatusBadge from "./PersonalReviewStatusBadge";
 import ReviewerNavigation from "./ReviewerNavigation";
+import LegacyReceiptProvenanceNotice from "@/components/adaptive/LegacyReceiptProvenanceNotice";
 import type { PersonalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
@@ -329,6 +330,8 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
               <ReceiptSourcesFlag schemaId={data.schemaId} sourceBacked={data.decisionReceipt.sourceBacked} />
               <ReceiptReviewFlag schemaId={data.schemaId} humanReviewNeeded={data.decisionReceipt.humanReviewNeeded} />
             </div>
+            {/* Item 6A: frozen pre-6A Receipt shown as recorded; read-only notice only. */}
+            <LegacyReceiptProvenanceNotice basis={data.decisionReceipt.basis} />
             <div className="mt-4 space-y-3">
               <CollapsibleList title="Basis" items={data.decisionReceipt.basis} />
               <CollapsibleList title="Assumptions" items={data.decisionReceipt.assumptions} />

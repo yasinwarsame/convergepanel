@@ -17,6 +17,7 @@
 
 import "server-only";
 import { ModelId, ModelResult } from "@/lib/types";
+import { readCriterionProvenance } from "./criterionProvenance";
 import {
   AdaptiveModelResult,
   AdaptiveSourceCoverage,
@@ -265,7 +266,8 @@ export function getAdaptiveLimitations(schemaId: PersistedAdaptiveSchemaId, resu
     case "decision_support": {
       const r = result as DecisionSupportResult;
       limitations.push(...r.recommendation.caveats);
-      if (r.criteria.length > 0 && r.criteria.every((c) => c.source === "model")) {
+      // Item 6A: one shared provenance read (criterionProvenance.ts), never the raw field.
+      if (r.criteria.length > 0 && r.criteria.every((c) => readCriterionProvenance(r, c) !== "user")) {
         limitations.push("The recommendation depends on inferred rather than user-provided criteria.");
       }
       break;

@@ -106,7 +106,19 @@ describe("marker assignment (buildExportSnapshot)", () => {
         // facts (readFrozenRunProvenance, what the JSON export and the display lines read) must still be equal.
         expect(rest.runProvenance).toMatchObject({ provenanceVersion: 2 });
         for (const m of rest.runProvenance!.models) expect(["recorded", "absent"]).toContain(m.outcomeSource);
-        expect({ ...rest, runProvenance: readFrozenRunProvenance(rest.runProvenance) }).toEqual(historical.reportSnapshot);
+        // Item 6A controlled exception (owner-authorized, 2026-11-22): a freshly aggregated Decision Support result now
+        // carries the provenance-generation marker criteriaProvenance "request_text_v1" (absent from the historical
+        // records). Only that key, only with that exact value, only on a DS result object, is removed before comparing.
+        const withoutItem6aMarker = (v: unknown): unknown => {
+          if (Array.isArray(v)) return v.map(withoutItem6aMarker);
+          if (v && typeof v === "object") {
+            const o = v as Record<string, unknown>;
+            const isMarkedDsResult = Array.isArray(o.criteria) && o.criteriaProvenance === "request_text_v1";
+            return Object.fromEntries(Object.entries(o).filter(([k]) => !(isMarkedDsResult && k === "criteriaProvenance")).map(([k, x]) => [k, withoutItem6aMarker(x)]));
+          }
+          return v;
+        };
+        expect(withoutItem6aMarker({ ...rest, runProvenance: readFrozenRunProvenance(rest.runProvenance) })).toEqual(historical.reportSnapshot);
         if (c.schemaId === "decision_support") expect(presentation).toStrictEqual({ dsLabelWordingVersion: 1 });
         else expect(presentation).toBeUndefined();
       }

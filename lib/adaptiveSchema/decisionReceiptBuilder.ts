@@ -27,6 +27,7 @@
 import "server-only";
 import { PersistedAdaptiveOutputV1 } from "./persistedOutput";
 import { AdaptiveDecisionReceipt } from "./governanceRecord";
+import { hasUnverifiedLegacyCriteria, LEGACY_PROVENANCE_LIMITATION, readCriterionProvenance, receiptCriterionSuffix } from "./criterionProvenance";
 import {
   BiasBlindspotAuditResult,
   CausalExplanationResult,
@@ -363,7 +364,9 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
     : `${actionLabel} — ${result.recommendation.rationale}`;
 
   const basis = [
-    ...result.criteria.map((c) => `Criterion: ${c.label}${c.source === "user" ? " (user-provided)" : ""}`),
+    // Item 6A: provenance comes only from the shared accessor (criterionProvenance.ts). A verified criterion is
+    // marked "(stated in request)"; a pre-6A self-reported one "(provenance unverified)"; a model one has no suffix.
+    ...result.criteria.map((c) => `Criterion: ${c.label}${receiptCriterionSuffix(readCriterionProvenance(result, c))}`),
     ...result.assessments.map((a) => {
       const option = result.options.find((o) => o.id === a.optionId);
       const criterion = result.criteria.find((c) => c.id === a.criterionId);
@@ -382,6 +385,9 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
 
   const limitations = dedupeExact([
     ...(meta.limitations ?? []),
+    // Item 6A legacy disclosure: only on results aggregated before the request-text rule that still carry a
+    // model-reported "user" criterion. New results never add this line.
+    ...(hasUnverifiedLegacyCriteria(result) ? [LEGACY_PROVENANCE_LIMITATION] : []),
     ...result.risks.map((r) => `Risk: ${r.label}${r.mitigation ? ` (mitigation: ${r.mitigation})` : ""}`),
     ...result.recommendation.caveats,
     ...(result.reversibleNextStep ? [`Reversible next step available: ${result.reversibleNextStep}`] : []),

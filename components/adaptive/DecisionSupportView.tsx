@@ -18,6 +18,7 @@
  */
 
 import { AggregatedDecisionAssessment, AggregatedDecisionCriterion, AggregatedDecisionOption, DecisionRecommendationAction, DecisionSupportResult } from "@/lib/adaptiveSchema/types";
+import { hasUnverifiedLegacyCriteria, readCriterionProvenance } from "@/lib/adaptiveSchema/criterionProvenance";
 import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 import {
   DS_GROUPING_BASIS,
@@ -195,6 +196,11 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
           <div className="mt-3">
             <SectionLabel>Decision criteria</SectionLabel>
             <p className="mb-1.5 text-xs text-slate-500">{DS_STRENGTH_CAPTION}</p>
+            {hasUnverifiedLegacyCriteria(decisionSupport) && (
+              <p className="mb-1.5 text-xs text-slate-500" data-testid="ds-legacy-provenance-note">
+                For this earlier run, criteria the models reported as yours could not be checked against your request, so they are marked unverified.
+              </p>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <thead>
@@ -212,8 +218,11 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
                     <tr key={criterion.id}>
                       <th className="border-b border-slate-100 p-2 align-top text-sm font-medium text-slate-700 whitespace-nowrap">
                         {criterion.label}
-                        {criterion.source === "user" && (
+                        {readCriterionProvenance(decisionSupport, criterion) === "user" && (
                           <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-sky-600">your criterion</span>
+                        )}
+                        {readCriterionProvenance(decisionSupport, criterion) === "unverified_legacy" && (
+                          <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">provenance unverified</span>
                         )}
                       </th>
                       {options.map((option) => (

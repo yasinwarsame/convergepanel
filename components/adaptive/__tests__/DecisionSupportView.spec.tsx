@@ -86,22 +86,25 @@ describe("DecisionSupportView", () => {
     expect(html).toContain("Salesforce");
   });
 
-  it("shows decision criteria, marking a user-provided one", () => {
-    const result = buildDecisionSupportResult(
-      perModel([
-        [
-          "chatgpt",
-          fields({
-            options: ["HubSpot"],
-            criteria: ["Budget under $10k"],
-            userProvidedCriteria: ["Budget under $10k"],
-          }),
-        ],
-      ])
-    );
-    const html = renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: result }));
-    expect(html).toContain("Budget under $10k");
-    expect(html).toContain("your criterion");
+  // Item 6A: "your criterion" now requires the criterion to be stated in the user's original request; a model flag
+  // alone (the retired rule this test used to assert) no longer shows it.
+  it("shows decision criteria, marking one only when the original request states it", () => {
+    const rows = perModel([
+      [
+        "chatgpt",
+        fields({
+          options: ["HubSpot"],
+          criteria: ["Budget under $10k"],
+          userProvidedCriteria: ["Budget under $10k"],
+        }),
+      ],
+    ]);
+    const stated = renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: buildDecisionSupportResult(rows, 1, undefined, "Pick a CRM with a budget under $10k") }));
+    expect(stated).toContain("Budget under $10k");
+    expect(stated).toContain("your criterion");
+    const selfReportedOnly = renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: buildDecisionSupportResult(rows, 1, undefined, "Pick a CRM") }));
+    expect(selfReportedOnly).toContain("Budget under $10k");
+    expect(selfReportedOnly).not.toContain("your criterion");
   });
 
   it("renders the option-by-criterion matrix with an assessment cell", () => {
