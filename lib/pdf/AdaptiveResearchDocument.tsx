@@ -469,7 +469,7 @@ function Milestone2Content({ record }: { record: AdaptiveResearchExportV1 }) {
       {r.basis.length > 0 && (
         <SectionCard label="Basis">
           {/* Item 6A (F2, owner-authorized frozen-renderer exception): a stored pre-6A Receipt is rendered as recorded; only this read-only notice is added, and only when a basis line carries the retired "(user-provided)" suffix. */}
-          {receiptHasLegacyUserProvidedCriteria(r.basis) ? <Text style={[pdfStyles.mutedText, { marginBottom: 6 }]}>{LEGACY_FROZEN_RECEIPT_NOTICE}</Text> : null}
+          {receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? <Text style={[pdfStyles.mutedText, { marginBottom: 6 }]}>{LEGACY_FROZEN_RECEIPT_NOTICE}</Text> : null}
           <Bullets items={r.basis} closing={CARD_CLOSING_PADDING} />
         </SectionCard>
       )}

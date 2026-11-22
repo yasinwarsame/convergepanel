@@ -230,7 +230,7 @@ export default function DecisionReceiptSection({ receipt, reviewOverview }: { re
       </div>
 
       {/* Item 6A: a frozen pre-6A Receipt is shown exactly as recorded; only this read-only notice is added. */}
-      <LegacyReceiptProvenanceNotice basis={receipt.basis} />
+      <LegacyReceiptProvenanceNotice basis={receipt.basis} schemaId={receipt.schemaId} />
 
       <div className="mt-4 space-y-3">
         <CollapsibleReceiptList title="Basis" items={receipt.basis} />

@@ -116,10 +116,34 @@ describe("regenerated JSON (re-download dispatcher)", () => {
   });
 });
 
+describe("N2 — export notice and JSON flag are gated on trusted structure, never on text alone", () => {
+  /** A CURRENT (marked) record whose model-written text imitates the retired line format. */
+  function markedWithImitation(format: "pdf" | "docx" | "json"): Rec {
+    const rec: any = stored(format);
+    const m2 = rec.reportSnapshot.milestone2;
+    expect(m2.result.criteriaProvenance).toBe("request_text_v1");
+    m2.decisionReceipt.basis = [...m2.decisionReceipt.basis, "Criterion: Imitation (user-provided)"];
+    return rec;
+  }
+  it("PDF and DOCX: a marked result never shows the frozen notice", async () => {
+    expect(extractPdfTextNodes(AdaptiveResearchDocument({ record: markedWithImitation("pdf") }))).not.toContain(LEGACY_FROZEN_RECEIPT_NOTICE);
+    expect(await extractDocxText((await renderAdaptiveResearchExport(markedWithImitation("docx"))).bytes)).not.toContain(LEGACY_FROZEN_RECEIPT_NOTICE);
+  });
+  it("JSON: a marked result gets no derived disclosure", async () => {
+    const j = JSON.parse(Buffer.from((await renderAdaptiveResearchExport(markedWithImitation("json"))).bytes).toString("utf8"));
+    expect(j.result).not.toHaveProperty("derivedCriteriaProvenanceDisclosure");
+  });
+  it("a non-Decision-Support record is never treated as legacy DS provenance", async () => {
+    const rec: any = preSixA("pdf").rec;
+    rec.reportSnapshot.milestone2.schemaId = "definition_explanation";
+    expect(extractPdfTextNodes(AdaptiveResearchDocument({ record: rec }))).not.toContain(LEGACY_FROZEN_RECEIPT_NOTICE);
+  });
+});
+
 describe("review Receipt cards (personal and Team review pages) — rendered markup", () => {
   const receipt = (basis: string[]) => ({ conclusion: "Choose option: HubSpot — fits.", basis, assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: false });
   const LEGACY = ["Criterion: Total cost (user-provided)", "Criterion: Vendor lock-in"];
-  const CURRENT = ["Criterion: Total cost (stated in request)", "Criterion: Vendor lock-in"];
+  const CURRENT = ["Criterion (stated in request): Total cost", "Criterion: Vendor lock-in"];
   it.each([
     ["personal", PersonalReviewReceiptSection],
     ["team", TeamReviewReceiptSection],
@@ -129,6 +153,9 @@ describe("review Receipt cards (personal and Team review pages) — rendered mar
     expect(legacy).toContain("Criterion: Total cost (user-provided)");
     const current = renderToStaticMarkup(createElement(Section as any, { schemaId: "decision_support", receipt: receipt(CURRENT) }));
     expect(current).not.toContain("receipt-legacy-provenance-notice");
-    expect(current).toContain("Criterion: Total cost (stated in request)");
+    expect(current).toContain("Criterion (stated in request): Total cost");
+    // N2: the same frozen lines under another (trusted) schema never trigger the notice.
+    const otherSchema = renderToStaticMarkup(createElement(Section as any, { schemaId: "definition_explanation", receipt: receipt(LEGACY) }));
+    expect(otherSchema).not.toContain("receipt-legacy-provenance-notice");
   });
 });

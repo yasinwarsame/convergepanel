@@ -10,13 +10,13 @@ import {
   UNLABELLED_CRITERION,
   CRITERIA_PROVENANCE_RULE,
   hasUnverifiedLegacyCriteria,
-  LEGACY_RECEIPT_SUFFIX_USER_PROVIDED,
   provenanceTokens,
   readCriterionProvenance,
-  receiptCriterionSuffix,
+  receiptCriterionLine,
+  receiptCriterionTag,
   receiptHasLegacyUserProvidedCriteria,
-  RECEIPT_SUFFIX_UNVERIFIED,
-  RECEIPT_SUFFIX_USER,
+  RECEIPT_TAG_UNVERIFIED,
+  RECEIPT_TAG_USER,
 } from "@/lib/adaptiveSchema/criterionProvenance";
 
 const user = (label: string, request: string | null | undefined) => expect(classifyCriterionProvenance(label, request)).toBe("user");
@@ -26,9 +26,8 @@ describe("classifyCriterionProvenance — recognized literal phrases", () => {
   it("recognizes an exact phrase", () => user("Budget under $10k", "Choose a CRM with a budget under $10k."));
   it("normalizes case, punctuation and whitespace", () => {
     user("Ease of integration", "We care most about EASE   OF\tINTEGRATION!");
-    user("Ease-of-Integration", "ease of integration");
-    user("time to deploy", "Time-to-deploy matters.");
     user("Total cost", "  total,  cost?  ");
+    user("Ease-of-Integration", "EASE-OF-INTEGRATION matters"); // same compound, case-normalized
   });
   it("recognizes a single-token criterion stated as a whole word", () => user("Cost", "What is the cost of each option?"));
   it("recognizes a phrase at the start and end of the request", () => {
@@ -77,7 +76,8 @@ describe("classifyCriterionProvenance — Unicode", () => {
     user("成本", "成本");
     model("成本", "我们关心成本和速度");
   });
-  it("tokens are lowercase NFKC letter/number/mark runs", () => expect(provenanceTokens("Ease-of-Integration, ＴＷＯ 2!")).toEqual(["ease", "of", "integration", "two", "2"]));
+  // N4 owner policy (2026-11-23): hyphenated compounds and contractions are single lexical units.
+  it("tokens are lowercase NFKC cohesive lexical units", () => expect(provenanceTokens("Ease-of-Integration, ＴＷＯ 2! can't")).toEqual(["ease-of-integration", "two", "2", "can't"]));
 });
 
 describe("readCriterionProvenance — the one shared accessor", () => {
@@ -102,17 +102,29 @@ describe("readCriterionProvenance — the one shared accessor", () => {
 });
 
 describe("Receipt suffixes and frozen-Receipt recognition", () => {
-  it("maps each provenance to one suffix; the verified suffix differs from the retired one", () => {
-    expect(receiptCriterionSuffix("user")).toBe(RECEIPT_SUFFIX_USER);
-    expect(receiptCriterionSuffix("unverified_legacy")).toBe(RECEIPT_SUFFIX_UNVERIFIED);
-    expect(receiptCriterionSuffix("model")).toBe("");
-    expect(RECEIPT_SUFFIX_USER).not.toBe(LEGACY_RECEIPT_SUFFIX_USER_PROVIDED);
+  it("N1: the trusted tag sits before the colon; the sanitized model label after it", () => {
+    expect(receiptCriterionTag("user")).toBe(RECEIPT_TAG_USER);
+    expect(receiptCriterionTag("unverified_legacy")).toBe(RECEIPT_TAG_UNVERIFIED);
+    expect(receiptCriterionTag("model")).toBe("");
+    expect(receiptCriterionLine("Total cost", "user")).toBe("Criterion (stated in request): Total cost");
+    expect(receiptCriterionLine("Total cost", "unverified_legacy")).toBe("Criterion (provenance unverified): Total cost");
+    expect(receiptCriterionLine("Total cost (stated in the request)", "model")).toBe("Criterion: Total cost");
+    expect(receiptCriterionLine("Budget (user-provided).", "model")).toBe("Criterion: Budget");
   });
-  it("recognizes a frozen pre-6A criterion line, and nothing else", () => {
-    expect(receiptHasLegacyUserProvidedCriteria(["Criterion: Total cost (user-provided)"])).toBe(true);
-    expect(receiptHasLegacyUserProvidedCriteria(["Criterion: Total cost (stated in request)", "Criterion: Speed"])).toBe(false);
-    expect(receiptHasLegacyUserProvidedCriteria(["Basis note (user-provided)"])).toBe(false);
-    expect(receiptHasLegacyUserProvidedCriteria([])).toBe(false);
+  const DS = { schemaId: "decision_support" };
+  it("N2: recognizes a frozen pre-6A Decision Support criterion line, and nothing else", () => {
+    expect(receiptHasLegacyUserProvidedCriteria(["Criterion: Total cost (user-provided)"], DS)).toBe(true);
+    expect(receiptHasLegacyUserProvidedCriteria(["Criterion (stated in request): Total cost", "Criterion: Speed"], DS)).toBe(false);
+    expect(receiptHasLegacyUserProvidedCriteria(["Basis note (user-provided)"], DS)).toBe(false);
+    expect(receiptHasLegacyUserProvidedCriteria([], DS)).toBe(false);
+  });
+  it("N2: model text cannot trigger it — other schemas, marked results, assessment lines, missing schema", () => {
+    const line = ["Criterion: Total cost (user-provided)"];
+    expect(receiptHasLegacyUserProvidedCriteria(line, { schemaId: "definition_explanation" })).toBe(false);
+    expect(receiptHasLegacyUserProvidedCriteria(line, { schemaId: undefined })).toBe(false);
+    expect(receiptHasLegacyUserProvidedCriteria(line, { schemaId: "decision_support", resultProvenanceMarker: "request_text_v1" })).toBe(false);
+    expect(receiptHasLegacyUserProvidedCriteria(line, { schemaId: "decision_support", resultProvenanceMarker: undefined })).toBe(true);
+    expect(receiptHasLegacyUserProvidedCriteria(["Criterion: HubSpot × Total cost: cheaper (user-provided)"], DS)).toBe(false);
   });
 });
 
@@ -151,7 +163,8 @@ describe("F4 — numeric expressions stay whole", () => {
     ["plain number", "5 years", "within 5 years, ideally"],
     ["alphanumeric", "Q3 revenue", "Q3 revenue matters"],
   ])("%s: the whole numeric expression matches", (_l, label, request) => user(label, request));
-  it("a separator between letters still splits (unchanged)", () => user("Ease of integration", "ease-of-integration"));
+  // N4 owner policy (2026-11-23): this test used to pin that a hyphen between letters splits; that is now forbidden.
+  it("a hyphenated compound is one unit (N4 policy, replaces the old split pin)", () => model("Ease of integration", "ease-of-integration"));
   it("sentence punctuation after a number still splits", () => user("5 options", "We have 5 options. Choose one."));
 });
 
@@ -174,4 +187,72 @@ describe("F3 — model-written labels cannot carry trusted provenance markers", 
     model("Vendor lock-in (stated in request)", "Which CRM is cheapest?");
     user("Total cost (stated in request)", "Which CRM has the lowest total cost?"); // the real phrase is in the request
   });
+});
+
+// ── Item 6A final correction round (R2 N1/N3/N4) ────────────────────────────────────────────────────────────────────
+describe("N1 — near-variant origin claims in model labels are removed; substantive brackets kept", () => {
+  it.each([
+    ["Budget (stated in the request)", "Budget"],
+    ["Budget (user-provided).", "Budget"],
+    ["Budget (user-provided)\u200b.", "Budget"],
+    ["Budget \u2014 user-provided", "Budget"],
+    ["Budget - per the user's request", "Budget"],
+    ["Budget {user-provided}", "Budget"],
+    ["Budget (verified user-provided)", "Budget"],
+    ["Budget (as specified by the user)", "Budget"],
+    ["Budget \u00ab user provided \u00bb", "Budget"],
+    ["(user-provided) Budget", "Budget"],
+    ["Budget (provenance: verified)", "Budget"],
+  ])("%s → %s", (label, shown) => expect(criterionDisplayLabel(label)).toBe(shown));
+  it.each(["Cost (USD)", "Customer support (24/7)", "API (user-facing)", "Total cost \u2014 first year", "Data residency (EU)", "Time-to-value"])(
+    "keeps %s byte for byte",
+    (label) => expect(criterionDisplayLabel(label)).toBe(label)
+  );
+});
+
+describe("N3 — a number is never matched as a fragment of a larger numeric expression", () => {
+  it.each([
+    ["Arabic decimal", "5 years", "payback in 2\u066b5 years"],
+    ["Arabic thousands", "000 users", "serves 1\u066c000 users"],
+    ["middle-dot decimal", "5 years", "payback in 2\u00b75 years"],
+    ["math minus range", "5 years", "2\u22125 years"],
+    ["vulgar fraction (NFKC)", "2 year", "within \u00bd year"],
+    ["spaced hyphen range", "15 years", "within 10 - 15 years"],
+    ["spaced en-dash range", "15 years", "within 10 \u2013 15 years"],
+    ["NBSP thousands", "000 users", "serves 1\u00a0000 users"],
+    ["narrow NBSP thousands", "000 users", "serves 1\u202f000 users"],
+    ["plain-space thousands", "000 users", "serves 1 000 users"],
+    ["signed value", "5 years", "a -5 years offset"],
+    ["math-minus signed", "5 years", "a \u22125 years offset"],
+    ["worded range", "10 years", "between 5 and 10 years"],
+    ["to-range", "10 years", "5 to 10 years"],
+    ["ratio", "5 users", "3 of 5 users"],
+    ["trailing range", "5", "5 to 10"],
+  ])("%s", (_l, label, request) => model(label, request));
+  it.each([
+    ["Arabic decimal whole", "2\u066b5 years", "payback in 2\u066b5 years"],
+    ["spaced range whole", "10-15 years", "within 10 - 15 years"],
+    ["number then words", "5 years", "within 5 years or more"],
+    ["compound number", "5-year plan", "a 5-year plan"],
+    ["signed whole", "-5 years", "a -5 years offset"],
+  ])("%s still matches", (_l, label, request) => user(label, request));
+});
+
+describe("N4 — hyphenated compounds and contractions are cohesive (owner policy)", () => {
+  it.each([
+    ["Refundable", "Is a non-refundable fare worth it?"],
+    ["can", "I can't decide"],
+    ["Entry", "re-entry costs"],
+    ["Cost", "a low-cost option"],
+    ["Profit", "non-profit status"],
+    ["Mail", "e-mail support"],
+    ["year plan", "a 5-year plan"],
+    ["Compliance", "the risk of non\u2010compliance"],
+    ["user needs", "the user's needs"],
+  ])("%s is not matched inside %s", (label, request) => model(label, request));
+  it.each([
+    ["Non-refundable", "Is a non-refundable fare worth it?"],
+    ["Re-entry", "re-entry costs"],
+    ["Low-cost option", "a LOW-COST option"],
+  ])("the whole compound %s still matches", (label, request) => user(label, request));
 });

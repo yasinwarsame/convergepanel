@@ -253,7 +253,7 @@ function milestone2Section(record: AdaptiveResearchExportV1): (Paragraph | Table
   const conclusion = isDsLabelWordingMarked(record) ? dsPresentedExportConclusion(m2.result as DecisionSupportResult, r.conclusion) : r.conclusion;
   const out: (Paragraph | Table)[] = [heading("Conclusion"), body(conclusion)];
   // Item 6A (F2, owner-authorized frozen-renderer exception): read-only notice for a stored pre-6A Receipt only.
-  if (r.basis.length > 0) out.push(heading("Basis"), ...(receiptHasLegacyUserProvidedCriteria(r.basis) ? [muted(LEGACY_FROZEN_RECEIPT_NOTICE)] : []), ...bulletList(r.basis));
+  if (r.basis.length > 0) out.push(heading("Basis"), ...(receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? [muted(LEGACY_FROZEN_RECEIPT_NOTICE)] : []), ...bulletList(r.basis));
   if (r.assumptions.length > 0) out.push(heading("Assumptions"), ...bulletList(r.assumptions));
   if (r.uncertainties.length > 0) out.push(heading("Uncertainties"), ...bulletList(r.uncertainties));
   if (r.limitations.length > 0) out.push(heading("Limitations"), ...bulletList(r.limitations));

@@ -27,7 +27,7 @@
 import "server-only";
 import { PersistedAdaptiveOutputV1 } from "./persistedOutput";
 import { AdaptiveDecisionReceipt } from "./governanceRecord";
-import { criterionDisplayLabel, hasUnverifiedLegacyCriteria, LEGACY_PROVENANCE_LIMITATION, readCriterionProvenance, receiptCriterionSuffix } from "./criterionProvenance";
+import { criterionDisplayLabel, hasUnverifiedLegacyCriteria, LEGACY_PROVENANCE_LIMITATION, readCriterionProvenance, receiptCriterionLine } from "./criterionProvenance";
 import {
   BiasBlindspotAuditResult,
   CausalExplanationResult,
@@ -367,7 +367,8 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
     // Item 6A: provenance comes only from the shared accessor (criterionProvenance.ts). A verified criterion is
     // marked "(stated in request)"; a pre-6A self-reported one "(provenance unverified)"; a model one has no suffix.
     // F3: the model-written label is display text only (reserved trailing provenance markers stripped).
-    ...result.criteria.map((c) => `Criterion: ${criterionDisplayLabel(c.label)}${receiptCriterionSuffix(readCriterionProvenance(result, c))}`),
+    // N1: the trusted provenance tag sits between "Criterion" and the colon; the sanitized model label follows it.
+    ...result.criteria.map((c) => receiptCriterionLine(c.label, readCriterionProvenance(result, c))),
     ...result.assessments.map((a) => {
       const option = result.options.find((o) => o.id === a.optionId);
       const criterion = result.criteria.find((c) => c.id === a.criterionId);

@@ -196,7 +196,7 @@ export function PersonalReviewReceiptSection({ schemaId, receipt }: { schemaId: 
         <ReceiptReviewFlag schemaId={schemaId} humanReviewNeeded={receipt.humanReviewNeeded} />
       </div>
       {/* Item 6A: frozen pre-6A Receipt shown as recorded; read-only notice only. */}
-      <LegacyReceiptProvenanceNotice basis={receipt.basis} />
+      <LegacyReceiptProvenanceNotice basis={receipt.basis} schemaId={schemaId} />
       <div className="mt-4 space-y-3">
         <CollapsibleList title="Basis" items={receipt.basis} />
         <CollapsibleList title="Assumptions" items={receipt.assumptions} />
