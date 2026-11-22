@@ -252,7 +252,8 @@ const WIDENED_BY_INC1: Record<string, string> = {
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "68300e783c036853985142d9127713a0a68ed21a",
+  // ITEM6A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 68300e783c036853985142d9127713a0a68ed21a → 0c8efe01704d0a0707bba955291574e5b8fefd1c. Item 6A (owner-authorized 2026-11-22): that spec re-pins decisionSupportAlignment.ts, decisionReceiptBuilder.ts and DecisionSupportView.tsx for the authoritative criterion-provenance change (comments ITEM6A-REPIN inside it); no other change to it.
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "0c8efe01704d0a0707bba955291574e5b8fefd1c",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };
