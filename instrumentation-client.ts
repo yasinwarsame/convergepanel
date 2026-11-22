@@ -87,6 +87,9 @@ if (dsn !== undefined && !telemetryFreeDocument) {
     // Structural hardening: the SDK's own transport sends `Referrer-Policy: strict-origin`; envelopes (events,
     // transactions and Replay segments, through the `/monitoring` tunnel) carry no Referer at all.
     transportOptions: { fetchOptions: { referrerPolicy: "no-referrer" } },
+    // Containment (review MINOR-1): the tunnel is set here, not by withSentryConfig's `tunnelRoute` (which also
+    // registered external rewrites). app/monitoring/route.ts forwards the envelope body with Content-Type only.
+    tunnel: "/monitoring",
     // Structural hardening: the transmission boundary. Every envelope (events, transactions, spans, Replay segments,
     // logs) is URL-sanitized immediately before the fetch transport serializes it (lib/privacy/sentryEnvelopeScrub.ts).
     transport: (transportOptions: Parameters<typeof Sentry.makeFetchTransport>[0]): FetchTransport => {

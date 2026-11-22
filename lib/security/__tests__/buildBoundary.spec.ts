@@ -196,6 +196,14 @@ describe("Layer B checker on synthetic build directories (fails closed)", () => 
   it("classifies exactly the resource-less shapes seen in the real Next 14 build", () => {
     expect(classifyResourceless({ type: "NormalModule", loaders: ["next:next-app-loader"] })).toBeNull();
     expect(classifyResourceless({ type: "CompatGetDefaultExportRuntimeModule", moduleType: "runtime" })).toBeNull();
+    // Next 14's ignored client rewrite resolver (app with no rewrites): exactly that id under this checkout's node_modules.
+    const ignored = `ignored|${join(REPO, "node_modules/next/dist/shared/lib/router")}|./utils/resolve-rewrites`;
+    expect(classifyResourceless({ type: "RawModule", id: ignored })).toBeNull();
+    // Any other RawModule still fails closed (control): another module, another root, a lookalike path.
+    expect(classifyResourceless({ type: "RawModule", id: `ignored|${join(REPO, "node_modules/next/dist/shared/lib/router")}|./utils/other` })).toMatch(/unrecognised RawModule/);
+    expect(classifyResourceless({ type: "RawModule", id: "ignored|/tmp/evil/node_modules/next/dist/shared/lib/router|./utils/resolve-rewrites" })).toMatch(/unrecognised RawModule/);
+    expect(classifyResourceless({ type: "RawModule", id: "module.exports = require('fs')" })).toMatch(/unrecognised RawModule/);
+    expect(classifyResourceless({ type: "RawModule" })).toMatch(/unrecognised RawModule/);
     expect(classifyResourceless({ type: "ContextModule", context: "node_modules/require-in-the-middle" })).toBeNull();
     expect(classifyResourceless({ type: "NormalModule", loaders: [] })).toMatch(/no loader/);
     expect(classifyResourceless({ type: "RawModule" })).toMatch(/unrecognised/);

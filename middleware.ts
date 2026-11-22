@@ -16,6 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { classifyTelemetryProxyPath } from "@/lib/telemetry/analyticsProxy";
 
 /**
  * Structural telemetry hardening (GHSA-655j-5f43-92pw follow-up): `/ingest/*` is a reverse proxy to PostHog
@@ -39,6 +40,11 @@ export function isTelemetryProxyPath(pathname: string): boolean {
 }
 
 export function middleware(request: NextRequest) {
+  // Containment (PR #335 Production finding): any case, encoding or slash VARIANT of /ingest or /monitoring is
+  // refused here, before routing can reach a proxy. Only the exact canonical spelling continues.
+  if (classifyTelemetryProxyPath(request.nextUrl.pathname) === "variant") {
+    return new NextResponse(null, { status: 404 });
+  }
   if (isTelemetryProxyPath(request.nextUrl.pathname)) {
     return NextResponse.next({ request: { headers: stripProxyCredentials(request.headers) } });
   }
