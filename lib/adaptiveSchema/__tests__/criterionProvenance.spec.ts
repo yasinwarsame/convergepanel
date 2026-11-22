@@ -228,6 +228,10 @@ describe("N3 — a number is never matched as a fragment of a larger numeric exp
     ["to-range", "10 years", "5 to 10 years"],
     ["ratio", "5 users", "3 of 5 users"],
     ["trailing range", "5", "5 to 10"],
+    // A different separator is a different numeric expression ("2·5" may be a product, "2٫5" a decimal): never equal.
+    ["different decimal separator", "2\u066b5 years", "in 2\u00b75 years"],
+    ["minus vs hyphen range", "2\u22125 years", "within 2-5 years"],
+    ["fraction slash vs slash", "1\u20442 year", "within 1/2 year"],
   ])("%s", (_l, label, request) => model(label, request));
   it.each([
     ["Arabic decimal whole", "2\u066b5 years", "payback in 2\u066b5 years"],
