@@ -159,7 +159,7 @@ export interface DerivedCriteriaProvenanceDisclosure {
 }
 
 export const DERIVED_DISCLOSURE_NOTE =
-  "Derived when this export was rendered; not part of the historical record. recordedSource is the value stored at the time (a model self-report on results without a provenance marker); derivedProvenance is how ConvergePanel presents it now. Original request provenance could not be independently established for criteria marked unverified_legacy.";
+  "Derived when this export was rendered; not part of the historical record. recordedSource is the value stored at the time (a model self-report on results without a provenance marker); derivedProvenance is how it is presented now. Original request provenance could not be independently established for criteria marked unverified_legacy.";
 
 export function deriveCriteriaProvenanceDisclosure(schemaId: string, result: unknown, receipt: { basis?: unknown } | undefined | null): DerivedCriteriaProvenanceDisclosure | undefined {
   if (schemaId !== "decision_support" || !result || typeof result !== "object") return undefined;
