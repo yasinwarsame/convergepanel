@@ -54,8 +54,10 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/gatePresentation.ts": "512a9d51e95feb8982e60a93832cdac94eee1d9f",
   "lib/adaptiveSchema/trustSummary.ts": "dc6ea9e337a8ae9851559f6d035fc7664422526e",
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
-  "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
+  // ITEM6A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 80e8678d497d7f41a3d7bee48026832f0ec14736 → fa50830d9a6a73124d7a68daf75c7e94eec01ef0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "fa50830d9a6a73124d7a68daf75c7e94eec01ef0",
+  // ITEM6A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: d62e84cffefc0a1c7abfb0e42df75ab0f35cf208 → 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b",
   // Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18, review B2): ONLY nine client
   // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
   // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no render, report or
@@ -252,7 +254,8 @@ const WIDENED_BY_INC1: Record<string, string> = {
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "68300e783c036853985142d9127713a0a68ed21a",
+  // ITEM6A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 68300e783c036853985142d9127713a0a68ed21a → 509fbeec467c41948591baa32923980b3fa4382b. Item 6A (owner-authorized 2026-11-22): that spec re-pins decisionSupportAlignment.ts, decisionReceiptBuilder.ts and DecisionSupportView.tsx for the authoritative criterion-provenance change (comments ITEM6A-REPIN inside it); no other change to it.
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "509fbeec467c41948591baa32923980b3fa4382b",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };

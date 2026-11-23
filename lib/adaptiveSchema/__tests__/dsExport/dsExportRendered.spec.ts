@@ -24,6 +24,7 @@
  * are specific to the capture runtime (CI runs Node 24, zlib 1.3.2.1); record content is checked below and the PDF
  * hashes are the golden of that runtime.
  */
+import { LEGACY_INFERRED_CRITERIA_LIMITATION, UNESTABLISHED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
@@ -48,6 +49,8 @@ type Suite = {
   variants: Record<string, Digest>;
   created: Record<string, Digest>;
   redownload: Record<string, Digest>;
+  item6aReverted: { base: Record<string, { from: string; to: string }[]>; head: Record<string, { from: string; to: string }[]> };
+  item6aCreated: Record<string, Digest>;
   canaryViolations: number;
 };
 type Golden = { fingerprintId: string; base: Record<string, string>; versionOne: Record<string, string> };
@@ -112,9 +115,21 @@ describe("unchanged-main renderer and runtime", () => {
     // per-slot recorded outcome / D-5 facts and the version marker — into every record it builds. The 413e14b records
     // were frozen at version 1, so the comparison reads the identity facts (readFrozenRunProvenance, the JSON export's
     // projection) and separately requires every BASE record to carry the version-2 fields.
+    // Item 6A controlled exception (owner-authorized, 2026-11-22): a freshly aggregated Decision Support result carries
+    // the provenance-generation marker criteriaProvenance "request_text_v1", absent from the 413e14b records. Only that
+    // key, only with that exact value, only on a DS result object (has `criteria`), is removed before comparing.
+    const withoutItem6aMarker = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(withoutItem6aMarker);
+      if (v && typeof v === "object") {
+        const o = v as Record<string, unknown>;
+        const isMarkedDsResult = Array.isArray(o.criteria) && o.criteriaProvenance === "request_text_v1";
+        return Object.fromEntries(Object.entries(o).filter(([k]) => !(isMarkedDsResult && k === "criteriaProvenance")).map(([k, x]) => [k, withoutItem6aMarker(x)]));
+      }
+      return v;
+    };
     const strip = (r: Record<string, unknown>) => {
       const snapshot = r.reportSnapshot as Record<string, unknown>;
-      return { ...r, exportMetadata: { ...(r.exportMetadata as object), fileHash: null }, reportSnapshot: { ...snapshot, ...("runProvenance" in snapshot ? { runProvenance: readFrozenRunProvenance(snapshot.runProvenance) } : {}) } };
+      return withoutItem6aMarker({ ...r, exportMetadata: { ...(r.exportMetadata as object), fileHash: null }, reportSnapshot: { ...snapshot, ...("runProvenance" in snapshot ? { runProvenance: readFrozenRunProvenance(snapshot.runProvenance) } : {}) } });
     };
     const common = Object.keys(OLD_RECORDS);
     expect(common.length).toBe(105);
@@ -314,6 +329,56 @@ describe("new exports", () => {
       if (d.format === "docx") {
         expect(Object.keys(d.parts ?? {})).toEqual(expect.arrayContaining(["[Content_Types].xml", "word/document.xml", "docProps/core.xml"]));
         expect((d.paragraphs ?? []).length).toBeGreaterThan(10);
+      }
+    }
+  });
+});
+
+describe("Item 6A controlled exception: quoted Receipt labels (owner Option A, 2026-11-23)", () => {
+  // The suite reverts ONLY the Item 6A criterion-label quoting (exact inverse, item6aReceiptFormat.ts) on records it
+  // compares with historical evidence and goldens. These tests pin that the exception is exactly that, and that the
+  // real new-format exports render cleanly.
+  const sides = () => [suite.item6aReverted.base, suite.item6aReverted.head];
+  it("only Decision Support records, only untagged criterion lines, assessment lines and the neutral limitation, each the exact new form of its historical line", () => {
+    for (const side of sides()) {
+      expect(Object.keys(side).length).toBeGreaterThan(0);
+      for (const [k, lines] of Object.entries(side)) {
+        expect([k, k.startsWith("ds.")]).toEqual([k, true]);
+        for (const { from, to } of lines) {
+          const criterion = /^Criterion: "(.*)"$/s.exec(from);
+          const assessment = /^"(.*?)" × "(.*?)": (.*)$/s.exec(from);
+          if (criterion) expect(to).toBe(`Criterion: ${criterion[1]}`);
+          else if (from === UNESTABLISHED_CRITERIA_LIMITATION) expect(to).toBe(LEGACY_INFERRED_CRITERIA_LIMITATION);
+          else expect([from, assessment && to === `${assessment[1]} × ${assessment[2]}: ${assessment[3]}`]).toEqual([from, true]);
+          expect(from.startsWith("Criterion (")).toBe(false);
+        }
+      }
+    }
+  });
+  it("base and head revert the same lines (the builder is shared; only the renderer differs)", () => {
+    expect(suite.item6aReverted.base).toEqual(suite.item6aReverted.head);
+  });
+  it("every DS record with criteria is covered (the new format is really written), and nothing else differs from history", () => {
+    const withCriteria = Object.keys(OLD_RECORDS).filter((k) => k.startsWith("ds.") && ((OLD_RECORDS[k].reportSnapshot as any)?.milestone2?.decisionReceipt?.basis ?? []).some((l: string) => l.startsWith("Criterion: ")));
+    expect(withCriteria.length).toBeGreaterThan(0);
+    for (const k of withCriteria) expect([k, (suite.item6aReverted.base[k] ?? []).length > 0]).toEqual([k, true]);
+  });
+  it("the real new-format DS PDFs have no layout violation and show the quoted labels; DOCX paragraphs carry them verbatim", () => {
+    const keys = Object.keys(suite.item6aCreated);
+    expect(keys.filter((k) => k.endsWith(".pdf")).length).toBe(Object.keys(suite.created).filter((k) => k.startsWith("ds.") && k.endsWith(".pdf")).length);
+    for (const k of keys) {
+      const d = suite.item6aCreated[k];
+      // Receipt lines must appear in the real render; the neutral limitation also lives in result meta, which a record
+      // without a Receipt does not render, so it is checked by its absence of the earlier wording instead.
+      const quoted = (suite.item6aReverted.head[k] ?? []).map((x) => x.from).filter((l) => l !== UNESTABLISHED_CRITERIA_LIMITATION);
+      if (d.format === "pdf") {
+        expect({ k, v: d.layoutViolations }).toEqual({ k, v: [] });
+        const flat = (d.text ?? "").replace(/\s+/g, " ");
+        expect([k, flat.includes(LEGACY_INFERRED_CRITERIA_LIMITATION)]).toEqual([k, false]);
+        for (const line of quoted) expect([k, flat.includes(line.replace(/\s+/g, " "))]).toEqual([k, true]);
+      } else {
+        const paragraphs = (d.paragraphs ?? []) as unknown[];
+        for (const line of quoted) expect([k, paragraphs.some((p) => JSON.stringify(p).includes(JSON.stringify(line).slice(1, -1)))]).toEqual([k, true]);
       }
     }
   });

@@ -27,6 +27,7 @@
 import "server-only";
 import { PersistedAdaptiveOutputV1 } from "./persistedOutput";
 import { AdaptiveDecisionReceipt } from "./governanceRecord";
+import { escapeReceiptLineText, hasUnverifiedLegacyCriteria, LEGACY_PROVENANCE_LIMITATION, quoteReceiptLabel, readCriterionProvenance, receiptCriterionLine } from "./criterionProvenance";
 import {
   BiasBlindspotAuditResult,
   CausalExplanationResult,
@@ -363,11 +364,19 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
     : `${actionLabel} — ${result.recommendation.rationale}`;
 
   const basis = [
-    ...result.criteria.map((c) => `Criterion: ${c.label}${c.source === "user" ? " (user-provided)" : ""}`),
+    // Item 6A: provenance comes only from the shared accessor (criterionProvenance.ts). A verified criterion is
+    // marked "(stated in request)" (unreachable for new results under the fail-closed fallback: the accessor never
+    // returns "user" for a marked result); a pre-6A self-reported one "(provenance unverified)"; otherwise no tag.
+    // N1 / Option A: the trusted provenance tag sits between "Criterion" and the colon; the model label follows it
+    // verbatim as escaped, quoted data (never rewritten, never a source of provenance).
+    ...result.criteria.map((c) => receiptCriterionLine(c.label, readCriterionProvenance(result, c))),
+    // Assessment lines: the option label and the criterion label are both quoted, escaped data (R4 M1: an unquoted
+    // option label at the start of the line could imitate a trusted criterion line); the assessment text is
+    // line-safety escaped. Every assessment line therefore starts with a system-written quote, never with model text.
     ...result.assessments.map((a) => {
       const option = result.options.find((o) => o.id === a.optionId);
       const criterion = result.criteria.find((c) => c.id === a.criterionId);
-      return `${option?.label ?? a.optionId} × ${criterion?.label ?? a.criterionId}: ${a.assessment}`;
+      return `${quoteReceiptLabel(option?.label ?? a.optionId)} × ${quoteReceiptLabel(criterion ? criterion.label : a.criterionId)}: ${escapeReceiptLineText(a.assessment)}`;
     }),
   ];
 
@@ -382,6 +391,9 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
 
   const limitations = dedupeExact([
     ...(meta.limitations ?? []),
+    // Item 6A legacy disclosure: only on results aggregated before the request-text rule that still carry a
+    // model-reported "user" criterion. New results never add this line.
+    ...(hasUnverifiedLegacyCriteria(result) ? [LEGACY_PROVENANCE_LIMITATION] : []),
     ...result.risks.map((r) => `Risk: ${r.label}${r.mitigation ? ` (mitigation: ${r.mitigation})` : ""}`),
     ...result.recommendation.caveats,
     ...(result.reversibleNextStep ? [`Reversible next step available: ${result.reversibleNextStep}`] : []),

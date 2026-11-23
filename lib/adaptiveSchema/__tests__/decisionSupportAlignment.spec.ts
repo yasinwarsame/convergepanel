@@ -82,17 +82,20 @@ describe("buildDecisionSupportResult — criteria axis and provenance", () => {
     expect(result.criteria[0].coverageCount).toBe(2);
   });
 
-  it("marks a criterion 'user' when any contributing model flagged it as user-provided", () => {
-    const result = buildDecisionSupportResult(
-      perModel([
-        ["chatgpt", fields({ criteria: ["Budget under $10k"], userProvidedCriteria: ["Budget under $10k"] })],
-        ["claude", fields({ criteria: ["Ease of integration"] })],
-      ])
-    );
-    const budget = result.criteria.find((c) => c.label === "Budget under $10k");
-    const ease = result.criteria.find((c) => c.label === "Ease of integration");
-    expect(budget?.source).toBe("user");
-    expect(ease?.source).toBe("model");
+  // Item 6A: this test asserted the retired rule (any model's userProvidedCriteria => "user"). Provenance now comes only
+  // from the user's original request; a model flag alone never promotes a criterion. See criterionProvenance.spec.ts and
+  // item6aProvenanceIntegration.spec.ts for the full contract.
+  it("fail-closed fallback: no criterion is ever marked 'user', even when the request states it and models flag it", () => {
+    const rows = perModel([
+      ["chatgpt", fields({ criteria: ["Budget under $10k"], userProvidedCriteria: ["Budget under $10k"] })],
+      ["claude", fields({ criteria: ["Ease of integration"], userProvidedCriteria: ["Ease of integration"] })],
+    ]);
+    const stated = buildDecisionSupportResult(rows, 2, undefined, "Pick a CRM with a budget under $10k.");
+    expect(stated.criteria.find((c) => c.label === "Budget under $10k")?.source).toBe("model");
+    expect(stated.criteria.find((c) => c.label === "Ease of integration")?.source).toBe("model");
+    const noRequest = buildDecisionSupportResult(rows);
+    expect(noRequest.criteria.map((c) => c.source)).toEqual(["model", "model"]);
+    expect(noRequest.criteriaProvenance).toBe("request_text_v1");
   });
 });
 

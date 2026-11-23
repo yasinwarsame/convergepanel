@@ -294,6 +294,7 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
       sources: [{ url: "https://example.com/internal-report", hostname: "example.com" }],
       sourceBacked: true,
       humanReviewNeeded: true,
+      schemaId: "decision_support", // Item 6A N2: the frozen record's own schemaId (see the projection test below)
     });
   });
 
@@ -363,7 +364,10 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
     expect(result.status).toBe("ok");
   });
 
-  it("does not expose unrelated governanceRecord/internal fields alongside decisionReceipt (exactly the 8 projected fields, nothing else)", async () => {
+  // Item 6A (R2 N2, owner-authorized 2026-11-23): the projection adds ONE field, the frozen record's own system-written
+  // `schemaId` (already exposed by the personal and Team review routes), so the legacy-provenance notice is gated on
+  // trusted structure instead of Receipt text. Still nothing else.
+  it("does not expose unrelated governanceRecord/internal fields alongside decisionReceipt (exactly the 8 projected fields + the record's schemaId, nothing else)", async () => {
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
@@ -373,6 +377,7 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
       "conclusion",
       "humanReviewNeeded",
       "limitations",
+      "schemaId",
       "sourceBacked",
       "sources",
       "uncertainties",

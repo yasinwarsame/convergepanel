@@ -20,6 +20,7 @@ import AdaptiveReviewDecisionForm from "@/components/teamGovernance/AdaptiveRevi
 import { ReviewHistory } from "@/components/adaptive/ReviewGovernanceSection";
 import PersonalReviewStatusBadge from "./PersonalReviewStatusBadge";
 import ReviewerNavigation from "./ReviewerNavigation";
+import LegacyReceiptProvenanceNotice from "@/components/adaptive/LegacyReceiptProvenanceNotice";
 import type { PersonalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
@@ -183,6 +184,29 @@ type LoadedData = {
   dsProvenance: DsProvenanceDisplay | null;
 };
 
+/** Item 6A (F5): the Decision Receipt card exactly as the page renders it, exported so its markup can be rendered in tests. */
+export function PersonalReviewReceiptSection({ schemaId, receipt }: { schemaId: string; receipt: { conclusion: string; basis: string[]; assumptions: string[]; uncertainties: string[]; limitations: string[]; sourceBacked: boolean; humanReviewNeeded: boolean } }) {
+  return (
+    <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
+      <h2 className="text-base font-bold text-cp-text">Decision Receipt</h2>
+      <ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion} className="mt-3 text-sm leading-relaxed text-cp-text" />
+      <ReceiptGroupingDisclosure schemaId={schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
+        <ReceiptSourcesFlag schemaId={schemaId} sourceBacked={receipt.sourceBacked} />
+        <ReceiptReviewFlag schemaId={schemaId} humanReviewNeeded={receipt.humanReviewNeeded} />
+      </div>
+      {/* Item 6A: frozen pre-6A Receipt shown as recorded; read-only notice only. */}
+      <LegacyReceiptProvenanceNotice basis={receipt.basis} schemaId={schemaId} />
+      <div className="mt-4 space-y-3">
+        <CollapsibleList title="Basis" items={receipt.basis} />
+        <CollapsibleList title="Assumptions" items={receipt.assumptions} />
+        <CollapsibleList title="Uncertainties" items={receipt.uncertainties} />
+        <CollapsibleList title="Limitations" items={receipt.limitations} />
+      </div>
+    </section>
+  );
+}
+
 export default function PersonalReviewDetail({ runId }: { runId: string }) {
   const { user, loading: authLoading, authReady } = useAuth();
   const [data, setData] = useState<LoadedData | null>(null);
@@ -321,21 +345,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
             {refreshNotice ? <p className="mt-2 text-xs text-amber-400">{refreshNotice}</p> : null}
           </header>
 
-          <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
-            <h2 className="text-base font-bold text-cp-text">Decision Receipt</h2>
-            <ReceiptConclusion schemaId={data.schemaId} conclusion={data.decisionReceipt.conclusion} className="mt-3 text-sm leading-relaxed text-cp-text" />
-            <ReceiptGroupingDisclosure schemaId={data.schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
-              <ReceiptSourcesFlag schemaId={data.schemaId} sourceBacked={data.decisionReceipt.sourceBacked} />
-              <ReceiptReviewFlag schemaId={data.schemaId} humanReviewNeeded={data.decisionReceipt.humanReviewNeeded} />
-            </div>
-            <div className="mt-4 space-y-3">
-              <CollapsibleList title="Basis" items={data.decisionReceipt.basis} />
-              <CollapsibleList title="Assumptions" items={data.decisionReceipt.assumptions} />
-              <CollapsibleList title="Uncertainties" items={data.decisionReceipt.uncertainties} />
-              <CollapsibleList title="Limitations" items={data.decisionReceipt.limitations} />
-            </div>
-          </section>
+          <PersonalReviewReceiptSection schemaId={data.schemaId} receipt={data.decisionReceipt} />
 
           {data.dsProvenance ? <DsProvenanceSection display={data.dsProvenance} /> : null}
 

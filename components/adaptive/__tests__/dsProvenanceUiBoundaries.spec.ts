@@ -52,13 +52,17 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // (DOCX) at 48f3739. Pinned edit-by-edit by DS_FROZEN_EXPORT_DIFF below.
   // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
   // (exportMilestone2SummaryLevel / slotAgreementWord). Was cdf8bba191f6f24770273c7420d7643db2fd0604.
-  "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
+  // ITEM6A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 80e8678d497d7f41a3d7bee48026832f0ec14736 → fa50830d9a6a73124d7a68daf75c7e94eec01ef0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "fa50830d9a6a73124d7a68daf75c7e94eec01ef0",
   // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
   // (exportMilestone2SummaryLevel / slotAgreementWord). Was 5c2e1b25ce67efc4661db0ab9004c18d1de6298e.
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
+  // ITEM6A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: d62e84cffefc0a1c7abfb0e42df75ab0f35cf208 → 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b",
   "lib/adaptiveSchema/dsLabelWording.ts": "db50c0e7b9cec1ad8416a566b2d08c4ed16fefa1",
-  "lib/adaptiveSchema/decisionSupportAlignment.ts": "b19e49caacc05c52c17a4676a7321dca654d132c",
-  "lib/adaptiveSchema/decisionReceiptBuilder.ts": "e32c42b64d7d1d05f41dee95c548dacc76668640",
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionSupportAlignment.ts: b19e49caacc05c52c17a4676a7321dca654d132c → 21b1090ccdfcd8a6c15b4fa1ca1b8aa8618ed055. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Fail-closed fallback (owner 2026-11-23): new criteria never attributed to the user (source = NEW_RESULT_CRITERION_SOURCE); no other change.
+  "lib/adaptiveSchema/decisionSupportAlignment.ts": "21b1090ccdfcd8a6c15b4fa1ca1b8aa8618ed055",
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionReceiptBuilder.ts: e32c42b64d7d1d05f41dee95c548dacc76668640 → b8537b94e34fca8ad3d7b580b90a1e6dc121fb7f. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion labels written verbatim as escaped, quoted data; assessment lines line-safety escaped; no other change. Fail-closed fallback (owner 2026-11-23): option labels quoted/escaped in assessment lines (R4 M1); no other change.
+  "lib/adaptiveSchema/decisionReceiptBuilder.ts": "b8537b94e34fca8ad3d7b580b90a1e6dc121fb7f",
   "lib/adaptiveSchema/governanceRecordParser.ts": "2a195deca74df74c0f4701743bf1f78033ffc5e2",
   // P0 research-results restoration (owner-approved 2026-11-01): `generic` added to the legacy persisted allowlist
   // and its comment only; no provenance code. Was 9f9ca552d033bcdabe5fcb52862356e5f638e8b5 at 9eca1e3.
@@ -83,7 +87,8 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // 09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367.
   "lib/user/runDocumentToPublicResults.ts": "09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
-  "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",
+  // ITEM6A-REPIN components/adaptive/DecisionSupportView.tsx: e3beb32c1161f42d84222b1633a6bd8b1bb98939 → 8501d85dfd92a798e1bcddd3ce4205e95169b82b. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion label rendered verbatim in a <bdi> (no rewriting); no other change.
+  "components/adaptive/DecisionSupportView.tsx": "8501d85dfd92a798e1bcddd3ce4205e95169b82b",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
   // c16 (review of 48f3739, MAJOR-2): ONLY the consensus field of a run whose slots are not independent executing models
@@ -196,6 +201,12 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/pdf/AdaptiveResearchDocument.tsx": {
     was: "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
     edits: [
+      // Item 6A F2 (owner-authorized frozen-renderer exception, 2026-11-23): ONLY a read-only legacy-provenance notice in the
+      // Milestone-2 Basis card, rendered only for a stored decision_support Receipt without the provenance marker that
+      // carries a retired "(user-provided)" criterion line (receiptHasLegacyUserProvidedCriteria; R2 N2 trusted gating). Every other export renders byte-identically (no fixture carries that suffix).
+      // Protected by item6aExportDisclosure.spec.tsx (rendered PDF text with / without the notice).
+      ["\nimport { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from \"@/lib/adaptiveSchema/criterionProvenance\";", ""],
+      ["\n          {/* Item 6A (F2, owner-authorized frozen-renderer exception): a stored pre-6A Receipt is rendered as recorded; only this read-only notice is added, and only when a basis line carries the retired \"(user-provided)\" suffix. */}\n          {receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? <Text style={[pdfStyles.mutedText, { marginBottom: 6 }]}>{LEGACY_FROZEN_RECEIPT_NOTICE}</Text> : null}", ""],
       ['import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";', 'import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";'],
       ["\n  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.\n  const slotLevel = exportMilestone2SummaryLevel(record);", ""],
       ["{slotLevel ? slotLevel.field : gateLevel ? MARKED_GATE_LEVEL_FIELD", "{gateLevel ? MARKED_GATE_LEVEL_FIELD"],
@@ -214,6 +225,10 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/docx/AdaptiveResearchDocxDocument.ts": {
     was: "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
     edits: [
+      // Item 6A F2 (owner-authorized frozen-renderer exception, 2026-11-23): ONLY a read-only legacy-provenance notice under
+      // the Basis heading, under the same condition as the PDF. Protected by item6aExportDisclosure.spec.tsx.
+      ["\nimport { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from \"@/lib/adaptiveSchema/criterionProvenance\";", ""],
+      ["  // Item 6A (F2, owner-authorized frozen-renderer exception): read-only notice for a stored pre-6A Receipt only.\n  if (r.basis.length > 0) out.push(heading(\"Basis\"), ...(receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? [muted(LEGACY_FROZEN_RECEIPT_NOTICE)] : []), ...bulletList(r.basis));", "  if (r.basis.length > 0) out.push(heading(\"Basis\"), ...bulletList(r.basis));"],
       ['import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";', 'import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";'],
       [
         '  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.\n  const slotLevel = exportMilestone2SummaryLevel(record);\n  if (slotLevel) {\n    return [\n      heading("Report status summary"),\n      ...fieldGrid([\n        ["Models", modelsText || "—"],\n        [slotLevel.field, slotLevel.word],\n        ["Source grounding", SOURCE_GROUNDING_LABELS[snapshot.sourceGroundingLevel]],\n      ]),\n      muted(slotLevel.note),\n    ];\n  }\n',

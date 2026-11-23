@@ -904,7 +904,12 @@ export interface AggregatedDecisionOption {
 export interface AggregatedDecisionCriterion {
   id: string;
   label: string;
-  /** "user" if ANY contributing model flagged this criterion as coming from the user's own question/constraints; "model" otherwise. A simplified two-way read of the recommended type's three-way user/inferred/model provenance — a wire-layer self-report can't reliably distinguish "inferred from context" from "purely model-generated". */
+  /**
+   * Item 6A: on results carrying `criteriaProvenance: "request_text_v1"`, "user" means this criterion's displayed
+   * label occurs as a whole-token phrase in the user's original request (criterionProvenance.ts); anything else is
+   * "model". Model self-reports never set it. On older results (no marker) a "user" value came from a model
+   * self-report and is unverified. Always read through readCriterionProvenance(), never directly.
+   */
   source: "user" | "model";
   coverageCount: number;
   totalModels: number;
@@ -982,6 +987,8 @@ export interface DecisionSupportResult {
   /** Phase 10D.1 — response-level union of every contributing model's own `sources` field, exact-string deduplicated, first-seen order. Plain labels AND URLs both survive here; URL-only filtering for display happens at the decision-receipt/UI boundary, never here. */
   sources: string[];
   totalModels: number;
+  /** Item 6A provenance-generation marker. Present on every result aggregated under the request-text rule; absent on older persisted results, whose criterion provenance is unverified. */
+  criteriaProvenance?: "request_text_v1";
 }
 
 export interface Scenario {

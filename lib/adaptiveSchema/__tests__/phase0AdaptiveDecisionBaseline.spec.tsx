@@ -23,6 +23,7 @@ jest.mock("@/lib/connectors/gemini", () => ({
   callGemini: async () => ({ modelId: "gemini", status: "error", rawText: null, errorMessage: "mocked: no network in harness", latencyMs: 0 }),
 }));
 
+import { toHistoricalReceiptLines, type RevertedLine } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
 import { createHash } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -38,10 +39,19 @@ const GOLDEN = join(__dirname, "fixtures", "phase0AdaptiveDecision.golden.json")
 const GOLDEN_OUT = process.env.PHASE0_GOLDEN_OUT;
 /** Attribution-only presentation (names of the executing models / narrative embedding them) — retained from b894828. */
 const PRESENTATION_ONLY = /^\.synthesisReport\.(unifiedAnswer|executiveSummary)$|^\.synthesisReport\.presentation\..*\.(supporters|disputers)(\.|$)/;
+/**
+ * Item 6A controlled exception (owner-authorized, 2026-11-22): the ONLY new key on a Decision Support result is the
+ * provenance-generation marker `criteriaProvenance: "request_text_v1"` (absent at 35933c8). It is excluded from the
+ * projection only when it carries exactly that value, so the 35933c8 golden is unchanged; its presence is asserted
+ * separately below. A structural old-vs-new diff of all 33 decision_support records (40fdbf5d vs Item 6A) showed this
+ * key as the only differing path.
+ */
+const ITEM6A_MARKER_PATH = ".result.criteriaProvenance";
 function decisionProjection(rec: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const walk = (o: unknown, p: string) => {
     if (PRESENTATION_ONLY.test(p.replace(/\.\d+(?=\.|$)/g, ""))) return;
+    if (p === ITEM6A_MARKER_PATH && o === "request_text_v1") return;
     if (o && typeof o === "object") {
       const entries = Object.entries(o as Record<string, unknown>);
       if (entries.length === 0) out[p] = Array.isArray(o) ? "[]" : "{}";
@@ -303,8 +313,26 @@ it("every family record's decision projection equals 35933c8", async () => {
       }
     }
   }
-  const digests = Object.fromEntries(Object.entries(byId).map(([id, rec]) => [id, digest(rec)]));
+  // Item 6A structural correction (owner Option A, 2026-11-23): a fresh Decision Support Receipt writes criterion labels
+  // as quoted, escaped data (absent at 35933c8). Only that quoting is reverted, by the verified exact inverse
+  // (dsExport/item6aReceiptFormat.ts), before digesting; the scope of the exception is asserted below.
+  const reverted: Record<string, RevertedLine[]> = {};
+  const digests = Object.fromEntries(
+    Object.entries(byId).map(([id, rec]) => {
+      const lines: RevertedLine[] = [];
+      const historical = toHistoricalReceiptLines(rec, lines);
+      if (lines.length) reverted[id] = lines;
+      return [id, digest(historical)];
+    })
+  );
+  expect(Object.keys(reverted).filter((id) => !id.startsWith("decision_support|"))).toEqual([]);
+  for (const lines of Object.values(reverted)) for (const { from } of lines) expect(from.startsWith("Criterion (")).toBe(false);
   expect(Object.keys(digests).length).toBe(594);
+  // Item 6A: every Decision Support record carries the provenance marker (the projection above excludes only it).
+  const dsRecords = Object.entries(byId).filter(([id]) => id.startsWith("decision_support|"));
+  expect(dsRecords.length).toBe(33);
+  if (!GOLDEN_OUT) for (const [, rec] of dsRecords) expect((rec as any).result.criteriaProvenance).toBe("request_text_v1");
+  if (!GOLDEN_OUT) expect(Object.keys(reverted).length).toBeGreaterThan(0);
   if (GOLDEN_OUT) {
     writeFileSync(GOLDEN_OUT, JSON.stringify(digests, null, 1) + "\n");
     return;
