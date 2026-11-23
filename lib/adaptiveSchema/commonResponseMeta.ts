@@ -34,6 +34,8 @@ import {
   QueryType,
   RankedEnumerationResult,
   ResultSchema,
+  StructuredOutputRecordV1,
+  StructuredOutputSlotV1,
 } from "./types";
 import { PersistedAdaptiveSchemaId, SCHEMA_ANSWER_SHAPE } from "./persistedOutput";
 
@@ -311,6 +313,7 @@ export function buildCommonResponseMeta(args: BuildCommonResponseMetaArgs): Comm
   const requiresHumanReview = getAdaptiveHumanReviewSignals(schemaId, classification, schemaResult);
 
   const limitations = getAdaptiveLimitations(schemaId, schemaResult);
+  const structuredOutput = buildStructuredOutputRecord(modelResults, adaptiveResults);
   if (modelsWithUsableOutput < totalModels) {
     const missing = totalModels - modelsWithUsableOutput;
     limitations.unshift(
@@ -344,7 +347,34 @@ export function buildCommonResponseMeta(args: BuildCommonResponseMetaArgs): Comm
     sourceCoverage,
     limitations: Array.from(new Set(limitations)),
     executionStatus,
+    ...(structuredOutput ? { structuredOutput } : {}),
   };
+}
+
+/**
+ * Item 7A: the per-slot completeness record, or undefined when every selected slot produced complete structured output
+ * (nothing unavailable, nothing salvaged, nothing shortened). Slot i is modelResults[i]; its validated result is
+ * adaptiveResults[i] when present (orchestrate.ts maps one to one) — a missing one is "unavailable". Field keys and
+ * counts only.
+ */
+export function buildStructuredOutputRecord(modelResults: ModelResult[], adaptiveResults: AdaptiveModelResult[]): StructuredOutputRecordV1 | undefined {
+  const slots: StructuredOutputSlotV1[] = modelResults.map((m, i) => {
+    const r = adaptiveResults[i];
+    const usable = !!r && r.modelId === m.modelId && r.ok && !!r.data;
+    if (!usable) return { modelId: m.modelId, result: "unavailable" };
+    const invalidFields = r.invalidFields && r.invalidFields.length > 0 ? [...r.invalidFields] : undefined;
+    const truncatedFields = r.truncatedFields && r.truncatedFields.length > 0 ? [...r.truncatedFields] : undefined;
+    const droppedItems = r.droppedItems && Object.keys(r.droppedItems).length > 0 ? { ...r.droppedItems } : undefined;
+    return {
+      modelId: m.modelId,
+      result: invalidFields || droppedItems ? "partial" : "complete",
+      ...(invalidFields ? { invalidFields } : {}),
+      ...(truncatedFields ? { truncatedFields } : {}),
+      ...(droppedItems ? { droppedItems } : {}),
+    };
+  });
+  const degraded = slots.some((s) => s.result !== "complete" || !!s.truncatedFields);
+  return degraded ? { version: 1, slots } : undefined;
 }
 
 /** Distinct models contributing across a set of adaptive results — a small shared helper several call sites need, not schema-specific. */

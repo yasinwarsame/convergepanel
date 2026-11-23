@@ -38,7 +38,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/adaptiveSchema/dsProvenanceViewMin.ts": "fb2f0f5ec09593b8fea01d173aeaba6e1f2b59af",
   "lib/adaptiveSchema/dsProvenanceRouteAdapter.ts": "ac1f027bb128534c75c1270351e03e294b83240f",
   "lib/env.ts": "2b81ae7239ea4fd655b8320d5bf726c778149a20",
-  "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
+  // ITEM7A-REPIN lib/adaptiveSchema/exportSnapshot.ts: 5af930878120bbda7ba49ec40045502416859d19 → 053f7b2c92c5c963e73afb6551d20f8e62a2477d. Item 7A (owner-authorized
+  // 2026-11-23): ONLY a selected model that the run's persisted structured-output record marks unavailable is exported as
+  // ok: false (the existing "(failed)" marker); nothing is inferred without the record; no provenance code.
+  "lib/adaptiveSchema/exportSnapshot.ts": "053f7b2c92c5c963e73afb6551d20f8e62a2477d",
   // Owner order C3 (review of cf74a52, controlled exception): ONLY the unmarked verdict section's headings — when
   // exportPositionSafeReport reports the top claim's supporting slots as not independent executing models
   // (`independence`), the section label is "Where models agree / disagree (counted by executing model)" / "(model
@@ -88,7 +91,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/user/runDocumentToPublicResults.ts": "09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
   // ITEM6A-REPIN components/adaptive/DecisionSupportView.tsx: e3beb32c1161f42d84222b1633a6bd8b1bb98939 → 8501d85dfd92a798e1bcddd3ce4205e95169b82b. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion label rendered verbatim in a <bdi> (no rewriting); no other change.
-  "components/adaptive/DecisionSupportView.tsx": "8501d85dfd92a798e1bcddd3ce4205e95169b82b",
+  // ITEM7A-REPIN components/adaptive/DecisionSupportView.tsx: 8501d85dfd92a798e1bcddd3ce4205e95169b82b → f2ac77fc11c9743ac0ea8a35daf4a22581f73b0a. Item 7A
+  // (owner-authorized 2026-11-23): ONLY the Panel detail summary states "N models selected · M usable structured results" and
+  // names unavailable models when a disclosure is passed; without one the rendered tree is unchanged; no provenance code.
+  "components/adaptive/DecisionSupportView.tsx": "f2ac77fc11c9743ac0ea8a35daf4a22581f73b0a",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
   // c16 (review of 48f3739, MAJOR-2): ONLY the consensus field of a run whose slots are not independent executing models

@@ -24,6 +24,7 @@
  * are specific to the capture runtime (CI runs Node 24, zlib 1.3.2.1); record content is checked below and the PDF
  * hashes are the golden of that runtime.
  */
+import { countItem7aRecords, withoutItem7aRecord, type Item7aRemoval } from "../item7aHistoricalCompat";
 import { LEGACY_INFERRED_CRITERIA_LIMITATION, UNESTABLISHED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
@@ -136,7 +137,13 @@ describe("unchanged-main renderer and runtime", () => {
     for (const k of common) {
       const frozen = (suite.baseRecords[k].reportSnapshot as Record<string, unknown>).runProvenance as Record<string, unknown> | undefined;
       if ((OLD_RECORDS[k].reportSnapshot as Record<string, unknown>).runProvenance) expect([k, frozen?.provenanceVersion]).toEqual([k, 2]);
-      expect(strip(suite.baseRecords[k])).toEqual(strip(OLD_RECORDS[k]));
+      // Item 7A (owner-authorized 2026-11-23): only the per-slot structured-output record of a run with a shortfall is
+      // removed from the fresh side (absent historically); its scope is asserted.
+      const item7a: Item7aRemoval[] = [];
+      const freshRecord = withoutItem7aRecord(suite.baseRecords[k], item7a);
+      expect([k, item7a.filter((r) => r.kind === "meta").length]).toEqual([k, countItem7aRecords(suite.baseRecords[k])]);
+      expect([k, countItem7aRecords(OLD_RECORDS[k])]).toEqual([k, 0]); // historical evidence never holds the record
+      expect(strip(freshRecord)).toEqual(strip(OLD_RECORDS[k]));
     }
     expect(Object.keys(suite.baseRecords).filter((k) => !OLD_RECORDS[k]).sort()).toEqual(["pdf", "docx", "json"].map((f) => `ds.uncontested_choose_option.unreviewed_in_queue.synthetic_identities.${f}`).sort());
   });

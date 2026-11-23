@@ -9,6 +9,7 @@
  */
 jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, Timestamp: class Timestamp {} }));
 
+import { countItem7aRecords, withoutItem7aRecord, type Item7aRemoval } from "../item7aHistoricalCompat";
 import historicalRecords from "./__fixtures__/historicalRecords.json";
 import { asStored, exportCases, exportRecord, FORMATS, dsStates, dsOutput } from "./dsExportFixtures";
 import { ADDED_AFTER_CAPTURE } from "./dsExportHistory";
@@ -122,7 +123,12 @@ describe("marker assignment (buildExportSnapshot)", () => {
         // Item 6A structural correction (owner Option A, 2026-11-23): criterion labels in a fresh Receipt are quoted,
         // escaped data; only that quoting is reverted, by the verified exact inverse, and only on DS records.
         const reverted: RevertedLine[] = [];
-        const fresh = toHistoricalReceiptLines(withoutItem6aMarker({ ...rest, runProvenance: readFrozenRunProvenance(rest.runProvenance) }), reverted);
+        // Item 7A (owner-authorized 2026-11-23): a fresh run with a structured-output shortfall also records the per-slot
+        // record in its meta (absent historically); only that record is removed, and only where the counts show a shortfall.
+        const item7a: Item7aRemoval[] = [];
+        const fresh = withoutItem7aRecord(toHistoricalReceiptLines(withoutItem6aMarker({ ...rest, runProvenance: readFrozenRunProvenance(rest.runProvenance) }), reverted), item7a);
+        // Scope: every record present is a valid one and is removed exactly once; nothing else is touched.
+        expect([c.name, item7a.filter((r) => r.kind === "meta").length]).toEqual([c.name, countItem7aRecords(rest)]);
         expect([c.name, reverted.length > 0 && c.schemaId !== "decision_support"]).toEqual([c.name, false]);
         for (const { from } of reverted) expect(from.startsWith("Criterion (")).toBe(false);
         expect(fresh).toEqual(historical.reportSnapshot);

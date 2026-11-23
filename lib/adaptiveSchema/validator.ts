@@ -271,10 +271,12 @@ function coerceEnumDrift(
 function salvageFields(
   fields: FieldSpec[],
   raw: Record<string, unknown>
-): { data: Record<string, any>; invalidFields: string[]; issues: string[] } {
+): { data: Record<string, any>; invalidFields: string[]; issues: string[]; droppedItems: Record<string, number> } {
   const data: Record<string, any> = {};
   const invalidFields: string[] = [];
   const issues: string[] = [];
+  // Item 7A: per KEPT array field, how many items failed validation and were discarded (counts only, never content).
+  const droppedItems: Record<string, number> = {};
 
   for (const field of fields) {
     const value = raw[field.key];
@@ -311,12 +313,13 @@ function salvageFields(
     // only mark the field invalid when it had items and NONE of them survived.
     if (value.length === 0 || validItems.length > 0) {
       data[field.key] = validItems;
+      if (validItems.length < value.length) droppedItems[field.key] = value.length - validItems.length;
     } else {
       invalidFields.push(field.key);
     }
   }
 
-  return { data, invalidFields, issues };
+  return { data, invalidFields, issues, droppedItems };
 }
 
 /**
@@ -378,6 +381,7 @@ export function validateAdaptiveResponse(
 
   let data: Record<string, any>;
   let invalidFields: string[] = [];
+  let droppedItems: Record<string, number> = {};
 
   if (wholeResult.success) {
     data = { ...wholeResult.data };
@@ -388,6 +392,7 @@ export function validateAdaptiveResponse(
     const salvaged = salvageFields(schema.fields, patched);
     data = salvaged.data;
     invalidFields = salvaged.invalidFields;
+    droppedItems = salvaged.droppedItems;
 
     if (Object.keys(data).length === 0) {
       warn("[adaptiveSchema] Response failed schema validation", {
@@ -574,6 +579,7 @@ export function validateAdaptiveResponse(
     data,
     ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
+    ...(Object.keys(droppedItems).length > 0 ? { droppedItems } : {}),
     ...(coercions.length > 0 ? { coercions } : {}),
   };
 }

@@ -71,7 +71,10 @@ const UNCHANGED: [string, string][] = [
  */
 const CHANGED_IMPORTS: Record<string, string[]> = {
   "lib/adaptiveSchema/researchExport.ts": ["../types", "./exportGeneratedBy", "./governanceRecord", "./persistedOutput", "./reportStatus", "./reportSummary", "./types"],
-  "lib/adaptiveSchema/exportSnapshot.ts": ["../types", "./decisionReceiptBuilder", "./dsLabelWording", "./exportRunProvenance", "./gatePresentation", "./governanceRecord", "./persistedOutput", "./reportStatus", "./reportSummary", "./researchExport", "server-only"],
+  // Item 7A (owner-authorized 2026-11-23): + "./structuredOutputDisclosure" (its strict, pure record reader only), which
+  // itself imports only "./types" (pinned below).
+  "lib/adaptiveSchema/exportSnapshot.ts": ["../types", "./decisionReceiptBuilder", "./dsLabelWording", "./exportRunProvenance", "./gatePresentation", "./governanceRecord", "./persistedOutput", "./reportStatus", "./reportSummary", "./researchExport", "./structuredOutputDisclosure", "server-only"],
+  "lib/adaptiveSchema/structuredOutputDisclosure.ts": ["./types"],
   "lib/adaptiveSchema/dsLabelWording.ts": ["./types"],
   // Item 6A F2 (owner-authorized 2026-11-23): + "@/lib/adaptiveSchema/criterionProvenance" for the read-only legacy-provenance notice only.
   "lib/pdf/AdaptiveResearchDocument.tsx": ["./theme", "@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/criterionProvenance", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/types", "@react-pdf/renderer", "react"],

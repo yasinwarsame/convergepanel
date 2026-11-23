@@ -1,0 +1,31 @@
+{
+ "note": "Item 7A (owner-authorized 2026-11-23): the only pages that change are the ones whose run records a structured-output shortfall (all_models_failed: 3 selected, 0 usable). They now show the structured-output notice and name the unavailable slots (a substituted slot keeps its executing-model label). Captured on this branch; every other page stays at its earlier pin.",
+ "notice": "3 models selected · 0 usable structured results",
+ "cases": {
+  "p1.owner|all_models_failed|awc": {
+   "domSha256": "505829747b4564ec93a536f1cb816fe9f80d1ade7196c06ecf4aed5fae56ac98",
+   "labelCount": 2,
+   "executingChipCount": 2
+  },
+  "p1.rev.content|all_models_failed|awc": {
+   "domSha256": "505829747b4564ec93a536f1cb816fe9f80d1ade7196c06ecf4aed5fae56ac98",
+   "labelCount": 2,
+   "executingChipCount": 2
+  },
+  "p1.rev.reduced|all_models_failed|awc": {
+   "domSha256": "b0b6d041a411360c13dfc5e1ca06a491746488e3a62d87793b28b68c1899b9aa",
+   "labelCount": 2,
+   "executingChipCount": 2
+  },
+  "w1.member|all_models_failed|awc": {
+   "domSha256": "6a9bb24700ae53bd59af249681b882eb0867494c575bfb0a0a74fe9eff73f358",
+   "labelCount": 2,
+   "executingChipCount": 2
+  },
+  "w1.reviewer|all_models_failed|awc": {
+   "domSha256": "6a9bb24700ae53bd59af249681b882eb0867494c575bfb0a0a74fe9eff73f358",
+   "labelCount": 2,
+   "executingChipCount": 2
+  }
+ }
+}
