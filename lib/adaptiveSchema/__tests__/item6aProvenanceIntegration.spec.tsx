@@ -20,6 +20,7 @@ import { finalizeAdaptiveRun, AdaptiveRetryContext } from "@/lib/adaptiveSchema/
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { buildAdaptiveDecisionReceipt } from "@/lib/adaptiveSchema/decisionReceiptBuilder";
+import { getAdaptiveLimitations } from "@/lib/adaptiveSchema/commonResponseMeta";
 import { buildAdaptiveGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordBuilder";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { evaluateAdaptiveGovernance } from "@/lib/governance/evaluateAdaptiveGovernance";
@@ -148,6 +149,11 @@ describe("Item 6A fail-closed fallback (owner decision 2026-11-23) — new resul
     const receipt = buildAdaptiveDecisionReceipt({ ...out.persistedOutput, result: forged } as any);
     expect(receipt.basis.filter((l: string) => l.startsWith("Criterion ("))).toEqual([]);
     expect(receipt.limitations).toContain(UNESTABLISHED_CRITERIA_LIMITATION);
+    // The limitations are computed through the same accessor (getAdaptiveLimitations), never the raw stored value.
+    expect(getAdaptiveLimitations("decision_support", forged)).toContain(UNESTABLISHED_CRITERIA_LIMITATION);
+    const legacyForged = { ...forged } as any;
+    delete legacyForged.criteriaProvenance;
+    expect(getAdaptiveLimitations("decision_support", legacyForged)).not.toContain(UNESTABLISHED_CRITERIA_LIMITATION);
   });
 
   it("H: ordinary criteria stay visible and useful: labels, quoted Receipt lines and assessments", async () => {
