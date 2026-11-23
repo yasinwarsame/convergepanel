@@ -368,10 +368,13 @@ describe("Item 6A controlled exception: quoted Receipt labels (owner Option A, 2
     expect(keys.filter((k) => k.endsWith(".pdf")).length).toBe(Object.keys(suite.created).filter((k) => k.startsWith("ds.") && k.endsWith(".pdf")).length);
     for (const k of keys) {
       const d = suite.item6aCreated[k];
-      const quoted = (suite.item6aReverted.head[k] ?? []).map((x) => x.from);
+      // Receipt lines must appear in the real render; the neutral limitation also lives in result meta, which a record
+      // without a Receipt does not render, so it is checked by its absence of the earlier wording instead.
+      const quoted = (suite.item6aReverted.head[k] ?? []).map((x) => x.from).filter((l) => l !== UNESTABLISHED_CRITERIA_LIMITATION);
       if (d.format === "pdf") {
         expect({ k, v: d.layoutViolations }).toEqual({ k, v: [] });
         const flat = (d.text ?? "").replace(/\s+/g, " ");
+        expect([k, flat.includes(LEGACY_INFERRED_CRITERIA_LIMITATION)]).toEqual([k, false]);
         for (const line of quoted) expect([k, flat.includes(line.replace(/\s+/g, " "))]).toEqual([k, true]);
       } else {
         const paragraphs = (d.paragraphs ?? []) as unknown[];
