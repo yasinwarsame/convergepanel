@@ -2,6 +2,14 @@
  * Item 6A — authoritative user-criterion provenance (owner rule, 2026-10-14; structural correction, owner Option A,
  * 2026-11-23).
  *
+ * FAIL-CLOSED FALLBACK (owner decision 2026-11-23, after independent review R4 was NOT_CLEAN): free-text matching
+ * cannot establish user provenance reliably enough, so NEW results attribute no criterion to the user. Every newly
+ * aggregated criterion stores the schema's non-user value (NEW_RESULT_CRITERION_SOURCE), readCriterionProvenance()
+ * never returns "user" for a marked result whatever is stored, and every surface presents the criterion neutrally
+ * ("Criterion", no origin claim; the limitation says attribution "has not been established"). The matching rule below
+ * (classifyCriterionProvenance) is retained for compatibility and documentation only and is NOT called by production
+ * code. Historical (unmarked) results and frozen Receipts keep their unverified / legacy disclosures unchanged.
+ *
  * The ONLY authority for "this criterion came from the user" is the user's original submitted request QUESTION (never
  * the context field, owner decision F8). Model output is never authoritative for user-origin metadata: the
  * decision_support schema's `userProvidedCriteria` field is a model self-report and is deliberately ignored here.
@@ -175,9 +183,23 @@ export function readCriterionProvenance(
   result: Pick<DecisionSupportResult, "criteriaProvenance">,
   criterion: Pick<AggregatedDecisionCriterion, "source">
 ): CriterionProvenance {
-  if (hasAuthoritativeCriteriaProvenance(result)) return criterion.source === "user" ? "user" : "model";
+  // Fail-closed fallback (owner decision 2026-11-23): a marked result never reads as "user", whatever value is
+  // stored, so no surface can reconstruct a positive attribution. Unmarked (legacy) "user" values stay unverified.
+  if (hasAuthoritativeCriteriaProvenance(result)) return "model";
   return criterion.source === "user" ? "unverified_legacy" : "model";
 }
+
+/**
+ * The criterion source every newly aggregated result stores (fail-closed fallback): the schema's non-user value. It
+ * records only that user attribution was NOT established; presentation is neutral ("Criterion"), never "model-written".
+ */
+export const NEW_RESULT_CRITERION_SOURCE = "model" as const;
+
+/** Limitation shown for new (marked) results instead of the earlier "inferred rather than user-provided" wording, which claimed an origin the system cannot establish. */
+export const UNESTABLISHED_CRITERIA_LIMITATION =
+  "Criteria are system-identified; whether any of them was stated in the request has not been established.";
+/** The earlier limitation, still used for unmarked historical results so their presentation is unchanged. */
+export const LEGACY_INFERRED_CRITERIA_LIMITATION = "The recommendation depends on inferred rather than user-provided criteria.";
 
 /** True when a legacy result carries at least one model-reported "user" criterion that is now shown as unverified. */
 export function hasUnverifiedLegacyCriteria(result: Pick<DecisionSupportResult, "criteriaProvenance" | "criteria">): boolean {

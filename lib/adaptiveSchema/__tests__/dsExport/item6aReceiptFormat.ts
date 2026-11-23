@@ -14,7 +14,7 @@
  *    left unchanged (and the comparison fails visibly);
  *  - every reverted line is reported, so specs assert the exception's exact scope.
  */
-import { escapeReceiptLineText, quoteReceiptLabel } from "@/lib/adaptiveSchema/criterionProvenance";
+import { escapeReceiptLineText, LEGACY_INFERRED_CRITERIA_LIMITATION, quoteReceiptLabel, UNESTABLISHED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 
 /** Inverse of escapeReceiptText for the body of a quoted label; null when the body is not a valid escape output. */
 export function unescapeQuotedLabel(body: string): string | null {
@@ -47,12 +47,16 @@ export function historicalReceiptLine(line: string): string {
     const label = unescapeQuotedLabel(criterion[1]);
     return label !== null ? `Criterion: ${label}` : line;
   }
-  const assessment = /^(.*?) × "((?:[^"\\]|\\.)*)": (.*)$/s.exec(line);
+  // Fail-closed fallback: the option label is quoted too ('"Option" × "Criterion": text').
+  const assessment = /^"((?:[^"\\]|\\.)*)" × "((?:[^"\\]|\\.)*)": (.*)$/s.exec(line);
   if (assessment) {
-    const [, option, body, text] = assessment;
+    const [, optionBody, body, text] = assessment;
+    const option = unescapeQuotedLabel(optionBody);
     const label = unescapeQuotedLabel(body);
-    if (label !== null && lineTextUnchanged(option) && lineTextUnchanged(text) && `${option} × ${quoteReceiptLabel(label)}: ${text}` === line) return `${option} × ${label}: ${text}`;
+    if (option !== null && label !== null && lineTextUnchanged(option) && lineTextUnchanged(text) && `${quoteReceiptLabel(option)} × ${quoteReceiptLabel(label)}: ${text}` === line) return `${option} × ${label}: ${text}`;
   }
+  // Fail-closed fallback: the neutral limitation that replaced the earlier origin claim, by exact match only.
+  if (line === UNESTABLISHED_CRITERIA_LIMITATION) return LEGACY_INFERRED_CRITERIA_LIMITATION;
   return line;
 }
 
@@ -68,12 +72,15 @@ export function toHistoricalReceiptLines<T>(value: T, reverted: RevertedLine[] =
     if (Array.isArray(v)) { for (const x of v) visit(x, apply); return; }
     if (!v || typeof v !== "object") return;
     const o = v as Record<string, unknown>;
-    if (typeof o.conclusion === "string" && Array.isArray(o.basis)) {
-      o.basis.forEach((line, i) => {
+    const lists: unknown[][] = [];
+    if (typeof o.conclusion === "string" && Array.isArray(o.basis)) lists.push(o.basis);
+    if (Array.isArray(o.limitations)) lists.push(o.limitations); // receipt and meta limitations (neutral wording only)
+    for (const list of lists) {
+      list.forEach((line, i) => {
         if (typeof line !== "string") return;
-        const to = historicalReceiptLine(line);
+        const to = list === o.limitations ? (line === UNESTABLISHED_CRITERIA_LIMITATION ? LEGACY_INFERRED_CRITERIA_LIMITATION : line) : historicalReceiptLine(line);
         if (to === line) return;
-        if (apply) (o.basis as unknown[])[i] = to;
+        if (apply) list[i] = to;
         else found.push({ from: line, to });
       });
     }

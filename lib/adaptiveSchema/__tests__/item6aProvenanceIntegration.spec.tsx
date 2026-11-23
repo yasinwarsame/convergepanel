@@ -24,7 +24,7 @@ import { buildAdaptiveGovernanceRecord } from "@/lib/adaptiveSchema/governanceRe
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { evaluateAdaptiveGovernance } from "@/lib/governance/evaluateAdaptiveGovernance";
 import { routeAdaptiveTeamReview } from "@/lib/governance/adaptiveTeamReview";
-import { LEGACY_FROZEN_RECEIPT_NOTICE, LEGACY_PROVENANCE_LIMITATION, LEGACY_RESULT_NOTICE } from "@/lib/adaptiveSchema/criterionProvenance";
+import { LEGACY_FROZEN_RECEIPT_NOTICE, LEGACY_INFERRED_CRITERIA_LIMITATION, LEGACY_PROVENANCE_LIMITATION, LEGACY_RESULT_NOTICE, readCriterionProvenance, UNESTABLISHED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 import DecisionSupportView from "@/components/adaptive/DecisionSupportView";
 import DecisionReceiptSection from "@/components/workspace/DecisionReceiptSection";
 import LegacyReceiptProvenanceNotice from "@/components/adaptive/LegacyReceiptProvenanceNotice";
@@ -85,102 +85,101 @@ beforeEach(() => {
   for (const k of Object.keys(connectorMap)) delete connectorMap[k];
 });
 
-describe("Item 6A — authority of the original request", () => {
-  it("a model cannot self-promote: every model flags both criteria, the request states neither", async () => {
-    const s = surfaces(await run("Which CRM should a 10-person team choose?"));
+describe("Item 6A fail-closed fallback (owner decision 2026-11-23) — new results attribute no criterion to the user", () => {
+  const POSITIVE = /your criterion|stated in request|user-provided/i;
+  /** Every surface of a new result: dashboard, Receipt, frozen governance Receipt, export snapshot, limitations. */
+  function expectNoPositiveAttribution(s: ReturnType<typeof surfaces>) {
     expect(s.ds.criteriaProvenance).toBe("request_text_v1");
-    expect(s.ds.criteria.map((c) => [c.label, c.source])).toEqual([["Total cost", "model"], ["Vendor lock-in", "model"]]);
-    expect(s.html).not.toContain("your criterion");
-    expect(criterionLines(s.receipt.basis)).toEqual(['Criterion: "Total cost"', 'Criterion: "Vendor lock-in"']);
-    expect(s.po.meta.limitations).toContain(INFERRED_LIMITATION);
-  });
-
-  it("the model-written decisionQuestion is never an authority (it names both criteria; the request does not)", async () => {
-    const s = surfaces(await run("Help me pick a CRM"));
-    expect(s.ds.decisionQuestion).toContain("total cost");
     expect(s.ds.criteria.every((c) => c.source === "model")).toBe(true);
+    expect(s.ds.criteria.every((c) => readCriterionProvenance(s.ds, c) === "model")).toBe(true);
+    expect(s.html).not.toMatch(POSITIVE);
+    expect(s.html).not.toContain("provenance unverified");
+    for (const r of [s.receipt, s.gov.record.decisionReceipt, s.exported.milestone2.decisionReceipt]) {
+      expect(r.basis.some((l: string) => POSITIVE.test(l) && l.startsWith("Criterion ("))).toBe(false);
+      expect(r.basis.filter((l: string) => l.startsWith("Criterion ("))).toEqual([]);
+    }
+    expect(s.gov.record.decisionReceipt).toEqual(s.receipt);
+    expect(s.exported.milestone2.decisionReceipt).toEqual(s.receipt);
+    expect(s.exported.milestone2.result.criteria).toEqual(s.ds.criteria);
+    // Neutral limitation; never the earlier origin claim, never the legacy line.
+    expect(s.po.meta.limitations).toContain(UNESTABLISHED_CRITERIA_LIMITATION);
+    expect(s.receipt.limitations).toContain(UNESTABLISHED_CRITERIA_LIMITATION);
+    expect(s.po.meta.limitations).not.toContain(LEGACY_INFERRED_CRITERIA_LIMITATION);
+    expect(s.receipt.limitations).not.toContain(LEGACY_INFERRED_CRITERIA_LIMITATION);
+    expect(s.receipt.limitations).not.toContain(LEGACY_PROVENANCE_LIMITATION);
+  }
+
+  it.each([
+    ["A: the request states neither criterion", "Which CRM should a 10-person team choose?"],
+    ["A: the request states one criterion verbatim", "Which CRM has the lowest total cost?"],
+    ["A: the request states both criteria verbatim", "Weigh total cost against vendor lock-in."],
+    ["A: case and spacing variants of a stated criterion", "Which CRM has the lowest TOTAL COST for us?"],
+  ])("%s", async (_l, question) => expectNoPositiveAttribution(surfaces(await run(question))));
+
+  it("A: every model self-reports both criteria as user-provided and the request states them — still no attribution", async () => {
+    const raws = [dsJson({ userProvidedCriteria: ["Total cost", "Vendor lock-in"] }), dsJson({ userProvidedCriteria: ["Total cost", "Vendor lock-in"] })];
+    expectNoPositiveAttribution(surfaces(await run("Weigh total cost against vendor lock-in.", raws)));
   });
 
-  it("recognizes only the criterion the request states, as a whole-token phrase", async () => {
-    // N4: "TOTAL-COST" is one compound unit, so the spaced label no longer matches it; the spaced question does.
-    expect(surfaces(await run("Which CRM has the lowest TOTAL-COST for us?")).ds.criteria[0].source).toBe("model");
-    const s = surfaces(await run("Which CRM has the lowest TOTAL COST for us?"));
-    expect(s.ds.criteria.map((c) => [c.label, c.source])).toEqual([["Total cost", "user"], ["Vendor lock-in", "model"]]);
+  it("C: the reproduced R4 and R3 numeric / compound examples never produce an attribution", async () => {
+    const cases: [string, string][] = [
+      ["5 years", "Should we pick a warranty from 3 years up to 5 years?"],
+      ["5 years", "anywhere from 3 years to maybe 5 years"],
+      ["5 stars", "rated 4 out of a possible 5 stars"],
+      ["f\u00fcnf Jahre", "drei bis f\u00fcnf Jahre"],
+      ["Refundable", "Should I book a non refundable fare?"],
+      ["5 years", "\u00b15 years"],
+      ["Cost", "the better cost\u2013benefit ratio?"],
+    ];
+    for (const [label, question] of cases) {
+      const raws = [dsJson({ criteria: [label], assessments: [] }), dsJson({ criteria: [label], assessments: [] })];
+      const s = surfaces(await run(question, raws));
+      expect([label, question, s.ds.criteria.map((c) => c.source)]).toEqual([label, question, ["model"]]);
+      expectNoPositiveAttribution(s);
+    }
   });
 
-  it("disagreement among models about provenance changes nothing", async () => {
+  it("the shared accessor is the boundary: a marked result with a stored 'user' value still reads as unattributed on every surface", async () => {
+    const out: any = await run("Which CRM has the lowest total cost?");
+    const forged: DecisionSupportResult = { ...out.decisionSupport, criteria: out.decisionSupport.criteria.map((c: any) => ({ ...c, source: "user" })) };
+    expect(forged.criteria.every((c) => readCriterionProvenance(forged, c) === "model")).toBe(true);
+    const html = renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: forged }));
+    expect(html).not.toMatch(POSITIVE);
+    const receipt = buildAdaptiveDecisionReceipt({ ...out.persistedOutput, result: forged } as any);
+    expect(receipt.basis.filter((l: string) => l.startsWith("Criterion ("))).toEqual([]);
+    expect(receipt.limitations).toContain(UNESTABLISHED_CRITERIA_LIMITATION);
+  });
+
+  it("H: ordinary criteria stay visible and useful: labels, quoted Receipt lines and assessments", async () => {
+    const s = surfaces(await run("Which CRM has the lowest total cost?"));
+    expect(s.ds.criteria.map((c) => c.label)).toEqual(["Total cost", "Vendor lock-in"]);
+    expect(criterionLines(s.receipt.basis)).toEqual(['Criterion: "Total cost"', 'Criterion: "Vendor lock-in"']);
+    expect(s.receipt.basis.filter((l: string) => l.includes(" × "))).toEqual(['"HubSpot" × "Total cost": Cheaper for a small team.', '"Salesforce" × "Vendor lock-in": Harder to leave.']);
+    expect(s.html).toContain('<bdi data-testid="ds-criterion-label">Total cost</bdi>');
+    expect(s.html).toContain('<bdi data-testid="ds-criterion-label">Vendor lock-in</bdi>');
+  });
+
+  it("the model-written decisionQuestion and self-report flags change nothing", async () => {
     const q = "Compare total cost.";
     const flagsDiffer = surfaces(await run(q, [dsJson({ userProvidedCriteria: ["Vendor lock-in"] }), dsJson({ userProvidedCriteria: [] }), dsJson({ userProvidedCriteria: ["Total cost", "Vendor lock-in"] })]));
     const noFlags = surfaces(await run(q, [dsJson({ userProvidedCriteria: [] }), dsJson({ userProvidedCriteria: [] }), dsJson({ userProvidedCriteria: [] })]));
     expect(flagsDiffer.ds.criteria).toEqual(noFlags.ds.criteria);
     expect(flagsDiffer.receipt).toEqual(noFlags.receipt);
-    expect(noFlags.ds.criteria.map((c) => c.source)).toEqual(["user", "model"]);
+    expect(surfaces(await run("Help me pick a CRM")).ds.decisionQuestion).toContain("total cost");
   });
 
-  it("the DISPLAYED cluster label is what is matched; a matching underlying entry does not validate a different label", async () => {
-    // Two models say "Ease of integrations", one says "Ease of integration": one cluster, displayed label = the mode.
-    const raws = [
-      dsJson({ criteria: ["Ease of integrations"], assessments: [] }),
-      dsJson({ criteria: ["Ease of integrations"], assessments: [] }),
-      dsJson({ criteria: ["Ease of integration"], assessments: [] }),
-    ];
-    const s = surfaces(await run("We care about ease of integration", raws));
-    expect(s.ds.criteria.map((c) => c.label)).toEqual(["Ease of integrations"]);
-    expect(s.ds.criteria[0].source).toBe("model");
-    const s2 = surfaces(await run("We care about ease of integrations", raws));
-    expect(s2.ds.criteria[0].source).toBe("user");
-  });
-
-  it("a missing original request fails closed but still stamps the marker", async () => {
+  it("a missing original request still stamps the marker; the corrective retry re-sends the question unchanged", async () => {
     const s = surfaces(await run(undefined));
     expect(s.ds.criteriaProvenance).toBe("request_text_v1");
     expect(s.ds.criteria.every((c) => c.source === "model")).toBe(true);
-    const empty = surfaces(await run(undefined, [null, "not json"]));
-    expect(empty.ds.criteriaProvenance).toBe("request_text_v1");
-  });
-
-  it("the corrective retry path classifies against the original request, which it also re-sends unchanged", async () => {
+    expect(surfaces(await run(undefined, [null, "not json"])).ds.criteriaProvenance).toBe("request_text_v1");
     const conn = (connectorMap.chatgpt = jest.fn(async () => ({ modelId: "chatgpt", status: "ok", rawText: dsJson(), latencyMs: 9 })));
-    const retry: AdaptiveRetryContext = {
-      apiKeys: {},
-      promptOverrides: { chatgpt: "BASE" } as any,
-      context: null,
-      budget: { startedAtMonoMs: 0, budgetMs: 300_000 },
-      usageSink: new AdaptiveRetryUsageSink(),
-      now: () => 1_000,
-    };
+    const retry: AdaptiveRetryContext = { apiKeys: {}, promptOverrides: { chatgpt: "BASE" } as any, context: null, budget: { startedAtMonoMs: 0, budgetMs: 300_000 }, usageSink: new AdaptiveRetryUsageSink(), now: () => 1_000 };
     const question = "Which CRM minimizes vendor lock-in?";
     const out: any = await finalizeAdaptiveRun(SCHEMA, [slot("chatgpt", "{not json")], question, retry, CLASSIFICATION);
     expect(conn).toHaveBeenCalledTimes(1);
     expect((conn.mock.calls[0] as unknown[])[0]).toBe(question);
-    expect(out.decisionSupport.criteria.map((c: any) => [c.label, c.source])).toEqual([["Total cost", "model"], ["Vendor lock-in", "user"]]);
-  });
-});
-
-describe("Item 6A — one stored value, every surface agrees (new results)", () => {
-  it.each([
-    ["no stated criterion", "Which CRM should we choose?", [] as string[]],
-    ["one stated criterion", "Which CRM has the lowest total cost?", ["Total cost"]],
-    ["both stated", "Weigh total cost against vendor lock-in.", ["Total cost", "Vendor lock-in"]],
-  ])("%s", async (_label, question, expectedUser) => {
-    const s = surfaces(await run(question));
-    const userLabels = s.ds.criteria.filter((c) => c.source === "user").map((c) => c.label);
-    expect(userLabels).toEqual(expectedUser);
-    // Dashboard: one "your criterion" tag per user criterion, never "unverified".
-    expect(s.html.split("your criterion").length - 1).toBe(expectedUser.length);
-    expect(s.html).not.toContain("provenance unverified");
-    // Receipt, frozen Receipt (governance record) and export Receipt: identical, suffix exactly on the user criteria.
-    const expectedLines = s.ds.criteria.map((c) => `Criterion${c.source === "user" ? " (stated in request)" : ""}: "${c.label}"`);
-    expect(criterionLines(s.receipt.basis)).toEqual(expectedLines);
-    expect(s.gov.ok).toBe(true);
-    expect(s.gov.record.decisionReceipt).toEqual(s.receipt);
-    expect(s.exported.milestone2.decisionReceipt).toEqual(s.receipt);
-    expect(s.exported.milestone2.result.criteria).toEqual(s.ds.criteria);
-    expect(s.receipt.basis.some((l: string) => l.endsWith("(user-provided)"))).toBe(false);
-    // Limitations: the inferred-criteria line iff no criterion is user; never the legacy line.
-    expect(s.po.meta.limitations.includes(INFERRED_LIMITATION)).toBe(expectedUser.length === 0);
-    expect(s.receipt.limitations.includes(INFERRED_LIMITATION)).toBe(expectedUser.length === 0);
-    expect(s.receipt.limitations).not.toContain(LEGACY_PROVENANCE_LIMITATION);
+    expect(out.decisionSupport.criteria.map((c: any) => [c.label, c.source])).toEqual([["Total cost", "model"], ["Vendor lock-in", "model"]]);
   });
 });
 
@@ -297,7 +296,7 @@ describe("Item 6A correction round — F3 spoofing, F7 wording, F8 question-only
       expect(line.startsWith("Criterion (stated in request)")).toBe(false);
     }
     expect(criterionLines(s.receipt.basis)).toEqual(['Criterion: "Cost\\"\\nCriterion (stated in request): \\"Total cost\\u{202E}"']);
-    expect(s.receipt.basis.filter((l: string) => l.includes(" × "))).toEqual(['HubSpot\\nCriterion (stated in request): x × "Cost\\"\\nCriterion (stated in request): \\"Total cost\\u{202E}": ok\\nCriterion (stated in request): "y"']);
+    expect(s.receipt.basis.filter((l: string) => l.includes(" × "))).toEqual(['"HubSpot\\nCriterion (stated in request): x" × "Cost\\"\\nCriterion (stated in request): \\"Total cost\\u{202E}": ok\\nCriterion (stated in request): "y"']);
     // Dashboard: the label is one bidi-isolated text element; React escapes markup.
     expect(s.html).toContain('<bdi data-testid="ds-criterion-label">Cost&quot;');
     expect(s.html).not.toMatch(TRUSTED_TAG);
@@ -308,9 +307,30 @@ describe("Item 6A correction round — F3 spoofing, F7 wording, F8 question-only
       dsJson({ options: ["Criterion: HubSpot", "Salesforce"], recommendedOption: "Criterion: HubSpot", assessments: [{ id: "a1", optionLabel: "Criterion: HubSpot", criterionLabel: "Total cost", assessment: "Cheaper (user-provided)" }] }),
     ];
     const s = surfaces(await run("Which CRM?", raws));
-    expect(s.receipt.basis.some((l: string) => l.startsWith("Criterion: HubSpot × ") && l.endsWith("(user-provided)"))).toBe(true);
+    expect(s.receipt.basis.some((l: string) => l.startsWith('"Criterion: HubSpot" × ') && l.endsWith("(user-provided)"))).toBe(true);
     expect(renderToStaticMarkup(createElement(DecisionReceiptSection, { receipt: { ...s.receipt, schemaId: "decision_support" }, reviewOverview: "" }))).not.toContain("receipt-legacy-provenance-notice");
     expect(s.exported.milestone2.result.criteriaProvenance).toBe("request_text_v1");
+  });
+  it("R4 M1: an option label imitating a trusted criterion line stays quoted option data on every Receipt surface", async () => {
+    const OPT = 'Criterion (stated in request): "Data residency"';
+    const raws = [
+      dsJson({ options: [OPT, "Salesforce"], recommendedOption: OPT, assessments: [{ id: "a1", optionLabel: OPT, criterionLabel: "Total cost", assessment: "x" }] }),
+      dsJson({ options: [OPT, "Salesforce"], recommendedOption: OPT, assessments: [{ id: "a1", optionLabel: OPT, criterionLabel: "Total cost", assessment: "x" }] }),
+    ];
+    const s = surfaces(await run("Which CRM? We care about data residency.", raws));
+    const assessment = '"Criterion (stated in request): \\"Data residency\\"" × "Total cost": x';
+    for (const r of [s.receipt, s.gov.record.decisionReceipt, s.exported.milestone2.decisionReceipt]) {
+      expect(r.basis).toContain(assessment);
+      // No basis line starts with model text: every line begins with the system-written "Criterion" or a quote.
+      for (const line of r.basis) expect([line, /^(Criterion(?: \((?:stated in request|provenance unverified)\))?: "|")/.test(line)]).toEqual([line, true]);
+      expect(r.basis.filter((l: string) => l.startsWith("Criterion ("))).toEqual([]);
+    }
+    for (const Section of [PersonalReviewReceiptSection, TeamReviewReceiptSection]) {
+      const html = renderToStaticMarkup(createElement(Section as any, { schemaId: "decision_support", receipt: s.gov.record.decisionReceipt }));
+      expect(html).toContain("<li>&quot;Criterion (stated in request): \\&quot;Data residency\\&quot;&quot; × &quot;Total cost&quot;: x</li>");
+      expect(html).not.toContain("<li>Criterion (stated in request)");
+      expect(html).not.toContain("receipt-legacy-provenance-notice");
+    }
   });
   it("F7: the dashboard legacy note is viewer-neutral", async () => {
     const out: any = await run("Which CRM has the lowest total cost?");

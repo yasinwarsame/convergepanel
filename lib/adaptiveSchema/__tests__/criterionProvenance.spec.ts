@@ -18,6 +18,7 @@ import {
   receiptHasLegacyUserProvidedCriteria,
   RECEIPT_TAG_UNVERIFIED,
   RECEIPT_TAG_USER,
+  NEW_RESULT_CRITERION_SOURCE,
 } from "@/lib/adaptiveSchema/criterionProvenance";
 import { unescapeQuotedLabel } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
 
@@ -199,9 +200,10 @@ describe("format characters never split a word", () => {
 describe("readCriterionProvenance — the one shared accessor", () => {
   const marked = { criteriaProvenance: CRITERIA_PROVENANCE_RULE } as const;
   const legacy = {} as { criteriaProvenance?: "request_text_v1" };
-  it("reports the stored value for results carrying the marker", () => {
-    expect(readCriterionProvenance(marked, { source: "user" })).toBe("user");
+  it("fail-closed fallback: a marked result never reads as 'user', whatever is stored", () => {
+    expect(readCriterionProvenance(marked, { source: "user" })).toBe("model");
     expect(readCriterionProvenance(marked, { source: "model" })).toBe("model");
+    expect(NEW_RESULT_CRITERION_SOURCE).toBe("model");
   });
   it("never trusts a legacy (unmarked) 'user' value; any other marker value is legacy", () => {
     expect(readCriterionProvenance(legacy, { source: "user" })).toBe("unverified_legacy");

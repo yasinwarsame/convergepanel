@@ -16,6 +16,7 @@ import JSZip from "jszip";
 import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportFixtures";
 import { historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
 import { historicalReceiptText } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
+import { LEGACY_INFERRED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, docxStatusRegionV1, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
 import { DocxTextError, docxParagraphs } from "@/lib/adaptiveSchema/__tests__/dsExport/docxText";
 import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
@@ -104,7 +105,7 @@ describe("version-1 Decision Support DOCX", () => {
       // Cases added after the capture are built by today's builder on both sides; the inverse is identity on frozen text.
       expect(h).toBe(historicalReceiptText(after0[i]));
     });
-    expect([name, reverted]).toEqual([name, after0.map(historicalReceiptText).filter((t) => /^•\s+(Criterion: |.+ × .+: )/.test(t)).length]);
+    expect([name, reverted]).toEqual([name, after0.map(historicalReceiptText).filter((t) => /^•\s+(Criterion: |.+ × .+: )/.test(t) || t === `•  ${LEGACY_INFERRED_CRITERIA_LIMITATION}`).length]);
     for (const m of PROVENANCE_MARKERS) expect(l.join("\n")).not.toContain(m);
   });
 

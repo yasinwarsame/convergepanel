@@ -28,6 +28,7 @@ import { governanceStatusDisplay } from "@/lib/adaptiveSchema/exportContentDeriv
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { extractPdfTextNodes } from "./testUtils";
 import { historicalReceiptText } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
+import { LEGACY_INFERRED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 
 const nodes = (r: AdaptiveResearchExportV1) => extractPdfTextNodes(AdaptiveResearchDocument({ record: r }));
 const norm = (t: string) => t.replace(/\s+/g, " ").trim();
@@ -103,7 +104,7 @@ describe("version-1 Decision Support PDF", () => {
       // Cases added after the capture are built by today's builder on both sides; the inverse is identity on frozen text.
       expect(h).toBe(historicalReceiptText(after0[i]));
     });
-    const historicalCriterionLines = after0.map(historicalReceiptText).filter((t) => /^Criterion: |^.+ × .+: /.test(t)).length;
+    const historicalCriterionLines = after0.map(historicalReceiptText).filter((t) => /^Criterion: |^.+ × .+: /.test(t) || t === LEGACY_INFERRED_CRITERIA_LIMITATION).length;
     expect([name, reverted]).toEqual([name, historicalCriterionLines]);
   });
 

@@ -17,7 +17,7 @@ import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPd
 import { extractPdfTextNodes } from "@/lib/pdf/__tests__/testUtils";
 import { extractDocxText } from "@/lib/docx/__tests__/testUtils";
 import { adaptiveResearchJsonExportV1Schema } from "@/lib/adaptiveSchema/jsonExportSchema";
-import { DERIVED_DISCLOSURE_NOTE, LEGACY_FROZEN_RECEIPT_NOTICE, receiptCriterionLine } from "@/lib/adaptiveSchema/criterionProvenance";
+import { DERIVED_DISCLOSURE_NOTE, LEGACY_FROZEN_RECEIPT_NOTICE, LEGACY_INFERRED_CRITERIA_LIMITATION, receiptCriterionLine, UNESTABLISHED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 import { PersonalReviewReceiptSection } from "@/components/personalReview/PersonalReviewDetail";
 import { TeamReviewReceiptSection } from "@/components/teamGovernance/AdaptiveReviewDetail";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
@@ -137,6 +137,31 @@ describe("N2 — export notice and JSON flag are gated on trusted structure, nev
     const rec: any = preSixA("pdf").rec;
     rec.reportSnapshot.milestone2.schemaId = "definition_explanation";
     expect(extractPdfTextNodes(AdaptiveResearchDocument({ record: rec }))).not.toContain(LEGACY_FROZEN_RECEIPT_NOTICE);
+  });
+});
+
+describe("fail-closed fallback (owner decision 2026-11-23): exports of new results make no positive attribution", () => {
+  const POSITIVE = /your criterion|stated in request|\(user-provided\)/i;
+  /** A current (marked) stored record; optionally with a forged stored "user" source on every criterion. */
+  function current(format: "pdf" | "docx" | "json", forge: boolean): Rec {
+    const rec: any = stored(format);
+    const m2 = rec.reportSnapshot.milestone2;
+    expect(m2.result.criteriaProvenance).toBe("request_text_v1");
+    if (forge) m2.result.criteria = m2.result.criteria.map((c: any) => ({ ...c, source: "user" }));
+    return rec;
+  }
+  it.each([false, true])("PDF, DOCX and JSON carry no positive attribution and the neutral limitation (forged stored 'user': %s)", async (forge) => {
+    const pdf = extractPdfTextNodes(AdaptiveResearchDocument({ record: current("pdf", forge) })).join("\n");
+    const docx = await extractDocxText((await renderAdaptiveResearchExport(current("docx", forge))).bytes);
+    const json = JSON.parse(Buffer.from((await renderAdaptiveResearchExport(current("json", forge))).bytes).toString("utf8"));
+    for (const text of [pdf, docx]) {
+      expect(text).not.toMatch(POSITIVE);
+      expect(text).toContain(UNESTABLISHED_CRITERIA_LIMITATION);
+      expect(text).not.toContain(LEGACY_INFERRED_CRITERIA_LIMITATION);
+      expect(text).not.toContain(LEGACY_FROZEN_RECEIPT_NOTICE);
+    }
+    expect(JSON.stringify(json.result.decisionReceipt)).not.toMatch(POSITIVE);
+    expect(json.result).not.toHaveProperty("derivedCriteriaProvenanceDisclosure");
   });
 });
 

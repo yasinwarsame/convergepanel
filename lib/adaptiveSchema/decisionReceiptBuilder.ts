@@ -365,16 +365,18 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
 
   const basis = [
     // Item 6A: provenance comes only from the shared accessor (criterionProvenance.ts). A verified criterion is
-    // marked "(stated in request)"; a pre-6A self-reported one "(provenance unverified)"; a model one has no suffix.
+    // marked "(stated in request)" (unreachable for new results under the fail-closed fallback: the accessor never
+    // returns "user" for a marked result); a pre-6A self-reported one "(provenance unverified)"; otherwise no tag.
     // N1 / Option A: the trusted provenance tag sits between "Criterion" and the colon; the model label follows it
     // verbatim as escaped, quoted data (never rewritten, never a source of provenance).
     ...result.criteria.map((c) => receiptCriterionLine(c.label, readCriterionProvenance(result, c))),
-    // Assessment lines keep their shape; the criterion label is quoted the same way, and the other model-written parts
-    // are escaped so no model text can break the line or impersonate another Receipt line.
+    // Assessment lines: the option label and the criterion label are both quoted, escaped data (R4 M1: an unquoted
+    // option label at the start of the line could imitate a trusted criterion line); the assessment text is
+    // line-safety escaped. Every assessment line therefore starts with a system-written quote, never with model text.
     ...result.assessments.map((a) => {
       const option = result.options.find((o) => o.id === a.optionId);
       const criterion = result.criteria.find((c) => c.id === a.criterionId);
-      return `${escapeReceiptLineText(option?.label ?? a.optionId)} × ${criterion ? quoteReceiptLabel(criterion.label) : escapeReceiptLineText(a.criterionId)}: ${escapeReceiptLineText(a.assessment)}`;
+      return `${quoteReceiptLabel(option?.label ?? a.optionId)} × ${quoteReceiptLabel(criterion ? criterion.label : a.criterionId)}: ${escapeReceiptLineText(a.assessment)}`;
     }),
   ];
 

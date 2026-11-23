@@ -24,6 +24,7 @@
  * are specific to the capture runtime (CI runs Node 24, zlib 1.3.2.1); record content is checked below and the PDF
  * hashes are the golden of that runtime.
  */
+import { LEGACY_INFERRED_CRITERIA_LIMITATION, UNESTABLISHED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
@@ -338,15 +339,16 @@ describe("Item 6A controlled exception: quoted Receipt labels (owner Option A, 2
   // compares with historical evidence and goldens. These tests pin that the exception is exactly that, and that the
   // real new-format exports render cleanly.
   const sides = () => [suite.item6aReverted.base, suite.item6aReverted.head];
-  it("only Decision Support records, only untagged criterion lines and assessment lines, each the exact quoted form of its historical line", () => {
+  it("only Decision Support records, only untagged criterion lines, assessment lines and the neutral limitation, each the exact new form of its historical line", () => {
     for (const side of sides()) {
       expect(Object.keys(side).length).toBeGreaterThan(0);
       for (const [k, lines] of Object.entries(side)) {
         expect([k, k.startsWith("ds.")]).toEqual([k, true]);
         for (const { from, to } of lines) {
           const criterion = /^Criterion: "(.*)"$/s.exec(from);
-          const assessment = /^(.*?) × "(.*?)": (.*)$/s.exec(from);
+          const assessment = /^"(.*?)" × "(.*?)": (.*)$/s.exec(from);
           if (criterion) expect(to).toBe(`Criterion: ${criterion[1]}`);
+          else if (from === UNESTABLISHED_CRITERIA_LIMITATION) expect(to).toBe(LEGACY_INFERRED_CRITERIA_LIMITATION);
           else expect([from, assessment && to === `${assessment[1]} × ${assessment[2]}: ${assessment[3]}`]).toEqual([from, true]);
           expect(from.startsWith("Criterion (")).toBe(false);
         }

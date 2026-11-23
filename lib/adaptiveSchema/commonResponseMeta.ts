@@ -17,7 +17,7 @@
 
 import "server-only";
 import { ModelId, ModelResult } from "@/lib/types";
-import { readCriterionProvenance } from "./criterionProvenance";
+import { hasAuthoritativeCriteriaProvenance, LEGACY_INFERRED_CRITERIA_LIMITATION, readCriterionProvenance, UNESTABLISHED_CRITERIA_LIMITATION } from "./criterionProvenance";
 import {
   AdaptiveModelResult,
   AdaptiveSourceCoverage,
@@ -268,7 +268,8 @@ export function getAdaptiveLimitations(schemaId: PersistedAdaptiveSchemaId, resu
       limitations.push(...r.recommendation.caveats);
       // Item 6A: one shared provenance read (criterionProvenance.ts), never the raw field.
       if (r.criteria.length > 0 && r.criteria.every((c) => readCriterionProvenance(r, c) !== "user")) {
-        limitations.push("The recommendation depends on inferred rather than user-provided criteria.");
+        // Item 6A fail-closed fallback: new results make no claim about where criteria came from.
+        limitations.push(hasAuthoritativeCriteriaProvenance(r) ? UNESTABLISHED_CRITERIA_LIMITATION : LEGACY_INFERRED_CRITERIA_LIMITATION);
       }
       break;
     }

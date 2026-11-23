@@ -45,7 +45,7 @@ import {
   RiskLevel,
 } from "./types";
 import { dedupeTextList, hasIdenticalTokenSet, normalizeSlug, textsAreNearDuplicates, UnionFind } from "./textSimilarity";
-import { classifyCriterionProvenance, CRITERIA_PROVENANCE_RULE } from "./criterionProvenance";
+import { CRITERIA_PROVENANCE_RULE, NEW_RESULT_CRITERION_SOURCE } from "./criterionProvenance";
 
 /** Criteria are short labels ("Total cost", "Ease of integration") — tight bar, avoids merging distinct criteria that merely share vocabulary. Same bar causalAlignment.ts uses for factor labels. */
 const CRITERION_DEDUP_THRESHOLDS = { levenshteinMaxRatio: 0.25, tokenOverlapMin: 0.7 };
@@ -256,8 +256,11 @@ export function buildDecisionSupportResult(
   perModel: { modelId: ModelId; fields: DecisionSupportFields }[],
   totalModels: number = perModel.length,
   riskLevel?: RiskLevel,
-  /** Item 6A: the user's ORIGINAL submitted request — the sole authority for "user" criterion provenance. Never the model-written decisionQuestion. Missing/empty fails closed to "model". */
-  originalRequest?: string | null
+  /**
+   * Item 6A: the user's ORIGINAL submitted request. Retained for call-site compatibility only: under the owner's
+   * fail-closed fallback (2026-11-23) no new criterion is attributed to the user, so it is never read.
+   */
+  _originalRequest?: string | null
 ): DecisionSupportResult {
   if (perModel.length === 0) {
     return {
@@ -328,7 +331,10 @@ export function buildDecisionSupportResult(
   );
   const criteria: AggregatedDecisionCriterion[] = sortedCriterionClusters.map((c) => {
     const { firstSeenIndex, entries, ...rest } = c;
-    return { ...rest, source: classifyCriterionProvenance(c.label, originalRequest) };
+    // Item 6A fail-closed fallback (owner decision 2026-11-23): authoritative user attribution cannot be established
+    // reliably from free text, so no new criterion is ever classified "user". This is the schema's non-user value; it
+    // is presented neutrally ("Criterion"), never as a claim that the criterion was absent from the request.
+    return { ...rest, source: NEW_RESULT_CRITERION_SOURCE };
   });
 
   // ── Assessments: match each raw (optionLabel, criterionLabel) pair against the canonical axes above; drop unresolvable references rather than inventing a new axis entry. ──
