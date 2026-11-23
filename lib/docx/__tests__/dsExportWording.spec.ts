@@ -15,6 +15,7 @@ jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, 
 import JSZip from "jszip";
 import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportFixtures";
 import { historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
+import { historicalReceiptText } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
 import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, docxStatusRegionV1, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
 import { DocxTextError, docxParagraphs } from "@/lib/adaptiveSchema/__tests__/dsExport/docxText";
 import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
@@ -93,9 +94,17 @@ describe("version-1 Decision Support DOCX", () => {
     const after = l.slice(end);
     const after0 = old.slice(e0);
     expect(after.length).toBe(after0.length);
+    // Item 6A structural correction (owner Option A, 2026-11-23): only the criterion-label quoting is reverted (verified
+    // exact inverse) before the line-for-line comparison; the reverted lines are exactly the historical Receipt lines.
+    let reverted = 0;
     after.forEach((t, i) => {
-      if (!(i === 1 && after0[0] === "Conclusion")) expect(t).toBe(after0[i]);
+      if (i === 1 && after0[0] === "Conclusion") return;
+      const h = historicalReceiptText(t);
+      if (h !== t) reverted++;
+      // Cases added after the capture are built by today's builder on both sides; the inverse is identity on frozen text.
+      expect(h).toBe(historicalReceiptText(after0[i]));
     });
+    expect([name, reverted]).toEqual([name, after0.map(historicalReceiptText).filter((t) => /^•\s+(Criterion: |.+ × .+: )/.test(t)).length]);
     for (const m of PROVENANCE_MARKERS) expect(l.join("\n")).not.toContain(m);
   });
 

@@ -48,6 +48,8 @@ type Suite = {
   variants: Record<string, Digest>;
   created: Record<string, Digest>;
   redownload: Record<string, Digest>;
+  item6aReverted: { base: Record<string, { from: string; to: string }[]>; head: Record<string, { from: string; to: string }[]> };
+  item6aCreated: Record<string, Digest>;
   canaryViolations: number;
 };
 type Golden = { fingerprintId: string; base: Record<string, string>; versionOne: Record<string, string> };
@@ -326,6 +328,52 @@ describe("new exports", () => {
       if (d.format === "docx") {
         expect(Object.keys(d.parts ?? {})).toEqual(expect.arrayContaining(["[Content_Types].xml", "word/document.xml", "docProps/core.xml"]));
         expect((d.paragraphs ?? []).length).toBeGreaterThan(10);
+      }
+    }
+  });
+});
+
+describe("Item 6A controlled exception: quoted Receipt labels (owner Option A, 2026-11-23)", () => {
+  // The suite reverts ONLY the Item 6A criterion-label quoting (exact inverse, item6aReceiptFormat.ts) on records it
+  // compares with historical evidence and goldens. These tests pin that the exception is exactly that, and that the
+  // real new-format exports render cleanly.
+  const sides = () => [suite.item6aReverted.base, suite.item6aReverted.head];
+  it("only Decision Support records, only untagged criterion lines and assessment lines, each the exact quoted form of its historical line", () => {
+    for (const side of sides()) {
+      expect(Object.keys(side).length).toBeGreaterThan(0);
+      for (const [k, lines] of Object.entries(side)) {
+        expect([k, k.startsWith("ds.")]).toEqual([k, true]);
+        for (const { from, to } of lines) {
+          const criterion = /^Criterion: "(.*)"$/s.exec(from);
+          const assessment = /^(.*?) × "(.*?)": (.*)$/s.exec(from);
+          if (criterion) expect(to).toBe(`Criterion: ${criterion[1]}`);
+          else expect([from, assessment && to === `${assessment[1]} × ${assessment[2]}: ${assessment[3]}`]).toEqual([from, true]);
+          expect(from.startsWith("Criterion (")).toBe(false);
+        }
+      }
+    }
+  });
+  it("base and head revert the same lines (the builder is shared; only the renderer differs)", () => {
+    expect(suite.item6aReverted.base).toEqual(suite.item6aReverted.head);
+  });
+  it("every DS record with criteria is covered (the new format is really written), and nothing else differs from history", () => {
+    const withCriteria = Object.keys(OLD_RECORDS).filter((k) => k.startsWith("ds.") && ((OLD_RECORDS[k].reportSnapshot as any)?.milestone2?.decisionReceipt?.basis ?? []).some((l: string) => l.startsWith("Criterion: ")));
+    expect(withCriteria.length).toBeGreaterThan(0);
+    for (const k of withCriteria) expect([k, (suite.item6aReverted.base[k] ?? []).length > 0]).toEqual([k, true]);
+  });
+  it("the real new-format DS PDFs have no layout violation and show the quoted labels; DOCX paragraphs carry them verbatim", () => {
+    const keys = Object.keys(suite.item6aCreated);
+    expect(keys.filter((k) => k.endsWith(".pdf")).length).toBe(Object.keys(suite.created).filter((k) => k.startsWith("ds.") && k.endsWith(".pdf")).length);
+    for (const k of keys) {
+      const d = suite.item6aCreated[k];
+      const quoted = (suite.item6aReverted.head[k] ?? []).map((x) => x.from);
+      if (d.format === "pdf") {
+        expect({ k, v: d.layoutViolations }).toEqual({ k, v: [] });
+        const flat = (d.text ?? "").replace(/\s+/g, " ");
+        for (const line of quoted) expect([k, flat.includes(line.replace(/\s+/g, " "))]).toEqual([k, true]);
+      } else {
+        const paragraphs = (d.paragraphs ?? []) as unknown[];
+        for (const line of quoted) expect([k, paragraphs.some((p) => JSON.stringify(p).includes(JSON.stringify(line).slice(1, -1)))]).toEqual([k, true]);
       }
     }
   });

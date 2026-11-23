@@ -18,7 +18,7 @@
  */
 
 import { AggregatedDecisionAssessment, AggregatedDecisionCriterion, AggregatedDecisionOption, DecisionRecommendationAction, DecisionSupportResult } from "@/lib/adaptiveSchema/types";
-import { criterionDisplayLabel, hasUnverifiedLegacyCriteria, LEGACY_RESULT_NOTICE, readCriterionProvenance } from "@/lib/adaptiveSchema/criterionProvenance";
+import { hasUnverifiedLegacyCriteria, LEGACY_RESULT_NOTICE, readCriterionProvenance } from "@/lib/adaptiveSchema/criterionProvenance";
 import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 import {
   DS_GROUPING_BASIS,
@@ -217,7 +217,8 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
                   {criteria.map((criterion) => (
                     <tr key={criterion.id}>
                       <th className="border-b border-slate-100 p-2 align-top text-sm font-medium text-slate-700 whitespace-nowrap">
-                        {criterionDisplayLabel(criterion.label)}
+                        {/* Item 6A (Option A): the model label verbatim, bidi-isolated; the trusted provenance tag is a separate element. */}
+                        <bdi data-testid="ds-criterion-label">{criterion.label}</bdi>
                         {readCriterionProvenance(decisionSupport, criterion) === "user" && (
                           <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-sky-600">your criterion</span>
                         )}

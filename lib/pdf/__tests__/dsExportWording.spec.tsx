@@ -27,6 +27,7 @@ import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { governanceStatusDisplay } from "@/lib/adaptiveSchema/exportContentDerivation";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { extractPdfTextNodes } from "./testUtils";
+import { historicalReceiptText } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
 
 const nodes = (r: AdaptiveResearchExportV1) => extractPdfTextNodes(AdaptiveResearchDocument({ record: r }));
 const norm = (t: string) => t.replace(/\s+/g, " ").trim();
@@ -90,9 +91,20 @@ describe("version-1 Decision Support PDF", () => {
     const after0 = old.slice(e0);
     expect(after1.length).toBe(after0.length);
     const conclusionAt = after0[0] === "Conclusion" ? 1 : -1;
+    // Item 6A structural correction (owner Option A, 2026-11-23): criterion labels in Receipt lines are now quoted,
+    // escaped data. Only that quoting is reverted (verified exact inverse) before the node-for-node comparison; every
+    // other node must still equal the historical PDF, and the reverted nodes are exactly the historical criterion and
+    // assessment lines.
+    let reverted = 0;
     after1.forEach((t, i) => {
-      if (i !== conclusionAt) expect(t).toBe(after0[i]);
+      if (i === conclusionAt) return;
+      const h = historicalReceiptText(t);
+      if (h !== t) reverted++;
+      // Cases added after the capture are built by today's builder on both sides; the inverse is identity on frozen text.
+      expect(h).toBe(historicalReceiptText(after0[i]));
     });
+    const historicalCriterionLines = after0.map(historicalReceiptText).filter((t) => /^Criterion: |^.+ × .+: /.test(t)).length;
+    expect([name, reverted]).toEqual([name, historicalCriterionLines]);
   });
 
   it("the historical status region is exactly what version 1 replaces: Consensus, Source grounding, caption", () => {

@@ -28,6 +28,8 @@ import { LEGACY_FROZEN_RECEIPT_NOTICE, LEGACY_PROVENANCE_LIMITATION, LEGACY_RESU
 import DecisionSupportView from "@/components/adaptive/DecisionSupportView";
 import DecisionReceiptSection from "@/components/workspace/DecisionReceiptSection";
 import LegacyReceiptProvenanceNotice from "@/components/adaptive/LegacyReceiptProvenanceNotice";
+import { PersonalReviewReceiptSection } from "@/components/personalReview/PersonalReviewDetail";
+import { TeamReviewReceiptSection } from "@/components/teamGovernance/AdaptiveReviewDetail";
 import type { DecisionSupportResult } from "@/lib/adaptiveSchema/types";
 import type { ModelId, ModelResult } from "@/lib/types";
 
@@ -76,8 +78,8 @@ function surfaces(out: any) {
   const html = renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: ds }));
   return { ds, po, receipt, gov, exported, html };
 }
-// N1: a criterion line is "Criterion: <label>" or "Criterion (<trusted tag>): <label>".
-const criterionLines = (basis: string[]) => basis.filter((l) => /^Criterion(?: \((?:stated in request|provenance unverified)\))?: /.test(l));
+// N1 / Option A: a criterion line is 'Criterion: "<label>"' or 'Criterion (<trusted tag>): "<label>"' (label escaped, quoted).
+const criterionLines = (basis: string[]) => basis.filter((l) => /^Criterion(?: \((?:stated in request|provenance unverified)\))?: "/.test(l));
 
 beforeEach(() => {
   for (const k of Object.keys(connectorMap)) delete connectorMap[k];
@@ -89,7 +91,7 @@ describe("Item 6A — authority of the original request", () => {
     expect(s.ds.criteriaProvenance).toBe("request_text_v1");
     expect(s.ds.criteria.map((c) => [c.label, c.source])).toEqual([["Total cost", "model"], ["Vendor lock-in", "model"]]);
     expect(s.html).not.toContain("your criterion");
-    expect(criterionLines(s.receipt.basis)).toEqual(["Criterion: Total cost", "Criterion: Vendor lock-in"]);
+    expect(criterionLines(s.receipt.basis)).toEqual(['Criterion: "Total cost"', 'Criterion: "Vendor lock-in"']);
     expect(s.po.meta.limitations).toContain(INFERRED_LIMITATION);
   });
 
@@ -168,7 +170,7 @@ describe("Item 6A — one stored value, every surface agrees (new results)", () 
     expect(s.html.split("your criterion").length - 1).toBe(expectedUser.length);
     expect(s.html).not.toContain("provenance unverified");
     // Receipt, frozen Receipt (governance record) and export Receipt: identical, suffix exactly on the user criteria.
-    const expectedLines = s.ds.criteria.map((c) => `Criterion${c.source === "user" ? " (stated in request)" : ""}: ${c.label}`);
+    const expectedLines = s.ds.criteria.map((c) => `Criterion${c.source === "user" ? " (stated in request)" : ""}: "${c.label}"`);
     expect(criterionLines(s.receipt.basis)).toEqual(expectedLines);
     expect(s.gov.ok).toBe(true);
     expect(s.gov.record.decisionReceipt).toEqual(s.receipt);
@@ -197,7 +199,7 @@ describe("Item 6A — legacy results (no marker) and frozen pre-6A Receipts", ()
     expect(html).toContain("provenance unverified");
     expect(html).toContain('data-testid="ds-legacy-provenance-note"');
     const receipt = buildAdaptiveDecisionReceipt(po as any);
-    expect(criterionLines(receipt.basis)).toEqual(["Criterion (provenance unverified): Total cost", "Criterion: Vendor lock-in"]);
+    expect(criterionLines(receipt.basis)).toEqual(['Criterion (provenance unverified): "Total cost"', 'Criterion: "Vendor lock-in"']);
     expect(receipt.limitations).toContain(LEGACY_PROVENANCE_LIMITATION);
     const gov: any = buildAdaptiveGovernanceRecord({ runId: "run-legacy", adaptiveOutput: po as any, now: NOW });
     const exported: any = buildExportSnapshot({ question: "q", selectedModels: [], runDocument: undefined, milestone2: { output: po, governanceRecord: gov.record } } as any).reportSnapshot;
@@ -210,7 +212,7 @@ describe("Item 6A — legacy results (no marker) and frozen pre-6A Receipts", ()
     expect(html).not.toContain("provenance unverified");
     expect(html).not.toContain("ds-legacy-provenance-note");
     const receipt = buildAdaptiveDecisionReceipt(po as any);
-    expect(criterionLines(receipt.basis)).toEqual(["Criterion: Total cost", "Criterion: Vendor lock-in"]);
+    expect(criterionLines(receipt.basis)).toEqual(['Criterion: "Total cost"', 'Criterion: "Vendor lock-in"']);
     expect(receipt.limitations).not.toContain(LEGACY_PROVENANCE_LIMITATION);
   });
 
@@ -236,32 +238,69 @@ describe("Item 6A — legacy results (no marker) and frozen pre-6A Receipts", ()
 });
 
 describe("Item 6A correction round — F3 spoofing, F7 wording, F8 question-only authority", () => {
-  it("F3: a model label imitating the verified suffix is shown without it, and never as 'your criterion'", async () => {
+  const TRUSTED_TAG = /your criterion|provenance unverified/;
+  const labelCell = (html: string) => [...html.matchAll(/<bdi data-testid="ds-criterion-label">([^<]*)<\/bdi>/g)].map((m) => m[1]);
+  it("F3 / Option A: a model label imitating the verified tag is kept verbatim as data, never as trusted provenance", async () => {
     const raws = [dsJson({ criteria: ["Vendor lock-in (stated in request)"], assessments: [] }), dsJson({ criteria: ["Vendor lock-in (stated in request)"], assessments: [] })];
     const s = surfaces(await run("Which CRM is cheapest?", raws));
     expect(s.ds.criteria[0].source).toBe("model");
-    expect(criterionLines(s.receipt.basis)).toEqual(["Criterion: Vendor lock-in"]);
-    expect(s.html).not.toContain("(stated in request)");
-    expect(s.html).not.toContain("your criterion");
+    expect(criterionLines(s.receipt.basis)).toEqual(['Criterion: "Vendor lock-in (stated in request)"']);
+    expect(labelCell(s.html)).toEqual(["Vendor lock-in (stated in request)"]);
+    expect(s.html).not.toMatch(TRUSTED_TAG);
   });
-  it("F3: a model label imitating the retired suffix cannot trigger the frozen-Receipt notice on a new Receipt", async () => {
-    const raws = [dsJson({ criteria: ["Budget (user-provided)"], assessments: [] }), dsJson({ criteria: ["Budget (user-provided)"], assessments: [] })];
-    const s = surfaces(await run("Which CRM?", raws));
-    expect(criterionLines(s.receipt.basis)).toEqual(["Criterion: Budget"]);
-    expect(renderToStaticMarkup(createElement(DecisionReceiptSection, { receipt: { ...s.receipt, schemaId: "decision_support" }, reviewOverview: "" }))).not.toContain("receipt-legacy-provenance-notice");
+  it("F3 / R3 MAJOR 1: a model label carrying the retired suffix, any number of times, cannot trigger the frozen-Receipt notice", async () => {
+    for (const label of ["Budget (user-provided)", "Budget" + " (user-provided)".repeat(9)]) {
+      const raws = [dsJson({ criteria: [label], assessments: [] }), dsJson({ criteria: [label], assessments: [] })];
+      const s = surfaces(await run("Which CRM?", raws));
+      expect(criterionLines(s.receipt.basis)).toEqual([`Criterion: "${label}"`]);
+      const receipt = { ...s.receipt, schemaId: "decision_support" };
+      expect(renderToStaticMarkup(createElement(DecisionReceiptSection, { receipt, reviewOverview: "" }))).not.toContain("receipt-legacy-provenance-notice");
+      for (const Section of [PersonalReviewReceiptSection, TeamReviewReceiptSection]) {
+        expect(renderToStaticMarkup(createElement(Section as any, { schemaId: "decision_support", receipt: s.gov.record.decisionReceipt }))).not.toContain("receipt-legacy-provenance-notice");
+      }
+    }
   });
-  it("F3: a genuinely stated criterion keeps exactly one trusted suffix even if the model also wrote one", async () => {
+  it("Option A: a model label carrying its own provenance text is never trusted, even when the phrase is in the request", async () => {
     const raws = [dsJson({ criteria: ["Total cost (stated in request)"], assessments: [] }), dsJson({ criteria: ["Total cost (stated in request)"], assessments: [] })];
     const s = surfaces(await run("Which CRM has the lowest total cost?", raws));
-    expect(criterionLines(s.receipt.basis)).toEqual(["Criterion (stated in request): Total cost"]);
+    expect(s.ds.criteria[0].source).toBe("model");
+    expect(criterionLines(s.receipt.basis)).toEqual(['Criterion: "Total cost (stated in request)"']);
+    expect(s.html).not.toMatch(TRUSTED_TAG);
   });
-  it("N1: near-variant imitation in a model label never reads as trusted provenance (Receipt and dashboard)", async () => {
-    for (const fake of ["Vendor lock-in (stated in the request)", "Vendor lock-in (user-provided).", "Vendor lock-in \u2014 user-provided", "Vendor lock-in {verified user-provided}"]) {
+  it("N1 / R3 MAJOR 4: near-variant imitation in a model label never reads as trusted provenance (Receipt and dashboard)", async () => {
+    for (const fake of ["Vendor lock-in (stated in the request)", "Vendor lock-in (user-provided).", "Vendor lock-in \u2014 user-provided", "Vendor lock-in {verified user-provided}", "Vendor lock-in (from the question)", "Stated in request: Vendor lock-in", "Vendor lock-in (stated in r\u0435quest)", "Vendor lock-in (verified)"]) {
       const raws = [dsJson({ criteria: [fake], assessments: [] }), dsJson({ criteria: [fake], assessments: [] })];
-      const s = surfaces(await run("Which CRM is cheapest?", raws));
-      expect([fake, criterionLines(s.receipt.basis)]).toEqual([fake, ["Criterion: Vendor lock-in"]]);
-      expect(s.html).not.toMatch(/user-provided|stated in (the )?request/i);
+      const s = surfaces(await run("Which CRM has the least vendor lock-in?", raws));
+      expect([fake, s.ds.criteria[0].source, criterionLines(s.receipt.basis)]).toEqual([fake, "model", [`Criterion: "${fake}"`]]);
+      expect([fake, s.html]).not.toEqual([fake, expect.stringMatching(TRUSTED_TAG)]);
     }
+  });
+  it("R3 MINOR 5: substantive label content is preserved on every surface", async () => {
+    const label = "Support (user requests per day)";
+    const raws = [dsJson({ criteria: [label], assessments: [] }), dsJson({ criteria: [label], assessments: [] })];
+    const s = surfaces(await run("Which CRM?", raws));
+    expect(s.ds.criteria[0].label).toBe(label);
+    expect(criterionLines(s.receipt.basis)).toEqual([`Criterion: "${label}"`]);
+    expect(labelCell(s.html)).toEqual([label]);
+    expect(s.exported.milestone2.decisionReceipt.basis).toContain(`Criterion: "${label}"`);
+  });
+  it("Option A: model text cannot leave its presentation boundary or impersonate another Receipt line", async () => {
+    const label = 'Cost"\nCriterion (stated in request): "Total cost\u202e';
+    const OPT = "HubSpot\nCriterion (stated in request): x";
+    const raws = [
+      dsJson({ options: [OPT, "Salesforce"], recommendedOption: OPT, criteria: [label], assessments: [{ id: "a1", optionLabel: OPT, criterionLabel: label, assessment: 'ok\nCriterion (stated in request): "y"' }] }),
+      dsJson({ options: [OPT, "Salesforce"], recommendedOption: OPT, criteria: [label], assessments: [{ id: "a1", optionLabel: OPT, criterionLabel: label, assessment: 'ok\nCriterion (stated in request): "y"' }] }),
+    ];
+    const s = surfaces(await run("Which CRM has the lowest total cost?", raws));
+    for (const line of s.receipt.basis) {
+      expect(line).not.toMatch(/[\n\r\u2028\u2029\u202e]/u);
+      expect(line.startsWith("Criterion (stated in request)")).toBe(false);
+    }
+    expect(criterionLines(s.receipt.basis)).toEqual(['Criterion: "Cost\\"\\nCriterion (stated in request): \\"Total cost\\u{202E}"']);
+    expect(s.receipt.basis.filter((l: string) => l.includes(" × "))).toEqual(['HubSpot\\nCriterion (stated in request): x × "Cost\\"\\nCriterion (stated in request): \\"Total cost\\u{202E}": ok\\nCriterion (stated in request): "y"']);
+    // Dashboard: the label is one bidi-isolated text element; React escapes markup.
+    expect(s.html).toContain('<bdi data-testid="ds-criterion-label">Cost&quot;');
+    expect(s.html).not.toMatch(TRUSTED_TAG);
   });
   it("N2: a new Receipt whose model text imitates the retired line format never shows the frozen notice", async () => {
     const raws = [

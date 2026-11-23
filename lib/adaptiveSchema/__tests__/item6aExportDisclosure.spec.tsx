@@ -17,7 +17,7 @@ import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPd
 import { extractPdfTextNodes } from "@/lib/pdf/__tests__/testUtils";
 import { extractDocxText } from "@/lib/docx/__tests__/testUtils";
 import { adaptiveResearchJsonExportV1Schema } from "@/lib/adaptiveSchema/jsonExportSchema";
-import { DERIVED_DISCLOSURE_NOTE, LEGACY_FROZEN_RECEIPT_NOTICE } from "@/lib/adaptiveSchema/criterionProvenance";
+import { DERIVED_DISCLOSURE_NOTE, LEGACY_FROZEN_RECEIPT_NOTICE, receiptCriterionLine } from "@/lib/adaptiveSchema/criterionProvenance";
 import { PersonalReviewReceiptSection } from "@/components/personalReview/PersonalReviewDetail";
 import { TeamReviewReceiptSection } from "@/components/teamGovernance/AdaptiveReviewDetail";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
@@ -45,7 +45,7 @@ function preSixA(format: "pdf" | "docx" | "json"): { rec: Rec; label: string; li
   delete m2.result.criteriaProvenance;
   m2.result.criteria[0].source = "user";
   const label: string = m2.result.criteria[0].label;
-  const i = m2.decisionReceipt.basis.findIndex((l: string) => l === `Criterion: ${label}`);
+  const i = m2.decisionReceipt.basis.findIndex((l: string) => l === receiptCriterionLine(label, "model"));
   expect(i).toBeGreaterThanOrEqual(0);
   const line = `Criterion: ${label} (user-provided)`;
   m2.decisionReceipt.basis[i] = line;
@@ -143,7 +143,7 @@ describe("N2 — export notice and JSON flag are gated on trusted structure, nev
 describe("review Receipt cards (personal and Team review pages) — rendered markup", () => {
   const receipt = (basis: string[]) => ({ conclusion: "Choose option: HubSpot — fits.", basis, assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: false });
   const LEGACY = ["Criterion: Total cost (user-provided)", "Criterion: Vendor lock-in"];
-  const CURRENT = ["Criterion (stated in request): Total cost", "Criterion: Vendor lock-in"];
+  const CURRENT = ['Criterion (stated in request): "Total cost"', 'Criterion: "Vendor lock-in"', 'Criterion: "Budget (user-provided)"'];
   it.each([
     ["personal", PersonalReviewReceiptSection],
     ["team", TeamReviewReceiptSection],
@@ -153,7 +153,7 @@ describe("review Receipt cards (personal and Team review pages) — rendered mar
     expect(legacy).toContain("Criterion: Total cost (user-provided)");
     const current = renderToStaticMarkup(createElement(Section as any, { schemaId: "decision_support", receipt: receipt(CURRENT) }));
     expect(current).not.toContain("receipt-legacy-provenance-notice");
-    expect(current).toContain("Criterion (stated in request): Total cost");
+    expect(current).toContain("Criterion (stated in request): &quot;Total cost&quot;");
     // N2: the same frozen lines under another (trusted) schema never trigger the notice.
     const otherSchema = renderToStaticMarkup(createElement(Section as any, { schemaId: "definition_explanation", receipt: receipt(LEGACY) }));
     expect(otherSchema).not.toContain("receipt-legacy-provenance-notice");

@@ -94,6 +94,7 @@ const mockAuthedFetch = jest.fn();
 jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) => mockAuthedFetch(...a) }));
 
 import { undoCriticalContrastClasses } from "./criticalContrastSlice";
+import { ITEM6A_LABEL_BDI_OPEN, undoItem6aPresentation } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
 import { createHash } from "crypto";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -350,7 +351,12 @@ if (CAPTURE) {
       const base = BASELINE.cases[c.id];
       const off = await renderPage(c, false);
       // Order 6 critical-contrast slice: the baseline predates it; compare with its class changes reversed.
-      const comparableDom = (dom: string) => undoCriticalContrastClasses(dom).markup;
+      // Item 6A structural correction (owner Option A, 2026-11-23): the baseline predates it; only the dashboard label
+      // wrapper and the Receipt label quoting are reverted (verified exact inverse), and their counts are pinned below.
+      const comparableDom = (dom: string) => undoItem6aPresentation(undoCriticalContrastClasses(dom).markup).markup;
+      const item6a = undoItem6aPresentation(undoCriticalContrastClasses(off.dom).markup);
+      expect([c.id, item6a.markup.includes("ds-criterion-label")]).toEqual([c.id, false]);
+      expect([c.id, item6a.bdi]).toEqual([c.id, occurrences(off.dom, ITEM6A_LABEL_BDI_OPEN)]);
       const pin = ATTRIBUTION.cases[c.id];
       const expectedSha = pin ? pin.domSha256 : base.domSha256;
       if (pin) expect([c.id, pin.domSha256 !== base.domSha256]).toEqual([c.id, true]);

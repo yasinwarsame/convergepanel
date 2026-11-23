@@ -61,8 +61,8 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/adaptiveSchema/dsLabelWording.ts": "db50c0e7b9cec1ad8416a566b2d08c4ed16fefa1",
   // ITEM6A-REPIN lib/adaptiveSchema/decisionSupportAlignment.ts: b19e49caacc05c52c17a4676a7321dca654d132c → 02c1a16ede3f31648187cb5a2e4d34dd83cba394. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
   "lib/adaptiveSchema/decisionSupportAlignment.ts": "02c1a16ede3f31648187cb5a2e4d34dd83cba394",
-  // ITEM6A-REPIN lib/adaptiveSchema/decisionReceiptBuilder.ts: e32c42b64d7d1d05f41dee95c548dacc76668640 → 39e50d605b57698829dad03069ccea2fe6848810. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
-  "lib/adaptiveSchema/decisionReceiptBuilder.ts": "39e50d605b57698829dad03069ccea2fe6848810",
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionReceiptBuilder.ts: e32c42b64d7d1d05f41dee95c548dacc76668640 → 094ff609ae3e8ad958752fbf638e2870aa95cd7b. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion labels written verbatim as escaped, quoted data; assessment lines line-safety escaped; no other change.
+  "lib/adaptiveSchema/decisionReceiptBuilder.ts": "094ff609ae3e8ad958752fbf638e2870aa95cd7b",
   "lib/adaptiveSchema/governanceRecordParser.ts": "2a195deca74df74c0f4701743bf1f78033ffc5e2",
   // P0 research-results restoration (owner-approved 2026-11-01): `generic` added to the legacy persisted allowlist
   // and its comment only; no provenance code. Was 9f9ca552d033bcdabe5fcb52862356e5f638e8b5 at 9eca1e3.
@@ -87,8 +87,8 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // 09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367.
   "lib/user/runDocumentToPublicResults.ts": "09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
-  // ITEM6A-REPIN components/adaptive/DecisionSupportView.tsx: e3beb32c1161f42d84222b1633a6bd8b1bb98939 → 77c15162abfbf3c48deab53d83dacce436278378. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change.
-  "components/adaptive/DecisionSupportView.tsx": "77c15162abfbf3c48deab53d83dacce436278378",
+  // ITEM6A-REPIN components/adaptive/DecisionSupportView.tsx: e3beb32c1161f42d84222b1633a6bd8b1bb98939 → 8501d85dfd92a798e1bcddd3ce4205e95169b82b. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion label rendered verbatim in a <bdi> (no rewriting); no other change.
+  "components/adaptive/DecisionSupportView.tsx": "8501d85dfd92a798e1bcddd3ce4205e95169b82b",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
   // c16 (review of 48f3739, MAJOR-2): ONLY the consensus field of a run whose slots are not independent executing models

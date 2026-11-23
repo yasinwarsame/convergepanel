@@ -1,62 +1,61 @@
 /**
- * Item 6A — authoritative user-criterion provenance (owner rule, 2026-10-14).
+ * Item 6A — authoritative user-criterion provenance (owner rule, 2026-10-14; structural correction, owner Option A,
+ * 2026-11-23).
  *
- * The ONLY authority for "this criterion came from the user" is the user's
- * original submitted request text. Model output is never authoritative for
- * user-origin metadata: the decision_support schema's `userProvidedCriteria`
- * field is a model self-report and is deliberately ignored here.
+ * The ONLY authority for "this criterion came from the user" is the user's original submitted request QUESTION (never
+ * the context field, owner decision F8). Model output is never authoritative for user-origin metadata: the
+ * decision_support schema's `userProvidedCriteria` field is a model self-report and is deliberately ignored here.
  *
- * Rule (`CRITERIA_PROVENANCE_RULE` = "request_text_v1"):
- *  - every criterion starts as "model";
- *  - it is "user" only when its DISPLAYED label, normalized, occurs in the
- *    normalized request QUESTION (never the context field, owner decision F8)
- *    as a contiguous run of whole tokens in the same order;
- *  - normalization is case, punctuation and whitespace only: NFKC, lowercase,
- *    invisible format characters (Unicode Cf) removed so they never split a word;
- *  - lexical units are cohesive (owner policy N4): a hyphen or apostrophe
- *    between two letters/digits stays inside the token, so "non-refundable",
- *    "can't", "re-entry", "low-cost" and "5-year" are single tokens and never
- *    match "refundable", "can", "entry", "cost" or "year";
- *  - numeric expressions are cohesive (N3): any punctuation or symbol between
- *    two digits (".", ",", "٫", "٬", "·", "−", "⁄", "/", ":", "'", ...), a
- *    digit-group space (NBSP, figure, thin, narrow NBSP), a spaced range
- *    ("10 - 15", "10 – 15", "10 ~ 15") and a leading sign ("-5", "−5", "+5")
- *    stay inside the number token;
- *  - ambiguous numeric boundaries fail closed: a match whose first/last label
- *    token is a number is rejected when the adjacent question token is another
- *    number, or a range/ratio connector ("to", "through", "and", "or", "of",
- *    "by", "x", "vs", ...) followed by a number ("1 000 users", "between 5 and
- *    10 years", "3 of 5 users");
- *  - no synonyms, stemming, plural folding, semantic similarity or model judgment;
- *  - a missing/empty question, or a label with no tokens, fails closed to "model".
+ * Matching rule (`CRITERIA_PROVENANCE_RULE` = "request_text_v1"). Every criterion starts as "model". It is "user" only
+ * when ALL of the following hold; anything uncertain stays "model" (deliberate false negatives, see below):
  *
- * Known, accepted limitations (all fail closed, never over-attribute):
- *  - scripts written without spaces (e.g. Chinese, Japanese, Thai) tokenize as
- *    whole runs, so a criterion embedded in a longer run is not recognized;
- *  - inflected forms ("costs" vs "cost") are not recognized;
- *  - spaced and hyphenated forms are different units ("time to deploy" does not
- *    match "time-to-deploy"); order matters; scattered words never match.
+ *  1. Segmentation. Both texts are NFC-normalized with invisible format characters (Unicode Cf) removed, then split
+ *     into WORDS (a letter or digit followed by letters, digits and combining marks) and the GAPS between them. Words
+ *     compare by NFKC + lowercase; gaps compare by NFKC with whitespace runs collapsed to one space.
+ *  2. The label is a phrase. After trimming whitespace it must begin and end with a word, so a label that carries any
+ *     leading or trailing decoration ("Cost (from the question)", "Total cost.") never matches.
+ *  3. Literal phrase. The label's words must occur in the question contiguously and in order, and every gap INSIDE the
+ *     label must equal the question's gap at that position (so "non-refundable" matches only "non-refundable", "low
+ *     cost" never matches "low-cost", "total cost" never matches "total, cost"). Compounds are therefore cohesive.
+ *  4. Plain boundaries — an ALLOW-list, not a deny-list. The question text touching the match on each side must be the
+ *     start / end of the question or consist only of whitespace, ordinary sentence punctuation (. , ; : ! ?), ASCII /
+ *     typographic double quotes and brackets, arranged as a sentence boundary: on the left the character touching the
+ *     match is whitespace, an opening bracket/quote, or the start of the question; on the right, closing brackets /
+ *     quotes / sentence punctuation may touch the match but must be followed by whitespace or the end of the question.
+ *     Every other character — every dash, apostrophe, sign, mathematical, currency or other symbol, any numeric
+ *     punctuation, a stray combining mark, any unlisted character — makes the boundary ambiguous and the match fails.
+ *     This covers "cost–benefit", "non--refundable", "can´t", "±5", ".5", "3/4", "10:30", "$5" and "5%" without any
+ *     per-character substitution.
+ *  5. Numeric proximity. When any label word is numeric (contains a digit, or is an English number word), the match
+ *     fails if any of the three question words on either side of it is numeric. This covers ranges, ratios and
+ *     number-word constructions in any connecting language ("three to five years", "4 out of 5 stars", "1 in 5",
+ *     "2 bis 5 Jahre", "1 000 users").
+ *  6. A missing / empty question, or a label without words, fails closed to "model". No synonyms, stemming, plural
+ *     folding, semantic similarity or model judgment.
  *
- * Model-written labels are display text, never provenance metadata (N1): the
- * trusted provenance is rendered outside the label (a separate tag in the UI;
- * in Receipt text, between "Criterion" and the colon, a position model text
- * cannot occupy), and criterionDisplayLabel() removes any leading or trailing
- * bracketed / dash-separated segment that makes an origin claim (mentions the
- * user, the request, or provenance together with provided / stated / supplied /
- * given / specified / requested / verified / origin), so a label cannot imitate
- * a provenance statement.
+ * Deliberate false negatives (product trade-off, owner policy "favor false negatives over false positives"): labels
+ * with decoration or trailing punctuation; punctuation inside a phrase that differs from the question ("total, cost");
+ * different dash / apostrophe characters inside a compound ("can't" vs "can’t"); a phrase in single quotes or touching
+ * any symbol; a numeric criterion near another number ("5 years" in "under $500 and 5 years"); inflected forms;
+ * scripts written without spaces (Chinese, Japanese, Thai), where a criterion inside a longer run is not recognized;
+ * number words outside English are recognized only when written in digits.
  *
- * Legacy disclosure (N2) is gated on trusted structure only: the record's
- * system-written schemaId must be "decision_support", a result carrying the
- * current marker never triggers it, and only a basis line in the retired
- * criterion-line format ("Criterion: <label> (user-provided)", not an
- * assessment line, which always contains " × ") counts. New Receipts never
- * write that format (the tag moved, labels are sanitized), so model text cannot
- * produce it. A pre-6A criterion label that itself contained " × " would not be
- * recognized (documented false negative).
+ * Presentation (owner Option A): model-written labels are DATA. They are never rewritten, shortened or sanitized, and
+ * provenance is never inferred from the displayed string. The trusted provenance tag is rendered separately — a
+ * separate element in the UI; in Receipt text, between "Criterion" and the colon, a position model text cannot occupy —
+ * and the label follows as an escaped, double-quoted string (`Criterion (stated in request): "Total cost"`,
+ * `Criterion: "Cost (from the question)"`), so a label can neither close its quotes, start a new line nor reorder text.
  *
- * This module is imported by client components, so it must stay free of
- * server-only dependencies.
+ * Legacy disclosure (N2) is gated on trusted structure only: the record's system-written schemaId must be
+ * "decision_support", a result carrying the current marker never triggers it (exports, which have the stored result),
+ * and only a basis line in the retired, UNQUOTED criterion-line format ("Criterion: <label> (user-provided)", not an
+ * assessment line, which always contains " × ") counts. Every criterion line this version writes ends with the
+ * system-written closing quote, so no model text can produce the retired shape. Review pages do not receive the stored
+ * result's marker (documented limitation); there the schemaId gate plus the system-written line structure decide, and
+ * a genuine retired line always keeps its notice (fail closed toward disclosure). A pre-6A label that itself contained
+ * " × " would not be recognized (documented false negative).
+ *
+ * This module is imported by client components, so it must stay free of server-only dependencies.
  */
 
 import type { AggregatedDecisionCriterion, DecisionSupportResult } from "./types";
@@ -67,99 +66,97 @@ export type CriteriaProvenanceRule = typeof CRITERIA_PROVENANCE_RULE;
 
 /** Invisible format characters (Unicode Cf: soft hyphen, zero-width space/joiners, BOM, word joiner, bidi marks). Removed, never treated as separators. */
 const FORMAT_CHARS = /\p{Cf}/gu;
-/** Digit-group spaces used as thousands separators in some locales. */
-const GROUP_SPACES = "\\u00A0\\u2007\\u2009\\u202F";
-/** A spaced numeric range ("10 - 15", "10 – 15", "10 ~ 15") is collapsed to one expression before tokenizing. */
-const SPACED_RANGE = new RegExp(`(\\p{N})[\\s${GROUP_SPACES}]*([-\\u2010-\\u2015\\u2212~])[\\s${GROUP_SPACES}]*(?=\\p{N})`, "gu");
-const W = "\\p{L}\\p{N}\\p{M}";
-/**
- * One cohesive lexical unit: an optional leading sign before a digit, then letter/number/mark runs joined by
- * (a) any punctuation, symbol or digit-group space BETWEEN TWO DIGITS, or (b) a hyphen or apostrophe between two
- * letters/digits (owner policy N4: compounds and contractions are single units).
- */
-const TOKEN = new RegExp(
-  `(?:(?<![${W}])[-\\u2212+](?=\\p{N}))?[${W}]+(?:(?:(?<=\\p{N})[\\p{P}\\p{S}${GROUP_SPACES}](?=\\p{N})|(?<=[${W}])[-\\u2010\\u2011'\\u2019\\u02BC](?=[${W}]))[${W}]+)*`,
-  "gu"
+/** A word: a letter or digit, then letters, digits and combining marks. A combining mark can never start a word. */
+const WORD = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu;
+
+/** A text split into words and the gaps around them: gaps[i] precedes words[i]; gaps[words.length] follows the last word. */
+export interface ProvenanceSegments {
+  words: string[];
+  gaps: string[];
+}
+
+const wordKey = (w: string) => w.normalize("NFKC").toLowerCase().replace(FORMAT_CHARS, "");
+const gapKey = (g: string) => g.normalize("NFKC").replace(FORMAT_CHARS, "").replace(/\s+/gu, " ");
+
+export function provenanceSegments(text: string | null | undefined): ProvenanceSegments {
+  if (typeof text !== "string") return { words: [], gaps: [""] };
+  const s = text.normalize("NFC").replace(FORMAT_CHARS, "");
+  const words: string[] = [];
+  const gaps: string[] = [];
+  let last = 0;
+  for (const m of s.matchAll(WORD)) {
+    gaps.push(gapKey(s.slice(last, m.index)));
+    words.push(wordKey(m[0]));
+    last = m.index! + m[0].length;
+  }
+  gaps.push(gapKey(s.slice(last)));
+  return { words, gaps };
+}
+
+/** Boundary allow-list. Anything not listed here is ambiguous. */
+const SPACE = /^\s$/u;
+const SENTENCE = new Set([".", ",", ";", ":", "!", "?"]);
+const OPENERS = new Set(['"', "“", "„", "«", "(", "[", "{"]);
+const CLOSERS = new Set(['"', "”", "»", ")", "]", "}"]);
+const allowedBoundaryChar = (c: string) => SPACE.test(c) || SENTENCE.has(c) || OPENERS.has(c) || CLOSERS.has(c);
+
+/** Left of the match: start of question, or allowed characters whose part touching the match is only opening brackets/quotes after whitespace. */
+function plainLeft(gap: string, atStart: boolean): boolean {
+  const chars = [...gap];
+  if (!chars.every(allowedBoundaryChar)) return false;
+  let i = chars.length;
+  while (i > 0 && OPENERS.has(chars[i - 1])) i--;
+  if (i === 0) return atStart;
+  return SPACE.test(chars[i - 1]);
+}
+
+/** Right of the match: end of question, or allowed characters whose part touching the match is only closers / sentence punctuation, then whitespace. */
+function plainRight(gap: string, atEnd: boolean): boolean {
+  const chars = [...gap];
+  if (!chars.every(allowedBoundaryChar)) return false;
+  let i = 0;
+  while (i < chars.length && (CLOSERS.has(chars[i]) || SENTENCE.has(chars[i]))) i++;
+  if (i === chars.length) return atEnd;
+  return SPACE.test(chars[i]);
+}
+
+/** English number words (digits are recognized in every script through \p{N}). */
+const NUMBER_WORDS = new Set(
+  (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen " +
+    "eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million billion trillion " +
+    "dozen half quarter first second third fourth fifth sixth seventh eighth ninth tenth"
+  ).split(" ")
 );
+const isNumericWord = (w: string) => /\p{N}/u.test(w) || NUMBER_WORDS.has(w);
+const NUMERIC_WINDOW = 3;
 
-/** Normalized tokens: NFKC, lowercase, format characters removed, spaced ranges collapsed, then cohesive TOKEN units. */
-export function provenanceTokens(text: string | null | undefined): string[] {
-  if (typeof text !== "string") return [];
-  return text.normalize("NFKC").toLowerCase().replace(FORMAT_CHARS, "").replace(SPACED_RANGE, "$1$2").match(TOKEN) ?? [];
-}
-
-const HAS_DIGIT = /\p{N}/u;
-/** Words that join two numbers into one range / ratio / alternative ("5 to 10", "3 of 5", "2 x 4"). */
-const NUMERIC_CONNECTORS = new Set(["to", "through", "thru", "till", "until", "and", "or", "of", "by", "x", "vs", "versus", "per"]);
-function numericNeighbour(tokens: string[], at: number, step: -1 | 1): boolean {
-  const t = tokens[at];
-  if (t === undefined) return false;
-  if (HAS_DIGIT.test(t)) return true;
-  const next = tokens[at + step];
-  return NUMERIC_CONNECTORS.has(t) && next !== undefined && HAS_DIGIT.test(next);
-}
-
-/**
- * True only when `needle` occurs in `haystack` as a contiguous, same-order run of whole tokens AND that occurrence
- * is not an ambiguous fragment of a larger numeric expression (fail closed).
- */
-function containsTokenRun(haystack: string[], needle: string[]): boolean {
-  if (needle.length === 0 || needle.length > haystack.length) return false;
-  const firstNumeric = HAS_DIGIT.test(needle[0]);
-  const lastNumeric = HAS_DIGIT.test(needle[needle.length - 1]);
-  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
-    for (let j = 0; j < needle.length; j++) {
-      if (haystack[i + j] !== needle[j]) continue outer;
-    }
-    if (firstNumeric && numericNeighbour(haystack, i - 1, -1)) continue;
-    if (lastNumeric && numericNeighbour(haystack, i + needle.length, 1)) continue;
-    return true;
+function matchesAt(q: ProvenanceSegments, l: ProvenanceSegments, i: number): boolean {
+  const n = l.words.length;
+  for (let j = 0; j < n; j++) {
+    if (q.words[i + j] !== l.words[j]) return false;
+    if (j > 0 && q.gaps[i + j] !== l.gaps[j]) return false;
   }
-  return false;
-}
-
-/** An origin claim: mentions the user / request / provenance AND an origin verb or status. Matched on NFKC, Cf-free, lowercase text. */
-const ORIGIN_SUBJECT = /\b(?:user|users|requester|request|requested|customer|client|provenance|origin)\b/u;
-const ORIGIN_STATUS = /(?:provid|stat|suppl|given|specif|request|verif|origin|provenance|defin|select|ask)/u;
-const isOriginClaim = (segment: string) => {
-  const t = segment.toLowerCase();
-  return ORIGIN_SUBJECT.test(t) && ORIGIN_STATUS.test(t.replace(ORIGIN_SUBJECT, " ")) || /\buser\s*[-‐-―]?\s*provided\b/u.test(t);
-};
-const TRAILING_PUNCT = /[\s.!?,;:。．！？，；：]+$/u;
-const TRAILING_BRACKETED = /\s*[([{<«〈【]([^()[\]{}<>«»〈〉【】]*)[)\]}>»〉】]\s*$/u;
-const LEADING_BRACKETED = /^\s*[([{<«〈【]([^()[\]{}<>«»〈〉【】]*)[)\]}>»〉】]\s*/u;
-const TRAILING_DASHED = /^(.*\S)\s+[-‐-―|:~]\s+(.+)$/u;
-export const UNLABELLED_CRITERION = "Unlabelled criterion";
-
-/**
- * Display text for a model-written criterion label (N1): removes any leading / trailing bracketed or spaced-dash
- * segment that makes an origin claim (and trailing punctuation left behind), repeatedly. A label with no such segment
- * is returned unchanged, byte for byte; substantive bracketed content ("Cost (USD)", "API (user-facing)") is kept.
- */
-export function criterionDisplayLabel(label: string): string {
-  const raw = typeof label === "string" ? label : "";
-  let probe = raw.normalize("NFKC").replace(FORMAT_CHARS, "");
-  let changed = false;
-  for (let guard = 0; guard < 8; guard++) {
-    const trimmed = probe.replace(TRAILING_PUNCT, "");
-    let m = TRAILING_BRACKETED.exec(trimmed);
-    if (m && isOriginClaim(m[1])) { probe = trimmed.slice(0, m.index); changed = true; continue; }
-    m = TRAILING_DASHED.exec(trimmed);
-    if (m && isOriginClaim(m[2])) { probe = m[1]; changed = true; continue; }
-    m = LEADING_BRACKETED.exec(trimmed);
-    if (m && isOriginClaim(m[1])) { probe = trimmed.slice(m[0].length); changed = true; continue; }
-    break;
+  if (!plainLeft(q.gaps[i], i === 0)) return false;
+  if (!plainRight(q.gaps[i + n], i + n === q.words.length)) return false;
+  if (l.words.some(isNumericWord)) {
+    for (let k = Math.max(0, i - NUMERIC_WINDOW); k < i; k++) if (isNumericWord(q.words[k])) return false;
+    for (let k = i + n; k < Math.min(q.words.length, i + n + NUMERIC_WINDOW); k++) if (isNumericWord(q.words[k])) return false;
   }
-  if (!changed) return raw;
-  const out = probe.replace(TRAILING_PUNCT, "").trim();
-  return out.length > 0 ? out : UNLABELLED_CRITERION;
+  return true;
 }
 
-/** Classifies ONE displayed criterion label (after criterionDisplayLabel) against the user's original request question. Never consults model output. */
+/** Classifies ONE model-written criterion label, exactly as written, against the user's original request question. Never consults model output. */
 export function classifyCriterionProvenance(label: string, originalRequest: string | null | undefined): "user" | "model" {
-  const requestTokens = provenanceTokens(originalRequest);
-  if (requestTokens.length === 0) return "model";
-  return containsTokenRun(requestTokens, provenanceTokens(criterionDisplayLabel(label))) ? "user" : "model";
+  const q = provenanceSegments(originalRequest);
+  if (q.words.length === 0) return "model";
+  const trimmed = typeof label === "string" ? label.replace(FORMAT_CHARS, "").trim() : "";
+  const l = provenanceSegments(trimmed);
+  const n = l.words.length;
+  // The label must be a bare phrase: nothing but words and inner gaps (rule 2).
+  if (n === 0 || l.gaps[0] !== "" || l.gaps[n] !== "" || n > q.words.length) return "model";
+  for (let i = 0; i + n <= q.words.length; i++) if (matchesAt(q, l, i)) return "user";
+  return "model";
 }
 
 /**
@@ -189,8 +186,8 @@ export function hasUnverifiedLegacyCriteria(result: Pick<DecisionSupportResult, 
 
 /**
  * Decision Receipt criterion tags (N1). The trusted tag is written BETWEEN "Criterion" and the colon
- * ("Criterion (stated in request): Total cost"), a position the model-written label can never occupy; a
- * model-identified criterion has no tag ("Criterion: Total cost").
+ * ('Criterion (stated in request): "Total cost"'), a position the model-written label can never occupy; a
+ * model-identified criterion has no tag ('Criterion: "Total cost"').
  */
 export const RECEIPT_TAG_USER = " (stated in request)";
 export const RECEIPT_TAG_UNVERIFIED = " (provenance unverified)";
@@ -203,9 +200,57 @@ export function receiptCriterionTag(provenance: CriterionProvenance): string {
   return "";
 }
 
-/** The one Receipt criterion-line format: system-written tag before the colon, sanitized model label after it. */
+/**
+ * Escapes model-written text for a one-line textual Receipt: a backslash, every quotation mark that could read as the
+ * delimiter (see isQuoteLike), and every character that could break,
+ * reorder or hide text — controls, invisible format and bidirectional characters, line / paragraph separators,
+ * surrogates, private-use and unassigned code points — are written as visible escapes. All other text, including
+ * brackets and words such as "(user-provided)", is kept exactly as the model wrote it.
+ */
+const ESCAPE_AS_CODE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\p{Co}\p{Cn}]/u;
+/** Quotation marks that could read as the delimiter: anything that NFKC-normalizes to '"', and every initial / final quotation mark except the two typographic apostrophes (U+2018 / U+2019), which stay readable in labels such as "user’s". */
+const isQuoteLike = (c: string) => c.normalize("NFKC").includes('"') || (/[\p{Pi}\p{Pf}]/u.test(c) && c !== "\u2018" && c !== "\u2019");
+const codeEscape = (c: string) => `\\u{${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}}`;
+export function escapeReceiptText(text: string): string {
+  const s = typeof text === "string" ? text : "";
+  let out = "";
+  for (const c of s) {
+    if (c === "\\") out += "\\\\";
+    else if (c === '"') out += '\\"';
+    else if (c === "\n") out += "\\n";
+    else if (c === "\r") out += "\\r";
+    else if (c === "\t") out += "\\t";
+    else if (ESCAPE_AS_CODE.test(c) || isQuoteLike(c)) out += codeEscape(c);
+    else out += c;
+  }
+  return out;
+}
+
+/**
+ * Line-safety escape for model-written text that is NOT quoted (assessment lines' option and assessment text): only the
+ * characters that could break, reorder or hide text are escaped; quotation marks and backslashes are kept as written.
+ */
+export function escapeReceiptLineText(text: string): string {
+  const s = typeof text === "string" ? text : "";
+  let out = "";
+  for (const c of s) {
+    if (c === "\n") out += "\\n";
+    else if (c === "\r") out += "\\r";
+    else if (c === "\t") out += "\\t";
+    else if (ESCAPE_AS_CODE.test(c)) out += codeEscape(c);
+    else out += c;
+  }
+  return out;
+}
+
+/** A model-written label as Receipt data: escaped and enclosed in system-written double quotes. */
+export function quoteReceiptLabel(label: string): string {
+  return `"${escapeReceiptText(label)}"`;
+}
+
+/** The one Receipt criterion-line format: system-written tag before the colon, the model label verbatim (escaped, quoted) after it. */
 export function receiptCriterionLine(label: string, provenance: CriterionProvenance): string {
-  return `Criterion${receiptCriterionTag(provenance)}: ${criterionDisplayLabel(label)}`;
+  return `Criterion${receiptCriterionTag(provenance)}: ${quoteReceiptLabel(label)}`;
 }
 
 export const LEGACY_PROVENANCE_LIMITATION =

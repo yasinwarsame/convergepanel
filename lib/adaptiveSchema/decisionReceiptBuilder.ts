@@ -27,7 +27,7 @@
 import "server-only";
 import { PersistedAdaptiveOutputV1 } from "./persistedOutput";
 import { AdaptiveDecisionReceipt } from "./governanceRecord";
-import { criterionDisplayLabel, hasUnverifiedLegacyCriteria, LEGACY_PROVENANCE_LIMITATION, readCriterionProvenance, receiptCriterionLine } from "./criterionProvenance";
+import { escapeReceiptLineText, hasUnverifiedLegacyCriteria, LEGACY_PROVENANCE_LIMITATION, quoteReceiptLabel, readCriterionProvenance, receiptCriterionLine } from "./criterionProvenance";
 import {
   BiasBlindspotAuditResult,
   CausalExplanationResult,
@@ -366,13 +366,15 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
   const basis = [
     // Item 6A: provenance comes only from the shared accessor (criterionProvenance.ts). A verified criterion is
     // marked "(stated in request)"; a pre-6A self-reported one "(provenance unverified)"; a model one has no suffix.
-    // F3: the model-written label is display text only (reserved trailing provenance markers stripped).
-    // N1: the trusted provenance tag sits between "Criterion" and the colon; the sanitized model label follows it.
+    // N1 / Option A: the trusted provenance tag sits between "Criterion" and the colon; the model label follows it
+    // verbatim as escaped, quoted data (never rewritten, never a source of provenance).
     ...result.criteria.map((c) => receiptCriterionLine(c.label, readCriterionProvenance(result, c))),
+    // Assessment lines keep their shape; the criterion label is quoted the same way, and the other model-written parts
+    // are escaped so no model text can break the line or impersonate another Receipt line.
     ...result.assessments.map((a) => {
       const option = result.options.find((o) => o.id === a.optionId);
       const criterion = result.criteria.find((c) => c.id === a.criterionId);
-      return `${option?.label ?? a.optionId} × ${criterion ? criterionDisplayLabel(criterion.label) : a.criterionId}: ${a.assessment}`;
+      return `${escapeReceiptLineText(option?.label ?? a.optionId)} × ${criterion ? quoteReceiptLabel(criterion.label) : escapeReceiptLineText(a.criterionId)}: ${escapeReceiptLineText(a.assessment)}`;
     }),
   ];
 
