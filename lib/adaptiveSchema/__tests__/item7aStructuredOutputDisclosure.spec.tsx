@@ -224,6 +224,8 @@ describe("shared disclosure", () => {
     expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [slots[0], { modelId: "claude", call: "completed", result: "unavailable", droppedItems: { risks: -1 } }] } } as never)).toBeNull();
     expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [slots[0], { modelId: "claude", result: "unavailable" }] } } as never)).toBeNull(); // no call status
     expect(readStructuredOutputRecord({ ...base, successfulModels: 1, structuredOutput: { version: 1, slots } } as never)).toBeNull(); // call count mismatch
+    // A missing slot is rejected even when the usable and call counts happen to match.
+    expect(readStructuredOutputRecord({ totalModels: 3, successfulModels: 2, modelsWithUsableOutput: 1, structuredOutput: { version: 1, slots } } as never)).toBeNull();
     expect(deriveStructuredOutputDisclosure({ ...base, structuredOutput: { version: 1, slots: slots.slice(0, 1) } } as never)!.affected).toBeNull();
   });
 
