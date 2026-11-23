@@ -420,6 +420,8 @@ export function validateAdaptiveResponse(
   }
 
   const truncatedFields: string[] = [];
+  // Item 7A: per array field, how many whole items were cut by the schema's item cap (counts only).
+  const itemsOverLimit: Record<string, number> = {};
 
   const markTruncated = (fieldKey: string) => {
     if (!truncatedFields.includes(fieldKey)) truncatedFields.push(fieldKey);
@@ -446,6 +448,7 @@ export function validateAdaptiveResponse(
     if (Array.isArray(value)) {
       if (field.maxItems && value.length > field.maxItems) {
         data[field.key] = value.slice(0, field.maxItems);
+        itemsOverLimit[field.key] = value.length - field.maxItems;
         markTruncated(field.key);
         warn("[adaptiveSchema] Truncated array field over item cap", {
           modelId,
@@ -580,6 +583,7 @@ export function validateAdaptiveResponse(
     ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
     ...(Object.keys(droppedItems).length > 0 ? { droppedItems } : {}),
+    ...(Object.keys(itemsOverLimit).length > 0 ? { itemsOverLimit } : {}),
     ...(coercions.length > 0 ? { coercions } : {}),
   };
 }

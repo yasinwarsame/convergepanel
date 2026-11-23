@@ -24,7 +24,7 @@
  * are specific to the capture runtime (CI runs Node 24, zlib 1.3.2.1); record content is checked below and the PDF
  * hashes are the golden of that runtime.
  */
-import { countItem7aRecords, withoutItem7aRecord, type Item7aRemoval } from "../item7aHistoricalCompat";
+import { countItem7aRecords } from "../item7aHistoricalCompat";
 import { LEGACY_INFERRED_CRITERIA_LIMITATION, UNESTABLISHED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
@@ -132,18 +132,22 @@ describe("unchanged-main renderer and runtime", () => {
       const snapshot = r.reportSnapshot as Record<string, unknown>;
       return withoutItem6aMarker({ ...r, exportMetadata: { ...(r.exportMetadata as object), fileHash: null }, reportSnapshot: { ...snapshot, ...("runProvenance" in snapshot ? { runProvenance: readFrozenRunProvenance(snapshot.runProvenance) } : {}) } });
     };
+    // Item 7A scope (exportSuite.mjs step 1): every record present in a freshly built fixture was removed exactly once, and
+    // only the Decision Support fixtures with fewer usable than selected models carry one.
+    const item7a = (suite as unknown as { item7aRemoved: Record<string, { removed: number; present: number }> }).item7aRemoved;
+    expect(Object.keys(item7a).sort()).toEqual(Object.keys(suite.baseRecords).sort());
+    for (const [k, v] of Object.entries(item7a)) expect([k, v.removed]).toEqual([k, v.present]);
+    expect(Object.keys(item7a).filter((k) => item7a[k].present > 0).map((k) => k.replace(/\.(pdf|docx|json)$/, "")).filter((v, i, a) => a.indexOf(v) === i).sort()).toEqual([
+      "ds.all_models_failed.unreviewed_in_queue",
+      "ds.uncontested_go_with_failed_slots.unreviewed_in_queue",
+    ]);
     const common = Object.keys(OLD_RECORDS);
     expect(common.length).toBe(105);
     for (const k of common) {
       const frozen = (suite.baseRecords[k].reportSnapshot as Record<string, unknown>).runProvenance as Record<string, unknown> | undefined;
       if ((OLD_RECORDS[k].reportSnapshot as Record<string, unknown>).runProvenance) expect([k, frozen?.provenanceVersion]).toEqual([k, 2]);
-      // Item 7A (owner-authorized 2026-11-23): only the per-slot structured-output record of a run with a shortfall is
-      // removed from the fresh side (absent historically); its scope is asserted.
-      const item7a: Item7aRemoval[] = [];
-      const freshRecord = withoutItem7aRecord(suite.baseRecords[k], item7a);
-      expect([k, item7a.filter((r) => r.kind === "meta").length]).toEqual([k, countItem7aRecords(suite.baseRecords[k])]);
-      expect([k, countItem7aRecords(OLD_RECORDS[k])]).toEqual([k, 0]); // historical evidence never holds the record
-      expect(strip(freshRecord)).toEqual(strip(OLD_RECORDS[k]));
+      expect([k, countItem7aRecords(OLD_RECORDS[k]), countItem7aRecords(suite.baseRecords[k])]).toEqual([k, 0, 0]); // historical evidence never holds the record
+      expect(strip(suite.baseRecords[k])).toEqual(strip(OLD_RECORDS[k]));
     }
     expect(Object.keys(suite.baseRecords).filter((k) => !OLD_RECORDS[k]).sort()).toEqual(["pdf", "docx", "json"].map((f) => `ds.uncontested_choose_option.unreviewed_in_queue.synthetic_identities.${f}`).sort());
   });
@@ -257,7 +261,8 @@ describe("environment-pinned goldens", () => {
     const golden: Golden = JSON.parse(readFileSync(file(), "utf8"));
     expect(golden.fingerprintId).toBe(suite.fingerprintId);
     const basePdf = Object.fromEntries(Object.entries(suite.base).filter(([k]) => k.endsWith(".pdf")).map(([k, d]) => [k, d.sha256]));
-    const v1Pdf = Object.fromEntries(Object.entries(suite.created).filter(([k]) => k.startsWith("ds.") && k.endsWith(".pdf")).map(([k, d]) => [k, d.sha256]));
+    // Item 7A: a new export of a run carrying the per-slot record is held to the golden with only that record removed.
+    const v1Pdf = Object.fromEntries(Object.entries(suite.created).filter(([k]) => k.startsWith("ds.") && k.endsWith(".pdf")).map(([k, d]) => [k, (STRIPPED7A()[k] ?? d).sha256]));
     expect(basePdf).toEqual(golden.base);
     expect(v1Pdf).toEqual(golden.versionOne);
   });
@@ -268,6 +273,8 @@ describe("environment-pinned goldens", () => {
     for (const [k, d] of Object.entries(OLD_BASELINE.entries)) if (d.format === "pdf") expect(n26.base[k]).toBe(d.sha256);
   });
 });
+
+const STRIPPED7A = () => (suite as unknown as { created7aStripped: Record<string, { sha256: string; text?: string }> }).created7aStripped;
 
 describe("new exports", () => {
   const dsKeys = () => Object.keys(suite.created).filter((k) => k.startsWith("ds."));
@@ -281,7 +288,22 @@ describe("new exports", () => {
   it("JSON of a new DS export is byte-identical to unchanged main's JSON of the same run (marker never serialized)", () => {
     const keys = dsKeys().filter((k) => k.endsWith(".json"));
     expect(keys.length).toBe(33);
-    for (const k of keys) expect(suite.created[k].sha256).toBe(suite.base[k].sha256);
+    for (const k of keys) expect((STRIPPED7A()[k] ?? suite.created[k]).sha256).toBe(suite.base[k].sha256);
+  });
+
+  it("Item 7A: exactly the two shortfall fixtures carry the record; their real exports add only the structured-output section", () => {
+    const stripped = STRIPPED7A();
+    expect(Object.keys(stripped).map((k) => k.replace(/\.(pdf|docx|json)$/, "")).filter((v, i, a) => a.indexOf(v) === i).sort()).toEqual([
+      "ds.all_models_failed.unreviewed_in_queue",
+      "ds.uncontested_go_with_failed_slots.unreviewed_in_queue",
+    ]);
+    for (const k of Object.keys(stripped)) {
+      expect([k, stripped[k].sha256 !== suite.created[k].sha256]).toEqual([k, true]);
+      if (k.endsWith(".pdf")) {
+        const has = (t?: string) => letters(t ?? "").toLowerCase().includes(letters("Structured output completeness").toLowerCase());
+        expect([k, has(suite.created[k].text), has(stripped[k].text)]).toEqual([k, true, false]);
+      }
+    }
   });
 
   it("new DS PDFs and DOCX take the version-1 branch (differ from unchanged main)", () => {

@@ -1128,6 +1128,12 @@ export interface AdaptiveModelResult {
    * item was discarded; absent on every result produced before this field existed.
    */
   droppedItems?: Record<string, number>;
+  /**
+   * Item 7A: per array field, how many whole items were cut because the field exceeded the schema's item cap. Counts
+   * only. This is the "material shortening" signal; prose trimmed to a word cap is NOT counted here (truncatedFields
+   * keeps both, as before).
+   */
+  itemsOverLimit?: Record<string, number>;
   /** Enum coercions applied before validation, across every claim[]-shaped field. Empty/absent when the raw response already used exact enum vocabulary. */
   coercions?: AdaptiveEnumCoercion[];
   /** True when this result reflects the one-shot retry call (original response failed validation, model was re-prompted with the errors). */
@@ -1659,7 +1665,8 @@ export interface CommonResponseMeta {
   executionStatus?: "completed" | "partial" | "failed";
   /**
    * Item 7A: per selected slot, how complete its structured output was. Written only when at least one slot was not
-   * complete (unavailable, partially salvaged, or shortened to fit a field limit); absent for complete runs and for
+   * complete (unavailable, partially salvaged, or materially shortened: whole items cut by an item cap; prose trimmed to
+   * a word cap does not count); absent for complete runs and for
    * every run recorded before Item 7A, where per-model detail is therefore NOT known. Schema field keys and counts
    * only, never model content. Read through structuredOutputDisclosure.ts.
    */
@@ -1671,14 +1678,16 @@ export type StructuredOutputSlotResult = "complete" | "partial" | "unavailable";
 
 export interface StructuredOutputSlotV1 {
   modelId: ModelId;
-  /** "unavailable": nothing usable survived validation. "partial": some fields or items were not recovered. */
+  /** Whether the provider call completed ("ok" or "substituted") — kept separate from whether its output was usable. */
+  call: "completed" | "failed";
+  /** "unavailable": nothing usable survived validation. "partial": some fields or items were not recovered or were cut. */
   result: StructuredOutputSlotResult;
   /** Schema field keys with no usable value. */
   invalidFields?: string[];
-  /** Schema field keys shortened to fit the schema's own word or item limits. */
-  truncatedFields?: string[];
   /** Per kept array field, the number of items discarded by salvage. */
   droppedItems?: Record<string, number>;
+  /** Per array field, the number of whole items cut by the schema's item cap (material shortening). */
+  itemsOverLimit?: Record<string, number>;
 }
 
 export interface StructuredOutputRecordV1 {

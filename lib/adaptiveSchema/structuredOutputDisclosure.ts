@@ -1,11 +1,14 @@
 /**
- * Item 7A — structured-output degradation disclosure. The ONE place that decides what a report says about how many
- * selected models produced usable structured output, and which did not.
+ * Item 7A — structured-output degradation disclosure. The ONE place that decides what a report or export says about
+ * how many selected models produced usable structured output, and which did not.
  *
  * Source of truth: the run's persisted `CommonResponseMeta` only.
- * - `totalModels` and `modelsWithUsableOutput` are the counts (both recorded since Phase 1).
- * - `structuredOutput` is the per-slot record (written since Item 7A, only when a slot was not complete).
- * A call that completed at the provider is never counted as a usable result: usability is `modelsWithUsableOutput`.
+ * - Counts: `totalModels` (selected), `successfulModels` (provider calls that completed), `modelsWithUsableOutput`
+ *   (usable structured output). A completed provider call is never counted as a usable result.
+ * - `structuredOutput`: the per-slot record (written since Item 7A, only when a slot was not complete).
+ *
+ * Material shortening rule (Item 7A): only whole items cut because a field exceeded the schema's item cap count.
+ * Prose trimmed to a word cap is not disclosed.
  *
  * Fail closed: a missing or malformed per-slot record never becomes a guess. When the counts show a shortfall but no
  * valid per-slot record exists (every run before Item 7A), the disclosure says the affected models were not recorded.
@@ -17,21 +20,24 @@ import type { CommonResponseMeta, StructuredOutputRecordV1, StructuredOutputSlot
 
 export interface StructuredOutputDisclosureModel {
   modelId: string;
-  /** "unavailable" = no usable structured output; "partial" = some fields or items not recovered; "shortened" = cut to a field limit only. */
-  state: "unavailable" | "partial" | "shortened";
-  /** Number of schema fields with no usable value (partial only). */
+  /** "unavailable" = no usable structured output; "partial" = some fields or items not recovered, or items cut by a limit. */
+  state: "unavailable" | "partial";
+  /** Whether the provider call completed (kept separate from usability). */
+  providerCall: "completed" | "failed";
   fieldsNotRecovered: number;
-  /** Total items discarded by salvage across kept fields (partial only). */
-  itemsDropped: number;
-  /** Number of fields shortened to fit the schema's word or item limits. */
-  fieldsShortened: number;
+  itemsDiscarded: number;
+  itemsOverLimit: number;
 }
 
 export interface StructuredOutputDisclosure {
   selected: number;
+  /** Provider calls that completed; null when the run did not record the count. */
+  completedCalls: number | null;
   usable: number;
   /** e.g. "5 models selected · 4 usable structured results". */
   headline: string;
+  /** e.g. "5 of 5 provider calls completed." — null when the count was not recorded. */
+  callsLine: string | null;
   /** Per affected slot, in slot order; null when the run did not record per-slot detail. */
   affected: StructuredOutputDisclosureModel[] | null;
 }
@@ -39,26 +45,31 @@ export interface StructuredOutputDisclosure {
 const isNonNegInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0);
 
+function readCounts(v: unknown): Record<string, number> | undefined | null {
+  if (v === undefined) return undefined;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length === 0 || !entries.every(([k, n]) => k.length > 0 && isNonNegInt(n) && n > 0)) return null;
+  return Object.fromEntries(entries) as Record<string, number>;
+}
+
 function readSlot(raw: unknown): StructuredOutputSlotV1 | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.modelId !== "string" || o.modelId.length === 0) return null;
+  if (o.call !== "completed" && o.call !== "failed") return null;
   if (o.result !== "complete" && o.result !== "partial" && o.result !== "unavailable") return null;
   if (o.invalidFields !== undefined && !isStringArray(o.invalidFields)) return null;
-  if (o.truncatedFields !== undefined && !isStringArray(o.truncatedFields)) return null;
-  let droppedItems: Record<string, number> | undefined;
-  if (o.droppedItems !== undefined) {
-    if (!o.droppedItems || typeof o.droppedItems !== "object" || Array.isArray(o.droppedItems)) return null;
-    const entries = Object.entries(o.droppedItems as Record<string, unknown>);
-    if (!entries.every(([k, n]) => k.length > 0 && isNonNegInt(n) && n > 0)) return null;
-    droppedItems = Object.fromEntries(entries) as Record<string, number>;
-  }
+  const droppedItems = readCounts(o.droppedItems);
+  const itemsOverLimit = readCounts(o.itemsOverLimit);
+  if (droppedItems === null || itemsOverLimit === null) return null;
   return {
     modelId: o.modelId as StructuredOutputSlotV1["modelId"],
+    call: o.call,
     result: o.result,
     ...(o.invalidFields ? { invalidFields: o.invalidFields as string[] } : {}),
-    ...(o.truncatedFields ? { truncatedFields: o.truncatedFields as string[] } : {}),
     ...(droppedItems ? { droppedItems } : {}),
+    ...(itemsOverLimit ? { itemsOverLimit } : {}),
   };
 }
 
@@ -76,15 +87,18 @@ export function readStructuredOutputRecord(meta: Partial<CommonResponseMeta> | n
   }
   const total = meta?.totalModels;
   const usable = meta?.modelsWithUsableOutput;
+  const successful = meta?.successfulModels;
   if (!isNonNegInt(total) || slots.length !== total) return null;
   if (!isNonNegInt(usable) || slots.filter((s) => s.result !== "unavailable").length !== usable) return null;
+  if (successful !== undefined && (!isNonNegInt(successful) || slots.filter((s) => s.call === "completed").length !== successful)) return null;
   return { version: 1, slots };
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const sum = (c?: Record<string, number>) => Object.values(c ?? {}).reduce((a, b) => a + b, 0);
 
 /**
- * The disclosure for a run, or null when there is nothing to disclose (all selected models produced complete
+ * The disclosure for a run, or null when there is nothing to disclose (every selected model produced complete
  * structured output, or the run predates the counts).
  */
 export function deriveStructuredOutputDisclosure(meta: Partial<CommonResponseMeta> | null | undefined): StructuredOutputDisclosure | null {
@@ -94,39 +108,88 @@ export function deriveStructuredOutputDisclosure(meta: Partial<CommonResponseMet
   const record = readStructuredOutputRecord(meta);
   if (usable === selected && !record) return null;
   const affected: StructuredOutputDisclosureModel[] | null = record
-    ? record.slots.flatMap((s): StructuredOutputDisclosureModel[] => {
-        const fieldsShortened = s.truncatedFields?.length ?? 0;
-        if (s.result === "complete" && fieldsShortened === 0) return [];
-        const itemsDropped = Object.values(s.droppedItems ?? {}).reduce((a, b) => a + b, 0);
-        return [
-          {
-            modelId: s.modelId,
-            state: s.result === "unavailable" ? "unavailable" : s.result === "partial" ? "partial" : "shortened",
-            fieldsNotRecovered: s.result === "partial" ? (s.invalidFields?.length ?? 0) : 0,
-            itemsDropped: s.result === "partial" ? itemsDropped : 0,
-            fieldsShortened: s.result === "unavailable" ? 0 : fieldsShortened,
-          },
-        ];
-      })
+    ? record.slots.flatMap((s): StructuredOutputDisclosureModel[] =>
+        s.result === "complete"
+          ? []
+          : [
+              {
+                modelId: s.modelId,
+                state: s.result === "unavailable" ? "unavailable" : "partial",
+                providerCall: s.call,
+                fieldsNotRecovered: s.result === "partial" ? (s.invalidFields?.length ?? 0) : 0,
+                itemsDiscarded: s.result === "partial" ? sum(s.droppedItems) : 0,
+                itemsOverLimit: s.result === "partial" ? sum(s.itemsOverLimit) : 0,
+              },
+            ]
+      )
     : null;
   if (affected && affected.length === 0) return null;
+  const successful = meta?.successfulModels;
+  const completedCalls = isNonNegInt(successful) && successful <= selected ? successful : null;
   return {
     selected,
+    completedCalls,
     usable,
     headline: `${plural(selected, "model", "models")} selected · ${plural(usable, "usable structured result", "usable structured results")}`,
+    callsLine: completedCalls === null ? null : `${completedCalls} of ${selected} provider ${selected === 1 ? "call" : "calls"} completed.`,
     affected,
   };
 }
 
-/** What happened to one affected model, without its name (the caller shows the name, e.g. as a model chip). */
+/** What happened to one affected model, without its name (the caller shows the name). */
 export function describeAffectedState(m: StructuredOutputDisclosureModel): string {
-  if (m.state === "unavailable") return "unavailable — no usable structured output";
+  if (m.state === "unavailable") {
+    return m.providerCall === "failed"
+      ? "unavailable — the provider call did not complete"
+      : "unavailable — the provider call completed but returned no usable structured output";
+  }
   const parts: string[] = [];
   if (m.fieldsNotRecovered > 0) parts.push(`${plural(m.fieldsNotRecovered, "field", "fields")} not recovered`);
-  if (m.itemsDropped > 0) parts.push(`${plural(m.itemsDropped, "item", "items")} discarded`);
-  if (m.fieldsShortened > 0) parts.push(`${plural(m.fieldsShortened, "field", "fields")} shortened to fit limits`);
-  return `${m.state === "partial" ? "partially used" : "used"} — ${parts.join("; ")}`;
+  if (m.itemsDiscarded > 0) parts.push(`${plural(m.itemsDiscarded, "item", "items")} discarded as invalid`);
+  if (m.itemsOverLimit > 0) parts.push(`${plural(m.itemsOverLimit, "item", "items")} beyond field limits not included`);
+  return `partially used — ${parts.join("; ")}`;
 }
 
 /** Shown when the counts show a shortfall but the run did not record which models were affected. */
 export const STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED = "Which models were affected was not recorded for this run.";
+
+/** The JSON export's derived disclosure (Item 7A): counts, affected models by id, and the rendered lines. */
+export interface DerivedStructuredOutputDisclosure {
+  derivedAtExport: true;
+  selected: number;
+  completedCalls: number | null;
+  usable: number;
+  affected: StructuredOutputDisclosureModel[] | null;
+  lines: string[];
+}
+
+/**
+ * The disclosure an EXPORT renders: only for a run that carries a valid per-slot record (every run created since
+ * Item 7A). A run without one — every stored historical export — renders exactly as before, so a re-rendered historical
+ * export still reproduces its stored file hash. (The live report still shows such a run's counts.)
+ */
+export function deriveRecordedStructuredOutputDisclosure(meta: unknown): StructuredOutputDisclosure | null {
+  const m = meta && typeof meta === "object" ? (meta as Partial<CommonResponseMeta>) : null;
+  return readStructuredOutputRecord(m) ? deriveStructuredOutputDisclosure(m) : null;
+}
+
+export function deriveStructuredOutputExportDisclosure(meta: unknown, nameOf: (modelId: string) => string): DerivedStructuredOutputDisclosure | null {
+  const d = deriveRecordedStructuredOutputDisclosure(meta);
+  if (!d) return null;
+  return { derivedAtExport: true, selected: d.selected, completedCalls: d.completedCalls, usable: d.usable, affected: d.affected, lines: structuredOutputDisclosureLines(d, nameOf) };
+}
+
+/** Section heading used by every export format. */
+export const STRUCTURED_OUTPUT_SECTION_HEADING = "Structured output completeness";
+
+/**
+ * The plain lines every export format (PDF, DOCX, JSON) renders for a disclosure, using the caller's model names.
+ * Same wording and order as the live report notice.
+ */
+export function structuredOutputDisclosureLines(d: StructuredOutputDisclosure, nameOf: (modelId: string) => string): string[] {
+  return [
+    d.headline,
+    ...(d.callsLine ? [d.callsLine] : []),
+    ...(d.affected === null ? [STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED] : d.affected.map((m) => `${nameOf(m.modelId)}: ${describeAffectedState(m)}.`)),
+  ];
+}

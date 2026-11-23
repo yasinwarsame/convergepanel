@@ -54,6 +54,7 @@ import { COLORS, badgeStyle, pdfStyles } from "./theme";
 import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 import { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from "@/lib/adaptiveSchema/criterionProvenance";
+import { deriveRecordedStructuredOutputDisclosure, STRUCTURED_OUTPUT_SECTION_HEADING, structuredOutputDisclosureLines } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
 
 /**
  * A bulleted list. Each row is mark + text side by side. The text paginates
@@ -273,6 +274,31 @@ function PaginatingCard({ heading, children, keepAhead = CARD_HEADING_PRESENCE_A
  * one page (`bounded`) stay on one page as a single non-breaking block —
  * their heading then moves with them and can never be stranded.
  */
+/**
+ * Item 7A: the structured-output completeness section — the same shared disclosure and wording as the live report.
+ * Renders nothing for a complete run, a legacy-family export, or a record without the counts.
+ */
+function hasStructuredOutputDisclosure(record: AdaptiveResearchExportV1): boolean {
+  return record.schemaFamily === "milestone2" && deriveRecordedStructuredOutputDisclosure(record.reportSnapshot.milestone2?.meta) !== null;
+}
+
+function StructuredOutputSection({ record }: { record: AdaptiveResearchExportV1 }) {
+  const snapshot = record.reportSnapshot;
+  const d = record.schemaFamily === "milestone2" ? deriveRecordedStructuredOutputDisclosure(snapshot.milestone2?.meta) : null;
+  if (!d) return null;
+  const [head, ...rest] = structuredOutputDisclosureLines(d, (id) => exportModelIdentityLabel(snapshot.runProvenance, id));
+  return (
+    <SectionCard label={STRUCTURED_OUTPUT_SECTION_HEADING} bounded>
+      <Text style={pdfStyles.fieldValue}>{head}</Text>
+      {rest.map((line, i) => (
+        <Text key={i} style={pdfStyles.mutedText}>
+          {line}
+        </Text>
+      ))}
+    </SectionCard>
+  );
+}
+
 function SectionCard({ label, bounded = false, children }: { label: string; bounded?: boolean; children: React.ReactNode }) {
   if (bounded) {
     // The anchor: a non-breaking first child that moves to the next page would make react-pdf keep its parent whole
@@ -970,7 +996,15 @@ export function AdaptiveResearchDocument({ record }: { record: AdaptiveResearchE
     >
       <Page size="A4" style={pdfStyles.page} wrap>
         <CoverHeader record={record} />
-        <StatusSummary record={record} />
+        {/* Item 7A: without a disclosure the child list is exactly what it was (no extra element). */}
+        {hasStructuredOutputDisclosure(record) ? (
+          <>
+            <StatusSummary record={record} />
+            <StructuredOutputSection record={record} />
+          </>
+        ) : (
+          <StatusSummary record={record} />
+        )}
         {record.schemaFamily === "milestone2" ? <Milestone2Content record={record} /> : <LegacyContent record={record} />}
         <Provenance record={record} />
         <PageFooter />

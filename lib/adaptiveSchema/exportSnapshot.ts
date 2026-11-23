@@ -18,7 +18,6 @@
  * module only transforms.
  */
 
-import { readStructuredOutputRecord } from "./structuredOutputDisclosure";
 import "server-only";
 import { buildAdaptiveDecisionReceipt } from "./decisionReceiptBuilder";
 import { GovernanceRecordV1 } from "./governanceRecord";
@@ -111,16 +110,10 @@ export interface BuiltExportSnapshot {
 
 /** Never throws — a snapshot must always be buildable from any validly-parsed persisted output, even a minimal one. */
 export function buildExportSnapshot(input: BuildExportSnapshotInput): BuiltExportSnapshot {
-  // Item 7A: a selected model the run recorded as having NO usable structured output is exported as ok: false (the
-  // export's existing "(failed)" marker). Only the persisted per-slot record counts; nothing is inferred for runs
-  // without one, and an explicit caller map still wins.
-  const recorded = readStructuredOutputRecord(input.milestone2?.output.meta);
-  const unavailable = new Set(recorded ? recorded.slots.filter((s) => s.result === "unavailable").map((s) => String(s.modelId)) : []);
-  const models: AdaptiveExportModelSummary[] = input.selectedModels.map((modelId) => {
-    const explicit = input.modelResultsOkByModelId?.[modelId];
-    const ok = explicit !== undefined ? explicit : unavailable.has(String(modelId)) ? false : undefined;
-    return { modelId, ok };
-  });
+  const models: AdaptiveExportModelSummary[] = input.selectedModels.map((modelId) => ({
+    modelId,
+    ok: input.modelResultsOkByModelId?.[modelId],
+  }));
 
   if (input.milestone2) {
     const { output, governanceRecord, reviewRouting } = input.milestone2;

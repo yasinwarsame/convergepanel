@@ -726,13 +726,24 @@ A full requirement-by-requirement audit of the query-routing redesign against it
 
 **Limitations adapter** (`getAdaptiveLimitations`): concrete, computed, per-schema statements (existing shortfall notes, missing-cell counts, dispute/ambiguity flags, `decision_support`'s own recommendation caveats plus an inferred-vs-user-provided-criteria check), deduplicated by exact string match (these are programmatically generated, not model prose, so the fuzzy near-duplicate merging `textSimilarity.ts` uses elsewhere isn't needed) — plus one universal statement the shared builder itself adds when `modelsWithUsableOutput < totalModels`.
 
-**Structured-output degradation disclosure (Item 7A, 2026-11-23).** One shared module, `lib/adaptiveSchema/structuredOutputDisclosure.ts`, decides what a report says about selected vs usable models; it reads only the persisted `CommonResponseMeta`.
-- `totalModels` and `modelsWithUsableOutput` are the counts. A provider call that completed is never counted as a usable result.
-- `meta.structuredOutput` (`StructuredOutputRecordV1`, written by `buildStructuredOutputRecord` in `commonResponseMeta.ts`) is the per-slot record: `complete` / `partial` / `unavailable`, plus field keys (`invalidFields`, `truncatedFields`) and `droppedItems` counts. It is written ONLY when a slot was not complete, so complete runs persist exactly what they did before.
-- `droppedItems` (on `AdaptiveModelResult`) is set by field-level salvage in `validator.ts`: per kept array field, how many items failed validation and were discarded. Counts only; discarded content is never kept. `mergeAdaptiveRetry` carries each field's count from the attempt its value came from. Validation acceptance, retries and aggregation are unchanged.
-- Presentation: `components/adaptive/StructuredOutputNotice.tsx` renders under the summary bar (e.g. "5 models selected · 4 usable structured results", each affected slot named), and Decision Support's Panel detail states the same headline and names unavailable models. Complete runs render the same element tree as before.
-- Legacy runs (no record): when the counts show a shortfall, the notice gives the counts and says which models were affected was not recorded. Nothing is inferred. A malformed or count-inconsistent record is ignored.
-- Exports: `buildExportSnapshot` marks a selected model `ok: false` (the existing "(failed)" marker) only when the record says unavailable. The Decision Receipt is unchanged; its existing "k of N selected models did not produce usable structured output." limitation uses the same counts.
+**Structured-output degradation disclosure (Item 7A, 2026-11-23; corrected 2026-11-24).** One shared module, `lib/adaptiveSchema/structuredOutputDisclosure.ts`, decides what a report or export says about selected vs usable models. It reads only the persisted `CommonResponseMeta`.
+- Counts: `totalModels` (selected), `successfulModels` (provider calls that completed) and `modelsWithUsableOutput` (usable structured output). A completed call is never counted as usable.
+- `meta.structuredOutput` (`StructuredOutputRecordV1`, built by `buildStructuredOutputRecord` in `commonResponseMeta.ts`) is the per-slot record:
+  - `call`: `completed` / `failed`;
+  - `result`: `complete` / `partial` / `unavailable`;
+  - `invalidFields` keys, plus `droppedItems` and `itemsOverLimit` counts.
+  It is written ONLY when a slot was not complete, so complete runs persist what they did before.
+- Material shortening rule: only whole items cut because a field exceeded the schema's item cap (`itemsOverLimit`) count. Prose trimmed to a word cap is not disclosed (it stays in `truncatedFields` as before).
+- `droppedItems` and `itemsOverLimit` (on `AdaptiveModelResult`) are set in `validator.ts`. Counts only; discarded content is never kept. `mergeAdaptiveRetry` carries each field's counts from the attempt its value came from. Validation acceptance, retries and aggregation are unchanged.
+- Live report: `components/adaptive/StructuredOutputNotice.tsx` renders under the summary bar:
+  - the headline (e.g. "5 models selected · 4 usable structured results");
+  - the provider-call line;
+  - each affected model, distinguishing "the provider call did not complete" from "completed but returned no usable structured output", plus partial-salvage counts.
+  Decision Support's Panel detail states the same headline and names unavailable models. Complete runs render the same element tree as before.
+- Legacy runs (no record): when the counts show a shortfall, the live report gives the counts and says which models were affected was not recorded. Nothing is inferred. A malformed or count-inconsistent record is ignored.
+- Exports (PDF, DOCX, JSON) render the same lines in a "Structured output completeness" section, and JSON carries `result.derivedStructuredOutputDisclosure`.
+  - This happens ONLY for a run carrying the per-slot record (`deriveRecordedStructuredOutputDisclosure`). A stored historical export therefore re-renders byte-identically and still reproduces its file hash.
+  - The export snapshot and the Decision Receipt are unchanged; the Receipt's existing "k of N selected models did not produce usable structured output." uses the same counts.
 - Not in 7A: provider output-budget truncation detection and the retry strategy (Item 7B).
 
 **The versioned envelope** (`lib/adaptiveSchema/persistedOutput.ts`): `PersistedAdaptiveOutputV1`, a 9-variant discriminated union keyed by `schemaId`, each carrying `version`, `answerShape` (verified against the real `SCHEMA_REGISTRY` renderHints, not invented), `classification`, `meta`, `result`, `generatedAt`. Runtime validation (`parsePersistedAdaptiveOutput`) is deliberately NOT a full Zod re-derivation of all 9 already-complex result types — that would be pure duplicated maintenance burden for data this codebase's own alignment functions already validated once, at generation time. Instead: a lightweight structural check per schema (the specific fields each renderer actually destructures, with the right JS type), checking version, schemaId/answerShape agreement, and schemaId/result shape agreement, returning one of four states (`ok: true` / `"absent"` / `"unsupported_version"` / `"malformed"`) and never throwing.

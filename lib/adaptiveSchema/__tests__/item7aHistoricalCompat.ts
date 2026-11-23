@@ -4,21 +4,18 @@
  *
  * Item 7A adds exactly one thing to a freshly built run's persisted output: `meta.structuredOutput`, written ONLY when
  * a selected slot was not complete (see commonResponseMeta.ts buildStructuredOutputRecord). Historical evidence never
- * holds it. Export snapshots of such a run also mark the record's unavailable models `ok: false` (exportSnapshot.ts).
+ * holds it. (Export renderers derive their disclosure from it at render time; the snapshot itself is unchanged.)
  *
  * `withoutItem7aRecord` is the exact inverse, applied ONLY to the fresh side of a historical comparison:
  *  - it removes `structuredOutput` only from an object shaped like CommonResponseMeta, and only when the value is a
  *    record readStructuredOutputRecord accepts for that meta's own counts (a malformed record is never hidden);
- *  - it reverts a snapshot model's `ok: false` to `ok: undefined` only for a model the removed record marks unavailable
- *    in that same snapshot;
  *  - every removal is reported, so each spec asserts the exception's exact scope.
  * The input is never modified.
  */
 import { readStructuredOutputRecord } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
 
 export interface Item7aRemoval {
-  /** "meta" for a removed record, "model" for a reverted snapshot model marker. */
-  kind: "meta" | "model";
+  kind: "meta";
   modelIds: string[];
 }
 
@@ -38,21 +35,6 @@ export function withoutItem7aRecord<T>(value: T, removed: Item7aRemoval[] = []):
         delete v.structuredOutput;
         removed.push({ kind: "meta", modelIds: record.slots.map((s) => String(s.modelId)) });
       }
-    }
-    // A report snapshot: its models list and the milestone-2 output it froze.
-    const models = v.models;
-    const meta = isObj(v.milestone2) && isObj(v.milestone2.output) ? v.milestone2.output.meta : undefined;
-    if (Array.isArray(models) && isObj(meta)) {
-      const record = readStructuredOutputRecord(meta as never);
-      const unavailable = new Set(record ? record.slots.filter((s) => s.result === "unavailable").map((s) => String(s.modelId)) : []);
-      const reverted: string[] = [];
-      for (const m of models) {
-        if (isObj(m) && m.ok === false && unavailable.has(String(m.modelId))) {
-          m.ok = undefined;
-          reverted.push(String(m.modelId));
-        }
-      }
-      if (reverted.length) removed.push({ kind: "model", modelIds: reverted });
     }
     for (const x of Object.values(v)) visit(x);
   };

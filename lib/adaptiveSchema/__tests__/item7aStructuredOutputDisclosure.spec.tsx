@@ -14,6 +14,7 @@ import { buildCommonResponseMeta, buildStructuredOutputRecord } from "@/lib/adap
 import { buildDecisionSupportResult, type DecisionSupportFields } from "@/lib/adaptiveSchema/decisionSupportAlignment";
 import { buildAdaptiveDecisionReceipt } from "@/lib/adaptiveSchema/decisionReceiptBuilder";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
+import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import {
   deriveStructuredOutputDisclosure,
   describeAffectedState,
@@ -91,11 +92,12 @@ describe("G3 — dropped-item counts (validator, retry merge)", () => {
   });
 
   it("a partially adopted retry keeps the count of the attempt each field came from", () => {
-    const first: AdaptiveModelResult = { modelId: "claude" as ModelId, schemaId: "contested_empirical", ok: true, data: { disputedClaims: [] }, invalidFields: ["summary"], droppedItems: { disputedClaims: 2 } };
-    const retried: AdaptiveModelResult = { modelId: "claude" as ModelId, schemaId: "contested_empirical", ok: true, data: { summary: "s", disputedClaims: [] }, droppedItems: { disputedClaims: 9, summary: 1 } };
+    const first: AdaptiveModelResult = { modelId: "claude" as ModelId, schemaId: "contested_empirical", ok: true, data: { disputedClaims: [] }, invalidFields: ["summary"], droppedItems: { disputedClaims: 2 }, itemsOverLimit: { disputedClaims: 3 } };
+    const retried: AdaptiveModelResult = { modelId: "claude" as ModelId, schemaId: "contested_empirical", ok: true, data: { summary: "s", disputedClaims: [] }, droppedItems: { disputedClaims: 9, summary: 1 }, itemsOverLimit: { disputedClaims: 7, summary: 4 } };
     const { result, outcome } = mergeAdaptiveRetry(first, retried);
     expect(outcome).toBe("adopted_partial");
     expect(result.droppedItems).toEqual({ disputedClaims: 2, summary: 1 });
+    expect(result.itemsOverLimit).toEqual({ disputedClaims: 3, summary: 4 });
   });
 });
 
@@ -107,7 +109,7 @@ describe("structured-output record (persisted meta)", () => {
     expect(meta.modelsWithUsableOutput).toBe(4); // ...but only four were usable
     expect(meta.structuredOutput).toEqual({
       version: 1,
-      slots: FIVE.map((m) => ({ modelId: m, result: m === "claude" ? "unavailable" : "complete" })),
+      slots: FIVE.map((m) => ({ modelId: m, call: "completed", result: m === "claude" ? "unavailable" : "complete" })),
     });
   });
 
@@ -115,18 +117,80 @@ describe("structured-output record (persisted meta)", () => {
     expect(buildStructuredOutputRecord(FIVE.map(modelResult), FIVE.map((m) => usable(m)))).toBeUndefined();
   });
 
-  it("records partial salvage and shortening as field keys and counts only", () => {
+  it("records partial salvage as field keys and counts only, and keeps provider-call status separate", () => {
     const rec = buildStructuredOutputRecord(
-      [modelResult("chatgpt" as ModelId), modelResult("claude" as ModelId)],
-      [usable("chatgpt" as ModelId, { truncatedFields: ["reversibleNextStep"] }), usable("claude" as ModelId, { invalidFields: ["sources"], droppedItems: { risks: 1 } })]
+      [modelResult("chatgpt" as ModelId), modelResult("claude" as ModelId), { ...modelResult("grok" as ModelId), status: "timeout", rawText: null }],
+      [usable("chatgpt" as ModelId), usable("claude" as ModelId, { invalidFields: ["sources"], droppedItems: { risks: 1 } }), failed("grok" as ModelId)]
     );
     expect(rec).toEqual({
       version: 1,
       slots: [
-        { modelId: "chatgpt", result: "complete", truncatedFields: ["reversibleNextStep"] },
-        { modelId: "claude", result: "partial", invalidFields: ["sources"], droppedItems: { risks: 1 } },
+        { modelId: "chatgpt", call: "completed", result: "complete" },
+        { modelId: "claude", call: "completed", result: "partial", invalidFields: ["sources"], droppedItems: { risks: 1 } },
+        { modelId: "grok", call: "failed", result: "unavailable" },
       ],
     });
+  });
+
+  it("material shortening rule: items cut by an item cap are recorded; prose trimmed to a word cap is not", () => {
+    const pair = [modelResult("chatgpt" as ModelId), modelResult("claude" as ModelId)];
+    const wordOnly = buildStructuredOutputRecord(pair, [usable("chatgpt" as ModelId, { truncatedFields: ["reversibleNextStep"] }), usable("claude" as ModelId)]);
+    expect(wordOnly).toBeUndefined();
+    const itemCap = buildStructuredOutputRecord(pair, [usable("chatgpt" as ModelId, { truncatedFields: ["risks"], itemsOverLimit: { risks: 2 } }), usable("claude" as ModelId)]);
+    expect(itemCap).toEqual({
+      version: 1,
+      slots: [
+        { modelId: "chatgpt", call: "completed", result: "partial", itemsOverLimit: { risks: 2 } },
+        { modelId: "claude", call: "completed", result: "complete" },
+      ],
+    });
+  });
+
+  it("validator counts items cut by an item cap (counts only)", () => {
+    const schema = SCHEMA_REGISTRY.contested_empirical;
+    const field = schema.fields.find((f) => f.key === "disputedClaims")!;
+    const cap = field.maxItems ?? 0;
+    expect(cap).toBeGreaterThan(0);
+    const claims = Array.from({ length: cap + 2 }, (_, i) => ({ id: `c${i}`, claim: `Claim ${i}.`, stance: "asserts", confidence: "majority_view", evidenceType: "empirical" }));
+    const r = validateAdaptiveResponse("gemini", schema, JSON.stringify({ summary: "s", settledClaims: [], disputedClaims: claims, keyMetrics: [], openQuestions: [] }), { silent: true });
+    expect(r.itemsOverLimit).toEqual({ disputedClaims: 2 });
+    expect((r.data?.disputedClaims as unknown[]).length).toBe(cap);
+  });
+});
+
+describe("end to end through finalizeAdaptiveRun (real validation, slot order, substitution, failures)", () => {
+  it("records each slot in order with its own provider status and usability", async () => {
+    const valid = JSON.stringify(fields({ options: ["Option A"], recommendationAction: "go" }));
+    const results: ModelResult[] = [
+      { modelId: "chatgpt" as ModelId, status: "ok", rawText: valid, latencyMs: 1 },
+      { modelId: "claude" as ModelId, status: "substituted", rawText: valid, latencyMs: 1, provider: "deepseek", requestedModel: "claude" } as ModelResult,
+      { modelId: "gemini" as ModelId, status: "ok", rawText: "```json\n{ \"decisionQuestion\": \"cut off", latencyMs: 1 },
+      { modelId: "grok" as ModelId, status: "timeout", rawText: null, latencyMs: 1 },
+    ];
+    const out: any = await finalizeAdaptiveRun(SCHEMA_REGISTRY.decision_support, results, "Which option?", undefined, classification());
+    expect(out.adaptiveResults.map((r: AdaptiveModelResult) => [r.modelId, r.ok])).toEqual([["chatgpt", true], ["claude", true], ["gemini", false], ["grok", false]]);
+    const meta = out.persistedOutput.meta as CommonResponseMeta;
+    expect([meta.totalModels, meta.successfulModels, meta.modelsWithUsableOutput]).toEqual([4, 3, 2]);
+    expect(meta.structuredOutput).toEqual({
+      version: 1,
+      slots: [
+        { modelId: "chatgpt", call: "completed", result: "complete" },
+        { modelId: "claude", call: "completed", result: "complete" },
+        { modelId: "gemini", call: "completed", result: "unavailable" },
+        { modelId: "grok", call: "failed", result: "unavailable" },
+      ],
+    });
+    expect(deriveStructuredOutputDisclosure(meta)!.affected!.map((m) => [m.modelId, describeAffectedState(m)])).toEqual([
+      ["gemini", "unavailable — the provider call completed but returned no usable structured output"],
+      ["grok", "unavailable — the provider call did not complete"],
+    ]);
+  });
+
+  it("a complete run through finalizeAdaptiveRun persists no record", async () => {
+    const valid = JSON.stringify(fields({ options: ["Option A"], recommendationAction: "go" }));
+    const results: ModelResult[] = ["chatgpt", "claude"].map((m) => ({ modelId: m as ModelId, status: "ok", rawText: valid, latencyMs: 1 }));
+    const out: any = await finalizeAdaptiveRun(SCHEMA_REGISTRY.decision_support, results, "Which option?", undefined, classification());
+    expect(out.persistedOutput.meta).not.toHaveProperty("structuredOutput");
   });
 });
 
@@ -134,8 +198,9 @@ describe("shared disclosure", () => {
   it("2d2e shape: '5 models selected · 4 usable structured results', claude named unavailable", () => {
     const d = deriveStructuredOutputDisclosure(twoDTwoEMeta())!;
     expect(d.headline).toBe("5 models selected · 4 usable structured results");
-    expect(d.affected).toEqual([{ modelId: "claude", state: "unavailable", fieldsNotRecovered: 0, itemsDropped: 0, fieldsShortened: 0 }]);
-    expect(describeAffectedState(d.affected![0])).toBe("unavailable — no usable structured output");
+    expect(d.affected).toEqual([{ modelId: "claude", state: "unavailable", providerCall: "completed", fieldsNotRecovered: 0, itemsDiscarded: 0, itemsOverLimit: 0 }]);
+    expect(describeAffectedState(d.affected![0])).toBe("unavailable — the provider call completed but returned no usable structured output");
+    expect(d.callsLine).toBe("5 of 5 provider calls completed.");
   });
 
   it("complete run: nothing to disclose", () => {
@@ -150,24 +215,38 @@ describe("shared disclosure", () => {
 
   it("a malformed or inconsistent record is ignored, never trusted", () => {
     const base = { totalModels: 2, successfulModels: 2, modelsWithUsableOutput: 1 };
-    const slots = [{ modelId: "chatgpt", result: "complete" }, { modelId: "claude", result: "unavailable" }];
+    const slots = [{ modelId: "chatgpt", call: "completed", result: "complete" }, { modelId: "claude", call: "completed", result: "unavailable" }];
     expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots } } as never)).not.toBeNull();
     expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 2, slots } } as never)).toBeNull();
     expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: slots.slice(0, 1) } } as never)).toBeNull();
     expect(readStructuredOutputRecord({ ...base, modelsWithUsableOutput: 2, structuredOutput: { version: 1, slots } } as never)).toBeNull();
-    expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [slots[0], { modelId: "claude", result: "gone" }] } } as never)).toBeNull();
-    expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [slots[0], { modelId: "claude", result: "unavailable", droppedItems: { risks: -1 } }] } } as never)).toBeNull();
+    expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [slots[0], { modelId: "claude", call: "completed", result: "gone" }] } } as never)).toBeNull();
+    expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [slots[0], { modelId: "claude", call: "completed", result: "unavailable", droppedItems: { risks: -1 } }] } } as never)).toBeNull();
+    expect(readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [slots[0], { modelId: "claude", result: "unavailable" }] } } as never)).toBeNull(); // no call status
+    expect(readStructuredOutputRecord({ ...base, successfulModels: 1, structuredOutput: { version: 1, slots } } as never)).toBeNull(); // call count mismatch
     expect(deriveStructuredOutputDisclosure({ ...base, structuredOutput: { version: 1, slots: slots.slice(0, 1) } } as never)!.affected).toBeNull();
   });
 
-  it("partial salvage and shortening are described with counts, all models usable", () => {
+  it("partial salvage, items cut by a limit, and a failed provider call are each described", () => {
     const meta = {
-      totalModels: 2, successfulModels: 2, modelsWithUsableOutput: 2,
-      structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", result: "complete", truncatedFields: ["reversibleNextStep"] }, { modelId: "claude", result: "partial", invalidFields: ["sources"], droppedItems: { risks: 1 } }] },
+      totalModels: 3, successfulModels: 2, modelsWithUsableOutput: 2,
+      structuredOutput: {
+        version: 1,
+        slots: [
+          { modelId: "chatgpt", call: "completed", result: "partial", itemsOverLimit: { risks: 2 } },
+          { modelId: "claude", call: "completed", result: "partial", invalidFields: ["sources"], droppedItems: { risks: 1 } },
+          { modelId: "grok", call: "failed", result: "unavailable" },
+        ],
+      },
     } as unknown as CommonResponseMeta;
     const d = deriveStructuredOutputDisclosure(meta)!;
-    expect(d.headline).toBe("2 models selected · 2 usable structured results");
-    expect(d.affected!.map(describeAffectedState)).toEqual(["used — 1 field shortened to fit limits", "partially used — 1 field not recovered; 1 item discarded"]);
+    expect(d.headline).toBe("3 models selected · 2 usable structured results");
+    expect(d.callsLine).toBe("2 of 3 provider calls completed.");
+    expect(d.affected!.map(describeAffectedState)).toEqual([
+      "partially used — 2 items beyond field limits not included",
+      "partially used — 1 field not recovered; 1 item discarded as invalid",
+      "unavailable — the provider call did not complete",
+    ]);
   });
 });
 
@@ -190,7 +269,8 @@ describe("G1/G2 — live and reopened report presentation (real AdaptivePanelRes
     expect(html).toContain('data-testid="structured-output-notice"');
     expect(html).toContain('role="note"');
     expect(html.split("5 models selected · 4 usable structured results").length - 1).toBe(2); // notice + panel detail
-    expect(html).toMatch(/data-testid="structured-output-affected"[^]*Claude[^]*unavailable — no usable structured output/);
+    expect(html).toMatch(/data-testid="structured-output-affected"[^]*Claude[^]*unavailable — the provider call completed but returned no usable structured output/);
+    expect(html).toContain("5 of 5 provider calls completed.");
     expect(html).toContain("Panel detail (5 models selected · 4 usable structured results)");
     expect(html).toMatch(/data-testid="ds-unavailable-models"[^]*Unavailable:[^]*Claude/);
   });
@@ -232,17 +312,8 @@ describe("G4 parity — Receipt and exports use the same counts", () => {
     expect(d.selected - d.usable).toBe(1);
   });
 
-  it("the export marks only the recorded unavailable model as failed", () => {
-    const meta = twoDTwoEMeta();
-    const { reportSnapshot } = buildExportSnapshot({ question: "q", selectedModels: FIVE, runDocument: {}, milestone2: { output: dsOutput(meta) } } as never);
-    const okById = Object.fromEntries((reportSnapshot as { models: { modelId: string; ok?: boolean }[] }).models.map((m) => [m.modelId, m.ok]));
-    expect(okById).toEqual({ chatgpt: undefined, claude: false, gemini: undefined, grok: undefined, perplexity: undefined });
-  });
-
-  it("an export of a run without a per-slot record is unchanged (nothing inferred)", () => {
-    const meta = { ...twoDTwoEMeta() };
-    delete meta.structuredOutput;
-    const { reportSnapshot } = buildExportSnapshot({ question: "q", selectedModels: FIVE, runDocument: {}, milestone2: { output: dsOutput(meta) } } as never);
+  it("the export snapshot itself is unchanged: no model is marked failed from the record", () => {
+    const { reportSnapshot } = buildExportSnapshot({ question: "q", selectedModels: FIVE, runDocument: {}, milestone2: { output: dsOutput(twoDTwoEMeta()) } } as never);
     expect((reportSnapshot as { models: { ok?: boolean }[] }).models.every((m) => m.ok === undefined)).toBe(true);
   });
 });

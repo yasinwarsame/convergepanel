@@ -353,27 +353,29 @@ export function buildCommonResponseMeta(args: BuildCommonResponseMetaArgs): Comm
 
 /**
  * Item 7A: the per-slot completeness record, or undefined when every selected slot produced complete structured output
- * (nothing unavailable, nothing salvaged, nothing shortened). Slot i is modelResults[i]; its validated result is
+ * (nothing unavailable, nothing salvaged, no item cut by an item cap; word-cap trimming alone does not count). Slot i is modelResults[i]; its validated result is
  * adaptiveResults[i] when present (orchestrate.ts maps one to one) — a missing one is "unavailable". Field keys and
  * counts only.
  */
 export function buildStructuredOutputRecord(modelResults: ModelResult[], adaptiveResults: AdaptiveModelResult[]): StructuredOutputRecordV1 | undefined {
   const slots: StructuredOutputSlotV1[] = modelResults.map((m, i) => {
     const r = adaptiveResults[i];
+    const call: StructuredOutputSlotV1["call"] = m.status === "ok" || m.status === "substituted" ? "completed" : "failed";
     const usable = !!r && r.modelId === m.modelId && r.ok && !!r.data;
-    if (!usable) return { modelId: m.modelId, result: "unavailable" };
+    if (!usable) return { modelId: m.modelId, call, result: "unavailable" };
     const invalidFields = r.invalidFields && r.invalidFields.length > 0 ? [...r.invalidFields] : undefined;
-    const truncatedFields = r.truncatedFields && r.truncatedFields.length > 0 ? [...r.truncatedFields] : undefined;
     const droppedItems = r.droppedItems && Object.keys(r.droppedItems).length > 0 ? { ...r.droppedItems } : undefined;
+    const itemsOverLimit = r.itemsOverLimit && Object.keys(r.itemsOverLimit).length > 0 ? { ...r.itemsOverLimit } : undefined;
     return {
       modelId: m.modelId,
-      result: invalidFields || droppedItems ? "partial" : "complete",
+      call,
+      result: invalidFields || droppedItems || itemsOverLimit ? "partial" : "complete",
       ...(invalidFields ? { invalidFields } : {}),
-      ...(truncatedFields ? { truncatedFields } : {}),
       ...(droppedItems ? { droppedItems } : {}),
+      ...(itemsOverLimit ? { itemsOverLimit } : {}),
     };
   });
-  const degraded = slots.some((s) => s.result !== "complete" || !!s.truncatedFields);
+  const degraded = slots.some((s) => s.result !== "complete");
   return degraded ? { version: 1, slots } : undefined;
 }
 

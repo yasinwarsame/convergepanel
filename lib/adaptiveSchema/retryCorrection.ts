@@ -125,6 +125,9 @@ export function mergeAdaptiveRetry(
   const droppedItems: Record<string, number> = {};
   for (const [key, n] of Object.entries(first.droppedItems || {})) if (keptFromFirst.has(key) && !adoptedSet.has(key)) droppedItems[key] = n;
   for (const [key, n] of Object.entries(retried.droppedItems || {})) if (adoptedSet.has(key)) droppedItems[key] = n;
+  const itemsOverLimit: Record<string, number> = {};
+  for (const [key, n] of Object.entries(first.itemsOverLimit || {})) if (keptFromFirst.has(key) && !adoptedSet.has(key)) itemsOverLimit[key] = n;
+  for (const [key, n] of Object.entries(retried.itemsOverLimit || {})) if (adoptedSet.has(key)) itemsOverLimit[key] = n;
   const coercions = [
     ...(first.coercions || []).filter((c) => keptFromFirst.has(rootFieldKey(c.path))),
     ...(retried.coercions || []).filter((c) => adoptedSet.has(rootFieldKey(c.path))),
@@ -143,6 +146,7 @@ export function mergeAdaptiveRetry(
       ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
       ...(stillInvalid.length > 0 ? { invalidFields: stillInvalid } : {}),
       ...(Object.keys(droppedItems).length > 0 ? { droppedItems } : {}),
+      ...(Object.keys(itemsOverLimit).length > 0 ? { itemsOverLimit } : {}),
       ...(coercions.length > 0 ? { coercions } : {}),
     },
   };

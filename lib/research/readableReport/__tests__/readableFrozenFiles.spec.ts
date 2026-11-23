@@ -53,12 +53,15 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/positionPresentation.ts": "7265fe7440c4171284c56676c9098d7d9d33a6d8",
   "lib/adaptiveSchema/gatePresentation.ts": "512a9d51e95feb8982e60a93832cdac94eee1d9f",
   "lib/adaptiveSchema/trustSummary.ts": "dc6ea9e337a8ae9851559f6d035fc7664422526e",
-  // ITEM7A-REPIN lib/adaptiveSchema/exportSnapshot.ts: 5af930878120bbda7ba49ec40045502416859d19 → 053f7b2c92c5c963e73afb6551d20f8e62a2477d. Item 7A (owner-authorized 2026-11-23): ONLY a selected model the run's persisted structured-output record marks unavailable is exported as ok: false (the existing "(failed)" marker); nothing inferred without the record.
-  "lib/adaptiveSchema/exportSnapshot.ts": "053f7b2c92c5c963e73afb6551d20f8e62a2477d",
+  "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
   // ITEM6A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 80e8678d497d7f41a3d7bee48026832f0ec14736 → fa50830d9a6a73124d7a68daf75c7e94eec01ef0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  "lib/pdf/AdaptiveResearchDocument.tsx": "fa50830d9a6a73124d7a68daf75c7e94eec01ef0",
+  // ITEM7A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: fa50830d9a6a73124d7a68daf75c7e94eec01ef0 → 2555c963f490311c1b6da730e9881939400d51f8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "2555c963f490311c1b6da730e9881939400d51f8",
   // ITEM6A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: d62e84cffefc0a1c7abfb0e42df75ab0f35cf208 → 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b",
+  // ITEM7A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b → 729f5169be532239997dc568ac10a985a73c2ad8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "729f5169be532239997dc568ac10a985a73c2ad8",
   // Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18, review B2): ONLY nine client
   // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
   // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no render, report or
@@ -256,8 +259,8 @@ const WIDENED_BY_INC1: Record<string, string> = {
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
   // ITEM6A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 68300e783c036853985142d9127713a0a68ed21a → 509fbeec467c41948591baa32923980b3fa4382b. Item 6A (owner-authorized 2026-11-22): that spec re-pins decisionSupportAlignment.ts, decisionReceiptBuilder.ts and DecisionSupportView.tsx for the authoritative criterion-provenance change (comments ITEM6A-REPIN inside it); no other change to it.
-  // ITEM7A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 509fbeec467c41948591baa32923980b3fa4382b → cc4e43326556d4e10ac4736463191c9fffdf62f9. Item 7A (owner-authorized 2026-11-23): that spec re-pins only DecisionSupportView.tsx and exportSnapshot.ts for the structured-output disclosure (comments ITEM7A-REPIN inside it); no other change.
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "cc4e43326556d4e10ac4736463191c9fffdf62f9",
+  // ITEM7A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 509fbeec467c41948591baa32923980b3fa4382b → 0acb71292896a9200df712563b2dc522f1abe611. Item 7A (owner-authorized 2026-11-23): that spec re-pins only DecisionSupportView.tsx, lib/pdf/AdaptiveResearchDocument.tsx and lib/docx/AdaptiveResearchDocxDocument.ts for the structured-output disclosure (comments ITEM7A-REPIN inside it); no other change.
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "0acb71292896a9200df712563b2dc522f1abe611",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };
