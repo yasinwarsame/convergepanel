@@ -17,7 +17,7 @@ import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__test
 import { historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
 import { historicalReceiptText } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
 import { LEGACY_INFERRED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
-import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, docxStatusRegionV1, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
+import { ITEM7A_STRUCTURED_OUTPUT, D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, docxStatusRegionV1, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
 import { DocxTextError, docxParagraphs } from "@/lib/adaptiveSchema/__tests__/dsExport/docxText";
 import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
 import { EXEMPTIONS, FIELD_LABELS, scanSurface, validateExemptions } from "@/components/adaptive/__tests__/seSurfaces/dsWordingScanner";
@@ -80,7 +80,8 @@ describe("version-1 Decision Support DOCX", () => {
     expect(region[region.indexOf(LABEL_SOURCES.toUpperCase()) + 1]).toBe(o.sources);
     for (const old of ["CONSENSUS", "SOURCE GROUNDING", OLD_CAPTION]) expect(l).not.toContain(old);
     expect(l.filter((t) => t === D9).length).toBe(o.d9 ? 1 : 0);
-    if (o.d9) expect(l[end - 1]).toBe(D9);
+    // Item 7A: the structured-output section (in the oracle region) follows D-9 for the two shortfall fixtures.
+    if (o.d9) expect(l[end - 1 - (ITEM7A_STRUCTURED_OUTPUT[stateOf(name)]?.length ?? 0)]).toBe(D9);
     expect(l.join("\n")).toContain(governanceStatusDisplay(record).label);
     const receipt = record.reportSnapshot.milestone2?.decisionReceipt;
     if (receipt) {

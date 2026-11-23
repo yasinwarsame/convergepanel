@@ -84,5 +84,16 @@ export function docxStatusRegionV1(caseName: string): string[] {
   const o = ORACLE[stateOf(caseName)];
   const models = caseName.endsWith(".synthetic_identities") ? DOCX_V1_MODELS_SYNTHETIC : DOCX_V1_MODELS[stateOf(caseName)];
   if (!o || !models) throw new Error(`no version-1 DOCX oracle for ${caseName}`);
-  return ["Report status summary", "MODELS", models, "MODEL AGREEMENT", o.agreement, "SOURCES", o.sources, ...(o.d9 ? [D9] : [])];
+  return ["Report status summary", "MODELS", models, "MODEL AGREEMENT", o.agreement, "SOURCES", o.sources, ...(o.d9 ? [D9] : []), ...(ITEM7A_STRUCTURED_OUTPUT[stateOf(caseName)] ?? [])];
 }
+
+/**
+ * Item 7A (owner-authorized 2026-11-24): the structured-output completeness section that directly follows the status
+ * summary of a run carrying the per-slot record — only the two fixtures with fewer usable than selected models, whose
+ * missing slots errored at the provider. Written out literally, never derived from the disclosure module.
+ */
+const NR7A = (name: string) => `${name} · model not recorded: unavailable — the provider call did not complete.`;
+export const ITEM7A_STRUCTURED_OUTPUT: Record<string, string[]> = {
+  uncontested_go_with_failed_slots: ["Structured output completeness", "5 models selected · 2 usable structured results", "2 of 5 provider calls completed.", NR7A("Gemini"), NR7A("Grok"), NR7A("Perplexity")],
+  all_models_failed: ["Structured output completeness", "3 models selected · 0 usable structured results", "0 of 3 provider calls completed.", NR7A("ChatGPT"), NR7A("Claude"), NR7A("Gemini")],
+};
