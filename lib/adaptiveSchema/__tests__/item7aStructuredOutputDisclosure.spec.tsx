@@ -224,6 +224,11 @@ describe("shared disclosure", () => {
     const d = deriveStructuredOutputDisclosure({ totalModels: 5, successfulModels: 5, modelsWithUsableOutput: 4 })!;
     expect(d.headline).toBe("5 models selected · 4 usable structured results");
     expect(d.affected).toBeNull();
+    // An unrecorded shortfall is never downgraded to details-only.
+    expect(d.prominent).toBe(true);
+    const html = renderToStaticMarkup(createElement(StructuredOutputNotice, { disclosure: d }));
+    expect(html).toContain('role="note"');
+    expect(html).toContain(STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED);
   });
 
   it("a malformed or inconsistent record is ignored, never trusted", () => {
@@ -366,7 +371,10 @@ describe("owner-approved material shortening rule (decision-critical field OR tw
       "claude — partially used: text shortened to the word limit in 1 field (not decision-critical).",
     ]);
     // Same for one non-critical field with items cut by its item cap, or items discarded as invalid.
-    expect(one({ itemsOverLimit: { assumptions: 2 }, shortenedFields: ["assumptions"] }).m.material).toBe(false);
+    const capped = one({ itemsOverLimit: { assumptions: 2 }, shortenedFields: ["assumptions"] }).m;
+    expect([capped.material, capped.itemsOverLimit, capped.textShortenedFields]).toEqual([false, 2, 0]);
+    // An item-capped field is described by its cut items, not counted again as text shortening.
+    expect(describeAffectedState(capped)).toBe("partially used: 2 items beyond field limits not included");
     expect(one({ droppedItems: { criteria: 1 } }).m.material).toBe(false);
   });
 
