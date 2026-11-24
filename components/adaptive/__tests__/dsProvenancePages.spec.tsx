@@ -339,6 +339,9 @@ if (CAPTURE) {
     readFileSync(join(__dirname, "__fixtures__", "dsProvenancePagesExecutingAttribution.json"), "utf8")
   );
   const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
+  const ITEM7A: { notice: string; cases: Record<string, { domSha256: string; labelCount: number; executingChipCount: number }> } = JSON.parse(
+    readFileSync(join(__dirname, "__fixtures__", "dsProvenancePagesItem7a.json"), "utf8")
+  );
   const BASELINE: { baseCommit: string; cases: Record<string, BaselineCase> } = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : { baseCommit: "", cases: {} };
 
   describe("page parity with the unmodified 9eca1e3 pages (real routes, real pages)", () => {
@@ -357,7 +360,11 @@ if (CAPTURE) {
       const item6a = undoItem6aPresentation(undoCriticalContrastClasses(off.dom).markup);
       expect([c.id, item6a.markup.includes("ds-criterion-label")]).toEqual([c.id, false]);
       expect([c.id, item6a.bdi]).toEqual([c.id, occurrences(off.dom, ITEM6A_LABEL_BDI_OPEN)]);
-      const pin = ATTRIBUTION.cases[c.id];
+      // Item 7A (owner-authorized): a page whose run records a structured-output shortfall shows the notice; it is
+      // pinned exactly in __fixtures__/dsProvenancePagesItem7a.json. Every other page has no notice and keeps its pin.
+      const item7aPin = ITEM7A.cases[c.id];
+      expect([c.id, comparableDom(off.dom).includes(ITEM7A.notice)]).toEqual([c.id, !!item7aPin]);
+      const pin = item7aPin ?? ATTRIBUTION.cases[c.id];
       const expectedSha = pin ? pin.domSha256 : base.domSha256;
       if (pin) expect([c.id, pin.domSha256 !== base.domSha256]).toEqual([c.id, true]);
       const counts = (dom: string) => [occurrences(dom, ATTRIBUTION.label), occurrences(dom, ATTRIBUTION.chipMarkup + ATTRIBUTION.label)];

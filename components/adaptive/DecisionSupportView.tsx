@@ -20,6 +20,8 @@
 import { AggregatedDecisionAssessment, AggregatedDecisionCriterion, AggregatedDecisionOption, DecisionRecommendationAction, DecisionSupportResult } from "@/lib/adaptiveSchema/types";
 import { hasUnverifiedLegacyCriteria, LEGACY_RESULT_NOTICE, readCriterionProvenance } from "@/lib/adaptiveSchema/criterionProvenance";
 import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED, type StructuredOutputDisclosure } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
+import type { ModelId } from "@/lib/types";
 import {
   DS_GROUPING_BASIS,
   DS_NO_SOURCES_LISTED,
@@ -101,7 +103,14 @@ function AssessmentCell({
   );
 }
 
-export default function DecisionSupportView({ decisionSupport }: { decisionSupport: DecisionSupportResult }) {
+export default function DecisionSupportView({
+  decisionSupport,
+  structuredOutput = null,
+}: {
+  decisionSupport: DecisionSupportResult;
+  /** Item 7A: the run's structured-output disclosure (null when complete or unknown, keeping the established panel detail). */
+  structuredOutput?: StructuredOutputDisclosure | null;
+}) {
   const {
     decisionQuestion,
     options,
@@ -308,7 +317,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
         {/* 12. Collapsible model-level detail — never primary. */}
         <details className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Panel detail ({totalModels} model{totalModels === 1 ? "" : "s"})
+            {structuredOutput ? <>Panel detail ({structuredOutput.headline})</> : <>Panel detail ({totalModels} model{totalModels === 1 ? "" : "s"})</>}
           </summary>
           <p className="mt-1.5 text-xs text-slate-500">
             {DS_GROUPING_BASIS} When the current grouping finds a split, the panel falls back to a conservative action rather than a
@@ -319,6 +328,19 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
               <SlotChip key={modelId} modelId={modelId} size="xs" />
             ))}
           </div>
+          {/* Item 7A: a selected model with no usable structured output is named, never silently omitted. */}
+          {structuredOutput?.affected?.some((m) => m.state === "unavailable") ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1" data-testid="ds-unavailable-models">
+              <span className="text-xs text-slate-500">Unavailable:</span>
+              {structuredOutput.affected
+                .filter((m) => m.state === "unavailable")
+                .map((m, i) => (
+                  <SlotChip key={`${m.modelId}-${i}`} modelId={m.modelId as ModelId} size="xs" />
+                ))}
+            </div>
+          ) : structuredOutput && structuredOutput.affected === null && structuredOutput.usable < structuredOutput.selected ? (
+            <p className="mt-2 text-xs text-slate-500">{STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED}</p>
+          ) : null}
         </details>
       </Card>
     </div>

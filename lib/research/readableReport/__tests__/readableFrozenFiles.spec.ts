@@ -55,9 +55,15 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/trustSummary.ts": "dc6ea9e337a8ae9851559f6d035fc7664422526e",
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
   // ITEM6A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 80e8678d497d7f41a3d7bee48026832f0ec14736 → fa50830d9a6a73124d7a68daf75c7e94eec01ef0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  "lib/pdf/AdaptiveResearchDocument.tsx": "fa50830d9a6a73124d7a68daf75c7e94eec01ef0",
+  // ITEM7A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: fa50830d9a6a73124d7a68daf75c7e94eec01ef0 → 2555c963f490311c1b6da730e9881939400d51f8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  // ITEM7A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 2555c963f490311c1b6da730e9881939400d51f8 → 79e542448152b19061a7f880a8ec3b370e98b840. Item 7A final correction round (owner-authorized 2026-11-24): the
+  // structured-output section moved above the SectionCard JSDoc it had displaced; no rendering change.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "79e542448152b19061a7f880a8ec3b370e98b840",
   // ITEM6A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: d62e84cffefc0a1c7abfb0e42df75ab0f35cf208 → 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b",
+  // ITEM7A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b → 729f5169be532239997dc568ac10a985a73c2ad8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "729f5169be532239997dc568ac10a985a73c2ad8",
   // Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18, review B2): ONLY nine client
   // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
   // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no render, report or
@@ -96,7 +102,8 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "9013684425a4776a0f2ad26560d765752917d5be",
+  // ITEM7A-REPIN lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json: 9013684425a4776a0f2ad26560d765752917d5be → f75cf845ebd7c207d17ae227ad61a6cf983a7891. Item 7A R3 MINOR-1 mapping correction (owner decision 2026-11-24): ONE added entry, non-user — the "disputedInterpretations" schema field key in structuredOutputDisclosure.ts DECISION_CRITICAL_FIELDS (never rendered); no other entry changed.
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "f75cf845ebd7c207d17ae227ad61a6cf983a7891",
 };
 
 /**
@@ -255,7 +262,9 @@ const WIDENED_BY_INC1: Record<string, string> = {
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
   // ITEM6A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 68300e783c036853985142d9127713a0a68ed21a → 509fbeec467c41948591baa32923980b3fa4382b. Item 6A (owner-authorized 2026-11-22): that spec re-pins decisionSupportAlignment.ts, decisionReceiptBuilder.ts and DecisionSupportView.tsx for the authoritative criterion-provenance change (comments ITEM6A-REPIN inside it); no other change to it.
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "509fbeec467c41948591baa32923980b3fa4382b",
+  // ITEM7A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 509fbeec467c41948591baa32923980b3fa4382b → 0acb71292896a9200df712563b2dc522f1abe611. Item 7A (owner-authorized 2026-11-23): that spec re-pins only DecisionSupportView.tsx, lib/pdf/AdaptiveResearchDocument.tsx and lib/docx/AdaptiveResearchDocxDocument.ts for the structured-output disclosure (comments ITEM7A-REPIN inside it); no other change.
+  // ITEM7A-REPIN components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts: 0acb71292896a9200df712563b2dc522f1abe611 → 952d6b1bb3fb039542349be0a2a580b51a26273f. Item 7A final correction round (owner-authorized 2026-11-24): only its PDF pin and the matching DS_FROZEN_EXPORT_DIFF insertion hunk (SectionCard JSDoc placement).
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "952d6b1bb3fb039542349be0a2a580b51a26273f",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };

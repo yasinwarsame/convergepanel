@@ -53,11 +53,17 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
   // (exportMilestone2SummaryLevel / slotAgreementWord). Was cdf8bba191f6f24770273c7420d7643db2fd0604.
   // ITEM6A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 80e8678d497d7f41a3d7bee48026832f0ec14736 → fa50830d9a6a73124d7a68daf75c7e94eec01ef0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  "lib/pdf/AdaptiveResearchDocument.tsx": "fa50830d9a6a73124d7a68daf75c7e94eec01ef0",
+  // ITEM7A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: fa50830d9a6a73124d7a68daf75c7e94eec01ef0 → 2555c963f490311c1b6da730e9881939400d51f8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  // ITEM7A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 2555c963f490311c1b6da730e9881939400d51f8 → 79e542448152b19061a7f880a8ec3b370e98b840. Item 7A final correction round (owner-authorized 2026-11-24): the
+  // structured-output section moved above the SectionCard JSDoc it had displaced; no rendering change.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "79e542448152b19061a7f880a8ec3b370e98b840",
   // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
   // (exportMilestone2SummaryLevel / slotAgreementWord). Was 5c2e1b25ce67efc4661db0ab9004c18d1de6298e.
   // ITEM6A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: d62e84cffefc0a1c7abfb0e42df75ab0f35cf208 → 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b",
+  // ITEM7A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b → 729f5169be532239997dc568ac10a985a73c2ad8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "729f5169be532239997dc568ac10a985a73c2ad8",
   "lib/adaptiveSchema/dsLabelWording.ts": "db50c0e7b9cec1ad8416a566b2d08c4ed16fefa1",
   // ITEM6A-REPIN lib/adaptiveSchema/decisionSupportAlignment.ts: b19e49caacc05c52c17a4676a7321dca654d132c → 21b1090ccdfcd8a6c15b4fa1ca1b8aa8618ed055. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Fail-closed fallback (owner 2026-11-23): new criteria never attributed to the user (source = NEW_RESULT_CRITERION_SOURCE); no other change.
   "lib/adaptiveSchema/decisionSupportAlignment.ts": "21b1090ccdfcd8a6c15b4fa1ca1b8aa8618ed055",
@@ -88,7 +94,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/user/runDocumentToPublicResults.ts": "09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
   // ITEM6A-REPIN components/adaptive/DecisionSupportView.tsx: e3beb32c1161f42d84222b1633a6bd8b1bb98939 → 8501d85dfd92a798e1bcddd3ce4205e95169b82b. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion label rendered verbatim in a <bdi> (no rewriting); no other change.
-  "components/adaptive/DecisionSupportView.tsx": "8501d85dfd92a798e1bcddd3ce4205e95169b82b",
+  // ITEM7A-REPIN components/adaptive/DecisionSupportView.tsx: 8501d85dfd92a798e1bcddd3ce4205e95169b82b → f2ac77fc11c9743ac0ea8a35daf4a22581f73b0a. Item 7A
+  // (owner-authorized 2026-11-23): ONLY the Panel detail summary states "N models selected · M usable structured results" and
+  // names unavailable models when a disclosure is passed; without one the rendered tree is unchanged; no provenance code.
+  "components/adaptive/DecisionSupportView.tsx": "f2ac77fc11c9743ac0ea8a35daf4a22581f73b0a",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
   // c16 (review of 48f3739, MAJOR-2): ONLY the consensus field of a run whose slots are not independent executing models
@@ -201,6 +210,14 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/pdf/AdaptiveResearchDocument.tsx": {
     was: "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
     edits: [
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["e\";\nimport { deriveRecordedStructuredOutputDisclosure, STRUCTURED_OUTPUT_SECTION_HEADING, structuredOutputDisclosureLines } from \"@/lib/adaptiveSchema/structuredOutputDisclosur", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["/**\n * Item 7A: the structured-output completeness section \u2014 the same shared disclosure and wording as the live report.\n * Renders nothing for a complete run, a legacy-family export, or a record without the counts.\n */\nfunction hasStructuredOutputDisclosure(record: AdaptiveResearchExportV1): boolean {\n  return record.schemaFamily === \"milestone2\" && deriveRecordedStructuredOutputDisclosure(record.reportSnapshot.milestone2?.meta) !== null;\n}\n\nfunction StructuredOutputSection({ record }: { record: AdaptiveResearchExportV1 }) {\n  const snapshot = record.reportSnapshot;\n  const d = record.schemaFamily === \"milestone2\" ? deriveRecordedStructuredOutputDisclosure(snapshot.milestone2?.meta) : null;\n  if (!d) return null;\n  const [head, ...rest] = structuredOutputDisclosureLines(d, (id) => exportModelIdentityLabel(snapshot.runProvenance, id));\n  return (\n    <SectionCard label={STRUCTURED_OUTPUT_SECTION_HEADING} bounded>\n      <Text style={pdfStyles.fieldValue}>{head}</Text>\n      {rest.map((line, i) => (\n        <Text key={i} style={pdfStyles.mutedText}>\n          {line}\n        </Text>\n      ))}\n    </SectionCard>\n  );\n}\n\n", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["{/* Item 7A: without a disclosure the child list is exactly what it was (no extra element). */}\n        {hasStructuredOutputDisclosure(record) ? (\n          <>\n            ", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["\n            <StructuredOutputSection record={record} />\n          </>\n        ) : (\n          <StatusSummary record={record} />\n        )}", ""],
       // Item 6A F2 (owner-authorized frozen-renderer exception, 2026-11-23): ONLY a read-only legacy-provenance notice in the
       // Milestone-2 Basis card, rendered only for a stored decision_support Receipt without the provenance marker that
       // carries a retired "(user-provided)" criterion line (receiptHasLegacyUserProvidedCriteria; R2 N2 trusted gating). Every other export renders byte-identically (no fixture carries that suffix).
@@ -225,6 +242,12 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/docx/AdaptiveResearchDocxDocument.ts": {
     was: "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
     edits: [
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["e\";\nimport { deriveRecordedStructuredOutputDisclosure, STRUCTURED_OUTPUT_SECTION_HEADING, structuredOutputDisclosureLines } from \"@/lib/adaptiveSchema/structuredOutputDisclosur", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["\n * Item 7A: the structured-output completeness section — the same shared disclosure and wording as the live report.\n * Empty (nothing rendered) for a complete run, a legacy-family export, or a record without the counts.\n */\nfunction structuredOutputSection(record: AdaptiveResearchExportV1): Paragraph[] {\n  const snapshot = record.reportSnapshot;\n  const d = record.schemaFamily === \"milestone2\" ? deriveRecordedStructuredOutputDisclosure(snapshot.milestone2?.meta) : null;\n  if (!d) return [];\n  const [head, ...rest] = structuredOutputDisclosureLines(d, (id) => exportModelIdentityLabel(snapshot.runProvenance, id));\n  return [heading(STRUCTURED_OUTPUT_SECTION_HEADING), body(head), ...rest.map(muted)];\n}\n\n/**", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["Section(record),\n    ...structuredOutput", ""],
       // Item 6A F2 (owner-authorized frozen-renderer exception, 2026-11-23): ONLY a read-only legacy-provenance notice under
       // the Basis heading, under the same condition as the PDF. Protected by item6aExportDisclosure.spec.tsx.
       ["\nimport { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from \"@/lib/adaptiveSchema/criterionProvenance\";", ""],

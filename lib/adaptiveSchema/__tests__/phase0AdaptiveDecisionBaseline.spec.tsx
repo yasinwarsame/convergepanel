@@ -23,6 +23,7 @@ jest.mock("@/lib/connectors/gemini", () => ({
   callGemini: async () => ({ modelId: "gemini", status: "error", rawText: null, errorMessage: "mocked: no network in harness", latencyMs: 0 }),
 }));
 
+import { countItem7aRecords, withoutItem7aRecord, type Item7aRemoval } from "./item7aHistoricalCompat";
 import { toHistoricalReceiptLines, type RevertedLine } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
 import { createHash } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
@@ -317,17 +318,31 @@ it("every family record's decision projection equals 35933c8", async () => {
   // as quoted, escaped data (absent at 35933c8). Only that quoting is reverted, by the verified exact inverse
   // (dsExport/item6aReceiptFormat.ts), before digesting; the scope of the exception is asserted below.
   const reverted: Record<string, RevertedLine[]> = {};
+  const item7aRemoved: Record<string, number> = {};
   const digests = Object.fromEntries(
     Object.entries(byId).map(([id, rec]) => {
       const lines: RevertedLine[] = [];
-      const historical = toHistoricalReceiptLines(rec, lines);
+      // Item 7A (owner-authorized 2026-11-23): a run with a structured-output shortfall also records the per-slot record
+      // in its meta (absent at 35933c8); only that record is removed, and its scope is asserted below.
+      const removals: Item7aRemoval[] = [];
+      const historical = withoutItem7aRecord(toHistoricalReceiptLines(rec, lines), removals);
       if (lines.length) reverted[id] = lines;
+      if (removals.length) item7aRemoved[id] = removals.length;
       return [id, digest(historical)];
     })
   );
   expect(Object.keys(reverted).filter((id) => !id.startsWith("decision_support|"))).toEqual([]);
   for (const lines of Object.values(reverted)) for (const { from } of lines) expect(from.startsWith("Criterion (")).toBe(false);
   expect(Object.keys(digests).length).toBe(594);
+  // Item 7A scope: every record present is valid and removed exactly once, and every record whose meta shows fewer usable
+  // than selected models carries one (a record may also exist with no shortfall: partial salvage or shortening).
+  const withRecord = Object.entries(byId).filter(([, rec]) => countItem7aRecords(rec) > 0).map(([id]) => id).sort();
+  expect(Object.keys(item7aRemoved).sort()).toEqual(withRecord);
+  for (const [id, n] of Object.entries(item7aRemoved)) expect([id, n]).toEqual([id, countItem7aRecords(byId[id])]);
+  const shortfallIds = Object.entries(byId)
+    .filter(([, rec]) => (rec as any).meta && typeof (rec as any).meta.totalModels === "number" && (rec as any).meta.modelsWithUsableOutput < (rec as any).meta.totalModels)
+    .map(([id]) => id);
+  for (const id of shortfallIds) expect([id, withRecord.includes(id)]).toEqual([id, true]);
   // Item 6A: every Decision Support record carries the provenance marker (the projection above excludes only it).
   const dsRecords = Object.entries(byId).filter(([id]) => id.startsWith("decision_support|"));
   expect(dsRecords.length).toBe(33);

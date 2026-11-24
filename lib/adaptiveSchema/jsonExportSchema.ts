@@ -70,6 +70,34 @@ const jsonExportResultSchema = z.discriminatedUnion("schemaFamily", [
         ),
       })
       .optional(),
+    // Item 7A: optional, additive, derived at render time from the frozen meta; absent for complete runs.
+    derivedStructuredOutputDisclosure: z
+      .object({
+        derivedAtExport: z.literal(true),
+        selected: z.number().int().nonnegative(),
+        completedCalls: z.union([z.number().int().nonnegative(), z.null()]),
+        usable: z.number().int().nonnegative(),
+        affected: z.union([
+          z.array(
+            z.object({
+              modelId: z.string(),
+              state: z.enum(["unavailable", "partial"]),
+              providerCall: z.enum(["completed", "failed"]),
+              fieldsNotRecovered: z.number().int().nonnegative(),
+              itemsDiscarded: z.number().int().nonnegative(),
+              itemsOverLimit: z.number().int().nonnegative(),
+              textShortenedFields: z.number().int().nonnegative(),
+              affectedFields: z.number().int().nonnegative(),
+              decisionCriticalAffected: z.boolean(),
+              material: z.boolean(),
+            })
+          ),
+          z.null(),
+        ]),
+        prominent: z.boolean(),
+        lines: z.array(z.string()),
+      })
+      .optional(),
   }),
   z.object({
     schemaFamily: z.literal("legacy"),

@@ -24,9 +24,15 @@ const UNCHANGED: [string, string][] = [
   ["app/api/workspaces/[workspaceId]/runs/[runId]/exports/[exportId]/route.ts", "ad9bee82d655d17d13cc3032242f06eff81d944d2881ee87da17760bc54799a5"],
   ["app/api/workspaces/[workspaceId]/runs/[runId]/exports/route.ts", "b154a3baba388617a01d91e882458ae9a50afab19874cc0df05306fac94f8edf"],
   // ITEM6A-REPIN lib/adaptiveSchema/jsonExport.ts: sha256 5619af6ce06c319a6e91821d3b92108d81c78fce74fad384b01f21ee4dad827c → 8170a0a3f24e95e139e2e450938c8bdd009174be2d61fca0e4a76e413b93dde0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  ["lib/adaptiveSchema/jsonExport.ts", "8170a0a3f24e95e139e2e450938c8bdd009174be2d61fca0e4a76e413b93dde0"],
+  // ITEM7A-REPIN lib/adaptiveSchema/jsonExport.ts: sha256 8170a0a3f24e95e139e2e450938c8bdd009174be2d61fca0e4a76e413b93dde0 → 373c4b4fb5c0368edd28d790a317dab19d004761f4e4f40ce9e0c783aacdaa8a. Item 7A (owner-authorized
+  // correction round, 2026-11-24): ONLY the optional, additive derivedStructuredOutputDisclosure, derived at render time and only for a run carrying the per-slot record.
+  ["lib/adaptiveSchema/jsonExport.ts", "373c4b4fb5c0368edd28d790a317dab19d004761f4e4f40ce9e0c783aacdaa8a"],
   // ITEM6A-REPIN lib/adaptiveSchema/jsonExportSchema.ts: sha256 e50f144b619e0c81faf78bbc61adc71ac27ab944795649cb9fdbc864bb6aeacb → 464993af33e23b81d11f00d1c6a686a8614649457f3fcf7c3bfe53661664af07. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
-  ["lib/adaptiveSchema/jsonExportSchema.ts", "464993af33e23b81d11f00d1c6a686a8614649457f3fcf7c3bfe53661664af07"],
+  // ITEM7A-REPIN lib/adaptiveSchema/jsonExportSchema.ts: sha256 464993af33e23b81d11f00d1c6a686a8614649457f3fcf7c3bfe53661664af07 → a796f6c5137e302a669f1b0c74cc34d03b752235f58ca14cf1a5bc303bfa94b8. Item 7A: ONLY the optional
+  // derivedStructuredOutputDisclosure object.
+  // ITEM7A-REPIN lib/adaptiveSchema/jsonExportSchema.ts: sha256 a796f6c5137e302a669f1b0c74cc34d03b752235f58ca14cf1a5bc303bfa94b8 → 36f6c2b226fa0af343fcf8656fa8e9ea6359f6868933c4eb5d8ae1bc925e2681. Item 7A final correction round
+  // (owner-authorized 2026-11-24): ONLY the material-rule fields of the same optional derivedStructuredOutputDisclosure object.
+  ["lib/adaptiveSchema/jsonExportSchema.ts", "36f6c2b226fa0af343fcf8656fa8e9ea6359f6868933c4eb5d8ae1bc925e2681"],
   ["lib/pdf/renderAdaptiveResearchPdf.ts", "efc6da0857c4a3734cf0eb97f5387d1eadd6319330e4b61202d5c3ca46f266fd"],
   ["lib/docx/renderAdaptiveResearchDocx.ts", "80fb811d7df16b2c303f1583b748f68d98e0b283c300d128a9ffd87ce575fec1"],
   // OWNER EXACT-FILE EXCEPTION (2026-11-03, research deletion integrity). This file was byte-identical to 0249a4e5,
@@ -72,11 +78,16 @@ const UNCHANGED: [string, string][] = [
 const CHANGED_IMPORTS: Record<string, string[]> = {
   "lib/adaptiveSchema/researchExport.ts": ["../types", "./exportGeneratedBy", "./governanceRecord", "./persistedOutput", "./reportStatus", "./reportSummary", "./types"],
   "lib/adaptiveSchema/exportSnapshot.ts": ["../types", "./decisionReceiptBuilder", "./dsLabelWording", "./exportRunProvenance", "./gatePresentation", "./governanceRecord", "./persistedOutput", "./reportStatus", "./reportSummary", "./researchExport", "server-only"],
+  // Item 7A (owner-authorized 2026-11-23): the shared structured-output disclosure every export format renders; it
+  // imports only "./types".
+  "lib/adaptiveSchema/structuredOutputDisclosure.ts": ["./types"],
   "lib/adaptiveSchema/dsLabelWording.ts": ["./types"],
   // Item 6A F2 (owner-authorized 2026-11-23): + "@/lib/adaptiveSchema/criterionProvenance" for the read-only legacy-provenance notice only.
-  "lib/pdf/AdaptiveResearchDocument.tsx": ["./theme", "@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/criterionProvenance", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/types", "@react-pdf/renderer", "react"],
+  // Item 7A (owner-authorized 2026-11-24): + "@/lib/adaptiveSchema/structuredOutputDisclosure" for the structured-output section only.
+  "lib/pdf/AdaptiveResearchDocument.tsx": ["./theme", "@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/criterionProvenance", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/structuredOutputDisclosure", "@/lib/adaptiveSchema/types", "@react-pdf/renderer", "react"],
   // Item 6A F2 (owner-authorized 2026-11-23): + "@/lib/adaptiveSchema/criterionProvenance" for the read-only legacy-provenance notice only.
-  "lib/docx/AdaptiveResearchDocxDocument.ts": ["@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/criterionProvenance", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/types", "docx"],
+  // Item 7A (owner-authorized 2026-11-24): + "@/lib/adaptiveSchema/structuredOutputDisclosure" for the structured-output section only.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": ["@/lib/adaptiveSchema/agreementNarrative", "@/lib/adaptiveSchema/criterionProvenance", "@/lib/adaptiveSchema/dsLabelWording", "@/lib/adaptiveSchema/exportContentDerivation", "@/lib/adaptiveSchema/exportPositionView", "@/lib/adaptiveSchema/exportRunProvenance", "@/lib/adaptiveSchema/positionPresentation", "@/lib/adaptiveSchema/reportPresentation", "@/lib/adaptiveSchema/reportSummary", "@/lib/adaptiveSchema/researchExport", "@/lib/adaptiveSchema/schemaRegistry", "@/lib/adaptiveSchema/structuredOutputDisclosure", "@/lib/adaptiveSchema/types", "docx"],
 };
 const importsOf = (file: string) => Array.from(new Set(Array.from(readFileSync(path.join(ROOT, file), "utf8").matchAll(/(?:from|import)\s+"([^"]+)"/g), (m) => m[1]))).sort();
 
