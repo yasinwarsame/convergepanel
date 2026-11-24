@@ -22,6 +22,12 @@ export type ConnectorCallOptions = {
    * panel call.
    */
   diagnosticOperation?: GeminiDiagnosticOperation;
+  /**
+   * Item 7B: the output-token cap for an adaptive output-budget repair call. Honoured only by connectors listed in
+   * lib/outputBudgetRepairPolicy.ts (Claude, ChatGPT), and only when it equals that model's pinned repair cap; any
+   * other value falls back to the first-attempt cap. Never set on a first attempt.
+   */
+  outputBudgetRepairMaxTokens?: number;
 };
 
 /** Closed set, so a log can never carry free text through this field. */

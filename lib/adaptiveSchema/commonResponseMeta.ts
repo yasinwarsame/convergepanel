@@ -34,6 +34,7 @@ import {
   QueryType,
   RankedEnumerationResult,
   ResultSchema,
+  StructuredOutputCause,
   StructuredOutputRecordV1,
   StructuredOutputSlotV1,
 } from "./types";
@@ -362,19 +363,25 @@ export function buildStructuredOutputRecord(modelResults: ModelResult[], adaptiv
     const r = adaptiveResults[i];
     const call: StructuredOutputSlotV1["call"] = m.status === "ok" || m.status === "substituted" ? "completed" : "failed";
     const usable = !!r && r.modelId === m.modelId && r.ok && !!r.data;
-    if (!usable) return { modelId: m.modelId, call, result: "unavailable" };
+    if (!usable) {
+      const cause = structuredOutputCause(m, r && r.modelId === m.modelId ? r : undefined, "unavailable", true);
+      return { modelId: m.modelId, call, result: "unavailable", ...(cause ? { cause } : {}) };
+    }
     const invalidFields = r.invalidFields && r.invalidFields.length > 0 ? [...r.invalidFields] : undefined;
     const droppedItems = r.droppedItems && Object.keys(r.droppedItems).length > 0 ? { ...r.droppedItems } : undefined;
     const itemsOverLimit = r.itemsOverLimit && Object.keys(r.itemsOverLimit).length > 0 ? { ...r.itemsOverLimit } : undefined;
     const shortenedFields = r.truncatedFields && r.truncatedFields.length > 0 ? Array.from(new Set(r.truncatedFields)) : undefined;
+    const result: StructuredOutputSlotV1["result"] = invalidFields || droppedItems || itemsOverLimit || shortenedFields ? "partial" : "complete";
+    const cause = structuredOutputCause(m, r, result, !!(invalidFields || droppedItems));
     return {
       modelId: m.modelId,
       call,
-      result: invalidFields || droppedItems || itemsOverLimit || shortenedFields ? "partial" : "complete",
+      result,
       ...(invalidFields ? { invalidFields } : {}),
       ...(droppedItems ? { droppedItems } : {}),
       ...(itemsOverLimit ? { itemsOverLimit } : {}),
       ...(shortenedFields ? { shortenedFields } : {}),
+      ...(cause ? { cause } : {}),
     };
   });
   const degraded = slots.some((s) => s.result !== "complete");
@@ -384,4 +391,37 @@ export function buildStructuredOutputRecord(modelResults: ModelResult[], adaptiv
 /** Distinct models contributing across a set of adaptive results — a small shared helper several call sites need, not schema-specific. */
 export function distinctContributingModels(adaptiveResults: AdaptiveModelResult[]): ModelId[] {
   return Array.from(new Set(adaptiveResults.filter((r) => r.ok).map((r) => r.modelId)));
+}
+
+/**
+ * Item 7B (D1, corrected after review R1): why a non-complete slot was not complete, from provider-reported evidence
+ * about the response the slot actually ADOPTED — never the discarded first attempt.
+ *
+ * Adopted response: when the single adaptive retry was adopted ("adopted_full" / "adopted_partial"), the slot shows the
+ * retry's response; otherwise the first attempt stands. An output-budget repair is only ever adopted after its provider
+ * reported a normal finish (D3), so an adopted repair is never described as truncated. A validation retry's own
+ * termination reason is not carried here, so it is "unknown" rather than guessed.
+ *
+ * "output_budget_exhausted" is recorded only when the standing first attempt itself reported the budget stop AND left
+ * nothing usable — a parsed (closed) answer was not cut by the budget, so a partial slot never carries it. A partial slot
+ * shortened only by a schema word or item cap carries no cause (by design, a separate Item 7A disclosure).
+ *
+ * Connector status is the only source of call completion: an empty answer that hit its budget is still a failed call
+ * (governance's failedModels and the 7A `call` field are unchanged); its cause says why.
+ */
+export function structuredOutputCause(
+  m: ModelResult,
+  r: AdaptiveModelResult | undefined,
+  result: StructuredOutputSlotV1["result"],
+  validationEvidence: boolean
+): StructuredOutputCause | undefined {
+  if (result === "complete") return undefined;
+  if (result === "partial" && !validationEvidence) return undefined;
+  if (r?.retryOutcome === "adopted_full" || r?.retryOutcome === "adopted_partial") {
+    return m.status === "ok" && m.terminationReason === "output_budget" ? "validation_failure" : "unknown";
+  }
+  if (m.status !== "substituted" && m.terminationReason === "output_budget") return result === "unavailable" ? "output_budget_exhausted" : "unknown";
+  if (m.status !== "ok" && m.status !== "substituted") return "provider_failure";
+  if (m.status === "ok" && m.terminationReason === "natural") return "validation_failure";
+  return "unknown";
 }

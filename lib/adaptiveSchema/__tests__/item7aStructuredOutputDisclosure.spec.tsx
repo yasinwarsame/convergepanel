@@ -113,7 +113,8 @@ describe("structured-output record (persisted meta)", () => {
     expect(meta.modelsWithUsableOutput).toBe(4); // ...but only four were usable
     expect(meta.structuredOutput).toEqual({
       version: 1,
-      slots: FIVE.map((m) => ({ modelId: m, call: "completed", result: m === "claude" ? "unavailable" : "complete" })),
+      // Item 7B: no provider-reported termination reason in this fixture, so the cause is "unknown" (never guessed).
+      slots: FIVE.map((m) => (m === "claude" ? { modelId: m, call: "completed", result: "unavailable", cause: "unknown" } : { modelId: m, call: "completed", result: "complete" })),
     });
   });
 
@@ -130,8 +131,8 @@ describe("structured-output record (persisted meta)", () => {
       version: 1,
       slots: [
         { modelId: "chatgpt", call: "completed", result: "complete" },
-        { modelId: "claude", call: "completed", result: "partial", invalidFields: ["sources"], droppedItems: { risks: 1 } },
-        { modelId: "grok", call: "failed", result: "unavailable" },
+        { modelId: "claude", call: "completed", result: "partial", invalidFields: ["sources"], droppedItems: { risks: 1 }, cause: "unknown" },
+        { modelId: "grok", call: "failed", result: "unavailable", cause: "provider_failure" },
       ],
     });
   });
@@ -186,8 +187,8 @@ describe("end to end through finalizeAdaptiveRun (real validation, slot order, s
       slots: [
         { modelId: "chatgpt", call: "completed", result: "complete" },
         { modelId: "claude", call: "completed", result: "complete" },
-        { modelId: "gemini", call: "completed", result: "unavailable" },
-        { modelId: "grok", call: "failed", result: "unavailable" },
+        { modelId: "gemini", call: "completed", result: "unavailable", cause: "unknown" },
+        { modelId: "grok", call: "failed", result: "unavailable", cause: "provider_failure" },
       ],
     });
     expect(deriveStructuredOutputDisclosure(meta)!.affected!.map((m) => [m.modelId, describeAffectedState(m)])).toEqual([
@@ -209,7 +210,7 @@ describe("shared disclosure", () => {
     const d = deriveStructuredOutputDisclosure(twoDTwoEMeta())!;
     expect(d.headline).toBe("5 models selected · 4 usable structured results");
     expect(d.affected).toEqual([
-      { modelId: "claude", state: "unavailable", providerCall: "completed", fieldsNotRecovered: 0, itemsDiscarded: 0, itemsOverLimit: 0, textShortenedFields: 0, affectedFields: 0, decisionCriticalAffected: false, material: true },
+      { modelId: "claude", state: "unavailable", providerCall: "completed", fieldsNotRecovered: 0, itemsDiscarded: 0, itemsOverLimit: 0, textShortenedFields: 0, affectedFields: 0, decisionCriticalAffected: false, material: true, cause: "unknown" },
     ]);
     expect(d.prominent).toBe(true);
     expect(describeAffectedState(d.affected![0])).toBe("unavailable: the provider call completed but returned no usable structured output");

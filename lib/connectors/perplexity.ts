@@ -24,6 +24,7 @@
 
 import { ModelResult } from "@/lib/types";
 import type { ConnectorCallOptions } from "./types";
+import { perplexityTermination } from "./termination";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { PERPLEXITY_API_KEY } from "@/lib/env";
@@ -148,6 +149,8 @@ export async function callPerplexity(
       const latencyMs = Date.now() - startTime;
       const parsed = parsePerplexityAgentResponse(json);
       const outcome = agentOutcome(parsed);
+      // Item 7B: the run's own status (agent-shaped responses only), independent of the connector status.
+      const terminationReason = parsed.shape === "agent" ? perplexityTermination(parsed.status, parsed.incompleteReason) : undefined;
 
       // Token usage from the Agent `usage` block (input_tokens / output_tokens)
       const providerKey = modelIdToProviderKey("perplexity");
@@ -202,6 +205,7 @@ export async function callPerplexity(
           latencyMs,
           tokenUsage: normalizedTokenUsage,
           rawResponse: json, // untouched provider JSON (diagnostics / token extraction)
+          ...(terminationReason ? { terminationReason } : {}),
         };
       }
 
@@ -212,6 +216,7 @@ export async function callPerplexity(
         latencyMs,
         tokenUsage: normalizedTokenUsage, // Always include tokenUsage (never undefined)
         rawResponse: json, // untouched provider JSON (token extraction, diagnostics)
+        ...(terminationReason ? { terminationReason } : {}),
       };
 
       // finishReason is reconstructed from the Agent status, not from HTTP 200:

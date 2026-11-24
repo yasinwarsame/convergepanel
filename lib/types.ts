@@ -177,6 +177,12 @@ export interface ModelResult {
   rawResponse?: any;
   hasUsageMetadata?: boolean;
   wasTruncated?: boolean;
+  /**
+   * Item 7B: why the provider stopped generating, as the provider itself reported it (lib/connectors/termination.ts).
+   * Independent of `status`: an "error" result may still carry "output_budget" when the provider completed the call but
+   * stopped at its output budget before returning text. Absent when unknown. In memory only — never persisted or public.
+   */
+  terminationReason?: import("@/lib/connectors/termination").ProviderTerminationReason;
 
   // Per-slot metadata (always populated by panel orchestration)
   requestedModel?: string;

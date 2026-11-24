@@ -754,6 +754,38 @@ A full requirement-by-requirement audit of the query-routing redesign against it
   - The export snapshot and the Decision Receipt are unchanged; the Receipt's existing "k of N selected models did not produce usable structured output." uses the same counts.
 - Not in 7A: provider output-budget truncation detection and the retry strategy (Item 7B).
 
+**Output-budget exhaustion (Item 7B, 2026-11-24).** A provider that stops at its output-token budget no longer silently costs a usable model.
+
+- **Termination reasons** (`lib/connectors/termination.ts`): every connector records `ModelResult.terminationReason` as `"output_budget"`, `"natural"` or `"other"`, mapped only from the provider's own documented value:
+  - Anthropic `stop_reason` "max_tokens";
+  - OpenAI and xAI `finish_reason` "length";
+  - Gemini `finishReason` "MAX_TOKENS";
+  - Perplexity Agent `incomplete` with `max_output_tokens`.
+
+  A missing value is unknown. Malformed JSON is never evidence.
+- **Status is never changed.** An empty answer that hit its budget is still `"error"`, so `runPanel` retry and DeepSeek substitution behave exactly as before. `failedPlaceholder` carries the reason. The field is in memory only and never public or persisted.
+- **Governance counts unchanged (R1 correction).** `successfulModels` and `failedModels`, and the 7A slot `call`, stay connector-status based. An empty answer that hit its budget is still a failed call, so `evaluateAdaptiveGovernance` (`reviewIfAnyModelFailed`) sees exactly the same inputs; a test pins this. The slot's `cause` says why.
+- **Cause (D1).** The 7A per-slot record gains an optional `cause`, one of `output_budget_exhausted`, `validation_failure`, `provider_failure` or `unknown` (`structuredOutputCause`).
+  - It describes the ADOPTED answer. After an adopted retry, the discarded first attempt never sets it. An adopted output-budget repair finished normally (D3), so it is never described as truncated.
+  - `output_budget_exhausted` appears only on an unavailable slot whose standing answer's own provider reported the budget stop.
+  - It is absent on complete slots, on schema word- or item-cap shortenings (which keep their own 7A wording), and on every earlier record.
+  - The strict reader rejects unknown values and contradictions: `provider_failure` on a completed call, `validation_failure` on a failed call, `output_budget_exhausted` on a slot that is not unavailable. The 7A count checks are unchanged.
+  - Wording:
+    - failed call: "unavailable: the provider stopped at its output-token limit before returning any output";
+    - completed call: "…returned no usable structured output; the response reached the provider's output-token limit".
+  - JSON exports carry the cause, and `jsonExportSchema.ts` validates it. Exports of records without a cause are unchanged.
+- **runPanel's existing same-cap retries:** they apply only to retryable statuses or messages. No connector's empty output-budget result is retryable; a test pins this. So no path makes more than the one adaptive retry.
+- **Bounded repair (D2).** When the first attempt reported `output_budget`, the one existing adaptive retry becomes an output-budget repair: the compact-output instruction (`OUTPUT_BUDGET_REPAIR_INSTRUCTION`) plus the pinned cap from `lib/outputBudgetRepairPolicy.ts`.
+  - Pinned caps: Claude `claude-haiku-4-5-20251001` 4,000 → 4,800; OpenAI `gpt-4o-mini` 2,200 → 3,300.
+  - Each cap is greater than the first cap, at most 1.5× it, at most 8,192, and at most the documented model limit. Exact model only.
+  - The repair runs only when its duration, projected from the first attempt's measured latency, plus 5 s fits both the model's hard timeout and the remaining retry guard. Timeouts, first-attempt caps and the retry window are unchanged.
+  - Connectors honour `outputBudgetRepairMaxTokens` only when it equals the pinned cap.
+- **No same-cap retry (D5).** With no compliant cap or no safe time, no call is made (`retryOutcome` `"skipped_output_budget"`). This covers Gemini (already at 8,192), Grok and Perplexity (no first-party model limit).
+- **No partial JSON (D3).** A repair is used only when its provider reports a normal finish. Cut-off output is never closed, spliced or parsed around.
+- **Unchanged:** the validation-failure retry, unknown causes, substitution, and one retry per slot.
+- **Tests:** `lib/connectors/__tests__/item7bTermination.spec.ts`, `lib/adaptiveSchema/__tests__/item7bOutputBudgetRepair.spec.ts`, `item7bExportCause.spec.tsx`, and the 7A round trip (which now includes causes).
+- **Known debt (separate, low):** a concealed workspace not-found under the root `app/loading.tsx` returns HTTP 200 (a soft 404).
+
 **The versioned envelope** (`lib/adaptiveSchema/persistedOutput.ts`): `PersistedAdaptiveOutputV1`, a 9-variant discriminated union keyed by `schemaId`, each carrying `version`, `answerShape` (verified against the real `SCHEMA_REGISTRY` renderHints, not invented), `classification`, `meta`, `result`, `generatedAt`. Runtime validation (`parsePersistedAdaptiveOutput`) is deliberately NOT a full Zod re-derivation of all 9 already-complex result types — that would be pure duplicated maintenance burden for data this codebase's own alignment functions already validated once, at generation time. Instead: a lightweight structural check per schema (the specific fields each renderer actually destructures, with the right JS type), checking version, schemaId/answerShape agreement, and schemaId/result shape agreement, returning one of four states (`ok: true` / `"absent"` / `"unsupported_version"` / `"malformed"`) and never throwing.
 
 **Firestore persistence** (`lib/firestore/runs.ts::persistAdaptiveOutput()`): embedded on the run document (`runs/{runId}.adaptiveOutput`), not a subcollection — the design doc's size assessment (computed from each schema's own `maxItems`/`maxWords` registry caps) showed even the largest schema's worst case (`comparison_matrix`, ~50-60 KB, the biggest because cells retain a per-model value map) is under 10% of the existing 850 KB document-size safety budget already established for raw per-model text. Guarded by the SAME `estimateDocumentSize`/`MAX_TOTAL_DOC_SIZE` machinery `completeRun()` already uses; if ever exceeded, the write OMITS `adaptiveOutput` rather than failing the run (mirrors the existing "degrade gracefully" posture for `perModel` truncation). Written additively, in the same request, immediately after `finalizeAdaptiveRun()` succeeds — never a retry job, never a second model call, never a second quota charge (quota is charged once, at `checkAndIncrementUsageForRun()`, entirely before this write). A write failure is caught, logged (metadata only), and never fails the run response — the live `adaptiveOutput` was already computed in memory and is returned either way, with a `persistenceStatus: "saved" | "failed" | "omitted_size_limit" | "not_applicable"` response field reflecting what happened. `"omitted_size_limit"` is deliberately its own state, not folded into `"failed"` (added right after Phase 1's initial build, per explicit review feedback) — a size-guard omission is an expected, deterministic outcome of that run's own content, while `"failed"` means a genuine write error worth investigating if it recurs; conflating the two would make `"failed"` both over-broad and useless as an alert signal.

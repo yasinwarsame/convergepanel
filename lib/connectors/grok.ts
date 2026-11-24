@@ -35,6 +35,7 @@ import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { GROK_MODEL, XAI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
+import { openAiCompatibleTermination, type ProviderTerminationReason } from "./termination";
 
 // Use the same unified system prompt as ChatGPT and Claude
 // This shared instruction ensures a standardized sectioned format across all models:
@@ -121,6 +122,11 @@ export async function callGrok(
     };
   }
 
+    // Item 7B: the provider-reported finish reason of the parsed response. It reaches an error result ONLY through the
+    // one empty-response error thrown below for that same response (identity-checked), never through any other
+    // exception (transport, timeout, parsing, or anything thrown later).
+    let terminationReason: ProviderTerminationReason | undefined;
+    let emptyResponseError: Error | undefined;
     try {
       /**
        * Make API call using fetch (X.AI uses OpenAI-compatible format)
@@ -271,6 +277,7 @@ export async function callGrok(
       // This log is to help diagnose future truncation and can be removed later if not needed
       // Don't break anything if finish_reason is missing; just log when present
       const finishReason = choice?.finish_reason;
+      terminationReason = openAiCompatibleTermination(finishReason);
       if (finishReason === "length") {
         console.warn(
           "[Grok connector] Response truncated due to token limit (finish_reason=length). " +
@@ -280,7 +287,8 @@ export async function callGrok(
       
       // Check if response is empty - throw error if so
       if (!rawText || rawText.length === 0) {
-        throw new Error("Grok API returned an empty response.");
+        emptyResponseError = new Error("Grok API returned an empty response.");
+        throw emptyResponseError;
       }
       
       // Quick sanity logging for Grok - log final answer length to monitor response health
@@ -342,6 +350,7 @@ export async function callGrok(
         latencyMs,
         tokenUsage: normalizedTokenUsage, // Always include tokenUsage (never undefined)
         rawResponse: data, // Store raw response for token extraction and debugging
+        ...(terminationReason ? { terminationReason } : {}),
       };
     } catch (error: any) {
       // Log error for debugging
@@ -387,6 +396,7 @@ export async function callGrok(
         errorMessage: message, // Clear error message for UI display
         latencyMs,
         tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        ...(terminationReason && emptyResponseError !== undefined && error === emptyResponseError ? { terminationReason } : {}),
       };
     }
 }
