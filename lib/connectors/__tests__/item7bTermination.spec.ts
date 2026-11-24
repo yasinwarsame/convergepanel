@@ -252,8 +252,13 @@ describe("repair-cap policy (D2) — every pinned entry satisfies every bound", 
   });
   it("the connectors send the very model id the policy is pinned to", () => {
     const src = (f: string) => readFileSync(join(process.cwd(), "lib/connectors", f), "utf8");
-    expect(src("claude.ts")).toContain('export const CLAUDE_PROVIDER_MODEL = "claude-haiku-4-5-20251001";');
-    expect(src("chatgpt.ts")).toContain('export const CHATGPT_PROVIDER_MODEL = "gpt-4o-mini";');
+    // The model literal each connector sends (the same oracle truthfulModelLabels.spec.ts reads), the constant its
+    // repair-cap guard uses, and the policy's pinned provider model must all be the same string.
+    for (const [file, id, constant] of [["claude.ts", "claude", "CLAUDE_PROVIDER_MODEL"], ["chatgpt.ts", "chatgpt", "CHATGPT_PROVIDER_MODEL"]] as const) {
+      const sent = /model:\s*"([^"]+)"/.exec(src(file))![1];
+      expect(sent).toBe(OUTPUT_BUDGET_REPAIR_CAPS[id]!.providerModel);
+      expect(src(file)).toContain(`export const ${constant} = "${sent}";`);
+    }
     const panel = readFileSync(join(process.cwd(), "lib/panel.ts"), "utf8");
     expect(panel).toContain('chatgpt: "gpt-4o-mini",');
     expect(panel).toContain('claude: "claude-haiku-4-5-20251001",');

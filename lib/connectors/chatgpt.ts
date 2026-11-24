@@ -63,7 +63,7 @@ export async function callChatGPT(
     
     const completion = await Promise.race([
       client.chat.completions.create({
-        model: CHATGPT_PROVIDER_MODEL,
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",

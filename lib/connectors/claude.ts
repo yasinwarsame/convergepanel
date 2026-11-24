@@ -63,7 +63,7 @@ export async function callClaude(
 
     const message = await Promise.race([
       anthropic.messages.create({
-        model: CLAUDE_PROVIDER_MODEL,
+        model: "claude-haiku-4-5-20251001",
         // Centralized first-attempt cap; an Item 7B repair call may raise it only to the pinned repair cap.
         max_tokens: connectorMaxTokens("claude", CLAUDE_PROVIDER_MODEL, claudeLimits.maxTokens, opts?.outputBudgetRepairMaxTokens),
         system: systemPrompt,
