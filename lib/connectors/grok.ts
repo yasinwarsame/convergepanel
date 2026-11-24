@@ -35,6 +35,7 @@ import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { GROK_MODEL, XAI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
+import { openAiCompatibleTermination, type ProviderTerminationReason } from "./termination";
 
 // Use the same unified system prompt as ChatGPT and Claude
 // This shared instruction ensures a standardized sectioned format across all models:
@@ -121,6 +122,9 @@ export async function callGrok(
     };
   }
 
+    // Item 7B: the provider-reported finish reason once a response body was parsed; carried onto the error result too
+    // (an empty "length" answer still throws below, unchanged), never inferred from a thrown error.
+    let terminationReason: ProviderTerminationReason | undefined;
     try {
       /**
        * Make API call using fetch (X.AI uses OpenAI-compatible format)
@@ -271,6 +275,7 @@ export async function callGrok(
       // This log is to help diagnose future truncation and can be removed later if not needed
       // Don't break anything if finish_reason is missing; just log when present
       const finishReason = choice?.finish_reason;
+      terminationReason = openAiCompatibleTermination(finishReason);
       if (finishReason === "length") {
         console.warn(
           "[Grok connector] Response truncated due to token limit (finish_reason=length). " +
@@ -342,6 +347,7 @@ export async function callGrok(
         latencyMs,
         tokenUsage: normalizedTokenUsage, // Always include tokenUsage (never undefined)
         rawResponse: data, // Store raw response for token extraction and debugging
+        ...(terminationReason ? { terminationReason } : {}),
       };
     } catch (error: any) {
       // Log error for debugging
@@ -387,6 +393,7 @@ export async function callGrok(
         errorMessage: message, // Clear error message for UI display
         latencyMs,
         tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        ...(terminationReason ? { terminationReason } : {}),
       };
     }
 }

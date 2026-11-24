@@ -34,6 +34,11 @@ export const ADAPTIVE_RETRY_OUTCOMES = [
   "skipped_budget",
   /** The slot was served by a substitute provider; no adaptive retry is ever issued for it. */
   "ineligible_substituted",
+  /**
+   * Item 7B (owner D5): the provider reported that the first attempt stopped at its output budget, and no compliant
+   * larger cap (or no safe time to use it) existed, so no same-cap retry was issued. The first attempt stands.
+   */
+  "skipped_output_budget",
 ] as const;
 
 export type AdaptiveRetryOutcome = (typeof ADAPTIVE_RETRY_OUTCOMES)[number];
@@ -286,5 +291,5 @@ export function retryStateAllowsProviderSearchEvidence(args: {
   const parsed = parseAdaptiveRetryOutcome(args.retryOutcome);
   if (parsed.kind === "unknown") return false;
   if (parsed.kind === "absent") return args.retried !== true;
-  return parsed.outcome === "failed_call" || parsed.outcome === "no_change" || parsed.outcome === "skipped_budget";
+  return parsed.outcome === "failed_call" || parsed.outcome === "no_change" || parsed.outcome === "skipped_budget" || parsed.outcome === "skipped_output_budget";
 }

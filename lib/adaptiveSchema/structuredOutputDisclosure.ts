@@ -19,9 +19,16 @@
  * valid per-slot record exists (every run before Item 7A), the disclosure says the affected models were not recorded.
  * A run with no shortfall and no record shows nothing.
  *
+ * Item 7B: a slot may carry an optional `cause` (StructuredOutputCause). The reader accepts it only when it is one of
+ * the closed values and consistent with the slot (none on a complete slot; "provider_failure" only on a failed call;
+ * "output_budget_exhausted" and "validation_failure" only on a completed call); anything else rejects the whole record.
+ * Only "output_budget_exhausted" adds wording ("the response reached the provider's output-token limit"): the other
+ * causes are already stated by the state itself or are not established. Records without a cause read exactly as before.
+ *
  * Pure and client-safe: no I/O, no logging, never throws. Field keys and counts only; never model content.
  */
-import type { CommonResponseMeta, StructuredOutputRecordV1, StructuredOutputSlotV1 } from "./types";
+import { STRUCTURED_OUTPUT_CAUSES } from "./types";
+import type { CommonResponseMeta, StructuredOutputCause, StructuredOutputRecordV1, StructuredOutputSlotV1 } from "./types";
 
 export interface StructuredOutputDisclosureModel {
   modelId: string;
@@ -40,6 +47,8 @@ export interface StructuredOutputDisclosureModel {
   decisionCriticalAffected: boolean;
   /** Prominent (true) or details-only (false) under the material rule. */
   material: boolean;
+  /** Item 7B: why the slot was not complete, when the run recorded it. */
+  cause?: StructuredOutputCause;
 }
 
 export interface StructuredOutputDisclosure {
@@ -157,6 +166,13 @@ function readSlot(raw: unknown): StructuredOutputSlotV1 | null {
   // Fail closed: "partial" must carry the evidence it claims; "complete" and "unavailable" carry none.
   const hasEvidence = o.invalidFields !== undefined || o.shortenedFields !== undefined || !!droppedItems || !!itemsOverLimit;
   if ((o.result === "partial") !== hasEvidence) return null;
+  // Item 7B: an optional cause must be a known value and agree with the slot it explains.
+  if (o.cause !== undefined) {
+    if (typeof o.cause !== "string" || !(STRUCTURED_OUTPUT_CAUSES as readonly string[]).includes(o.cause)) return null;
+    if (o.result === "complete") return null;
+    if (o.cause === "provider_failure" && o.call !== "failed") return null;
+    if ((o.cause === "output_budget_exhausted" || o.cause === "validation_failure") && o.call !== "completed") return null;
+  }
   return {
     modelId: o.modelId as StructuredOutputSlotV1["modelId"],
     call: o.call,
@@ -165,6 +181,7 @@ function readSlot(raw: unknown): StructuredOutputSlotV1 | null {
     ...(droppedItems ? { droppedItems } : {}),
     ...(itemsOverLimit ? { itemsOverLimit } : {}),
     ...(o.shortenedFields ? { shortenedFields: o.shortenedFields as string[] } : {}),
+    ...(o.cause !== undefined ? { cause: o.cause as StructuredOutputCause } : {}),
   };
 }
 
@@ -193,7 +210,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 const sum = (c?: Record<string, number>) => Object.values(c ?? {}).reduce((a, b) => a + b, 0);
 
 function describeSlot(s: StructuredOutputSlotV1, schemaId: unknown): StructuredOutputDisclosureModel {
-  const base = { modelId: s.modelId, providerCall: s.call };
+  const base = { modelId: s.modelId, providerCall: s.call, ...(s.cause ? { cause: s.cause } : {}) };
   if (s.result === "unavailable") {
     return { ...base, state: "unavailable", fieldsNotRecovered: 0, itemsDiscarded: 0, itemsOverLimit: 0, textShortenedFields: 0, affectedFields: 0, decisionCriticalAffected: false, material: true };
   }
@@ -244,18 +261,23 @@ export function deriveStructuredOutputDisclosure(meta: Partial<CommonResponseMet
 
 /** What happened to one affected model, without its name (the caller shows the name). */
 export function describeAffectedState(m: StructuredOutputDisclosureModel): string {
+  // Item 7B: stated only when the provider itself reported it (never inferred from malformed output).
+  const budget = m.cause === "output_budget_exhausted" ? `; ${STRUCTURED_OUTPUT_BUDGET_CAUSE_TEXT}` : "";
   if (m.state === "unavailable") {
-    return m.providerCall === "failed"
+    return (m.providerCall === "failed"
       ? "unavailable: the provider call did not complete"
-      : "unavailable: the provider call completed but returned no usable structured output";
+      : "unavailable: the provider call completed but returned no usable structured output") + budget;
   }
   const parts: string[] = [];
   if (m.fieldsNotRecovered > 0) parts.push(`${plural(m.fieldsNotRecovered, "field", "fields")} not recovered`);
   if (m.itemsDiscarded > 0) parts.push(`${plural(m.itemsDiscarded, "item", "items")} discarded as invalid`);
   if (m.itemsOverLimit > 0) parts.push(`${plural(m.itemsOverLimit, "item", "items")} beyond field limits not included`);
   if (m.textShortenedFields > 0) parts.push(`text shortened to the word limit in ${plural(m.textShortenedFields, "field", "fields")}`);
-  return `partially used: ${parts.join("; ")}`;
+  return `partially used: ${parts.join("; ")}${budget}`;
 }
+
+/** Item 7B: the wording for a recorded "output_budget_exhausted" cause. */
+export const STRUCTURED_OUTPUT_BUDGET_CAUSE_TEXT = "the response reached the provider's output-token limit";
 
 /** Shown when the counts show a shortfall but the run did not record which models were affected. */
 export const STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED = "Which models were affected was not recorded for this run.";

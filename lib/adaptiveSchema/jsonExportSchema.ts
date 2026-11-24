@@ -90,6 +90,8 @@ const jsonExportResultSchema = z.discriminatedUnion("schemaFamily", [
               affectedFields: z.number().int().nonnegative(),
               decisionCriticalAffected: z.boolean(),
               material: z.boolean(),
+              // Item 7B: optional, only when the run recorded why the slot was not complete.
+              cause: z.enum(["output_budget_exhausted", "validation_failure", "provider_failure", "unknown"]).optional(),
             })
           ),
           z.null(),

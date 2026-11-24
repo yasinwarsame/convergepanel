@@ -1674,9 +1674,24 @@ export interface CommonResponseMeta {
 /** Item 7A: how one selected slot's structured output was used. */
 export type StructuredOutputSlotResult = "complete" | "partial" | "unavailable";
 
+/**
+ * Item 7B (owner D1): why a slot was not complete, when that is known. A small closed set:
+ *   - "output_budget_exhausted": the provider itself reported that the first attempt stopped at its output-token budget;
+ *   - "validation_failure": the provider finished normally, but the output did not pass schema validation;
+ *   - "provider_failure": the provider call did not complete;
+ *   - "unknown": none of the above could be established (never guessed from malformed JSON).
+ * Absent on complete slots, on a slot shortened only by a schema cap (by design, not a failure), and on every record
+ * written before Item 7B.
+ */
+export const STRUCTURED_OUTPUT_CAUSES = ["output_budget_exhausted", "validation_failure", "provider_failure", "unknown"] as const;
+export type StructuredOutputCause = (typeof STRUCTURED_OUTPUT_CAUSES)[number];
+
 export interface StructuredOutputSlotV1 {
   modelId: ModelId;
-  /** Whether the provider call completed ("ok" or "substituted") — kept separate from whether its output was usable. */
+  /**
+   * Whether the provider call completed ("ok" or "substituted", or — Item 7B — a call the provider reported as stopped at
+   * its output budget even though no text came back) — kept separate from whether its output was usable.
+   */
   call: "completed" | "failed";
   /** "unavailable": nothing usable survived validation. "partial": some fields or items were not recovered, or were shortened by a cap. */
   result: StructuredOutputSlotResult;
@@ -1688,6 +1703,8 @@ export interface StructuredOutputSlotV1 {
   itemsOverLimit?: Record<string, number>;
   /** Field keys shortened by a word cap or an item cap (the result's `truncatedFields`). */
   shortenedFields?: string[];
+  /** Item 7B: why this slot was not complete, when known (see StructuredOutputCause). */
+  cause?: StructuredOutputCause;
 }
 
 export interface StructuredOutputRecordV1 {

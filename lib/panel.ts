@@ -405,6 +405,8 @@ function failedPlaceholder(modelId: ModelId, primaryResult: ModelResult, reason?
     rawText: "Model unavailable.",
     errorMessage: primaryResult.errorMessage || `${modelId} failed`,
     ...(primaryResult.errorCode ? { errorCode: primaryResult.errorCode } : {}),
+    // Item 7B: the primary's provider-reported termination reason (e.g. an empty answer that hit its output budget).
+    ...(primaryResult.terminationReason ? { terminationReason: primaryResult.terminationReason } : {}),
     latencyMs: primaryResult.latencyMs || 0,
     tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
     requestedModel,

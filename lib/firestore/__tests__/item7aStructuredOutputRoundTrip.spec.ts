@@ -48,7 +48,7 @@ import { persistAdaptiveOutput } from "@/lib/firestore/runs";
 import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
-import { deriveStructuredOutputDisclosure, readStructuredOutputRecord } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
+import { deriveStructuredOutputDisclosure, readStructuredOutputRecord, structuredOutputDisclosureLines } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
 import type { CommonResponseMeta, QueryClassification } from "@/lib/adaptiveSchema/types";
 import type { ModelId, ModelResult } from "@/lib/types";
 
@@ -87,8 +87,11 @@ describe(`Item 7A structured-output record: Firestore round trip (${EMULATOR ? "
     const results: ModelResult[] = [
       { modelId: "chatgpt" as ModelId, status: "ok", rawText: answer({ reversibleNextStep: longStep }), latencyMs: 1 },
       { modelId: "claude" as ModelId, status: "substituted", rawText: answer(), latencyMs: 1, provider: "deepseek", requestedModel: "claude" } as ModelResult,
-      { modelId: "gemini" as ModelId, status: "ok", rawText: "```json\n{ \"decisionQuestion\": \"cut off", latencyMs: 1 },
+      // Item 7B: the provider itself reported that this answer stopped at its output budget.
+      { modelId: "gemini" as ModelId, status: "ok", rawText: "```json\n{ \"decisionQuestion\": \"cut off", latencyMs: 1, terminationReason: "output_budget" },
       { modelId: "grok" as ModelId, status: "timeout", rawText: null, latencyMs: 1 },
+      // Item 7B: a normal finish whose output fails validation.
+      { modelId: "perplexity" as ModelId, status: "ok", rawText: "not json at all", latencyMs: 1, terminationReason: "natural" },
     ];
     const out: any = await finalizeAdaptiveRun(SCHEMA_REGISTRY.decision_support, results, "Which option?", undefined, classification);
     const written = out.persistedOutput;
@@ -98,8 +101,9 @@ describe(`Item 7A structured-output record: Firestore round trip (${EMULATOR ? "
       slots: [
         { modelId: "chatgpt", call: "completed", result: "partial", shortenedFields: ["reversibleNextStep"] },
         { modelId: "claude", call: "completed", result: "complete" },
-        { modelId: "gemini", call: "completed", result: "unavailable" },
-        { modelId: "grok", call: "failed", result: "unavailable" },
+        { modelId: "gemini", call: "completed", result: "unavailable", cause: "output_budget_exhausted" },
+        { modelId: "grok", call: "failed", result: "unavailable", cause: "provider_failure" },
+        { modelId: "perplexity", call: "completed", result: "unavailable", cause: "validation_failure" },
       ],
     });
 
@@ -122,6 +126,12 @@ describe(`Item 7A structured-output record: Firestore round trip (${EMULATOR ? "
     expect(readMeta.structuredOutput).toEqual(meta.structuredOutput);
     expect(readStructuredOutputRecord(readMeta)).toEqual(meta.structuredOutput);
     expect(deriveStructuredOutputDisclosure(readMeta)).toEqual(deriveStructuredOutputDisclosure(meta));
-    expect(deriveStructuredOutputDisclosure(readMeta)).toMatchObject({ selected: 4, completedCalls: 3, usable: 2, prominent: true });
+    expect(deriveStructuredOutputDisclosure(readMeta)).toMatchObject({ selected: 5, completedCalls: 4, usable: 2, prominent: true });
+    expect(structuredOutputDisclosureLines(deriveStructuredOutputDisclosure(readMeta)!, (id) => id).slice(2)).toEqual([
+      "chatgpt — partially used: text shortened to the word limit in 1 field.",
+      "gemini — unavailable: the provider call completed but returned no usable structured output; the response reached the provider's output-token limit.",
+      "grok — unavailable: the provider call did not complete.",
+      "perplexity — unavailable: the provider call completed but returned no usable structured output.",
+    ]);
   });
 });
