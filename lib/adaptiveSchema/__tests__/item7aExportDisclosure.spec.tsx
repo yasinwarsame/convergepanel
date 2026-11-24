@@ -23,7 +23,7 @@ const DEGRADED = byName("ds.uncontested_go_with_failed_slots.unreviewed_in_queue
 const COMPLETE = byName("ds.uncontested_choose_option.unreviewed_in_queue");
 const HEADLINE = "5 models selected · 2 usable structured results";
 const CALLS = "2 of 5 provider calls completed.";
-const UNAVAILABLE = "unavailable — the provider call did not complete.";
+const UNAVAILABLE = " — unavailable: the provider call did not complete.";
 
 describe("PDF (element tree of the composer)", () => {
   it("a degraded run shows the section, headline, call count and each unavailable model", () => {
@@ -64,6 +64,10 @@ describe("JSON (rendered bytes, validated by the export schema)", () => {
     expect(x.affected.map((m) => [m.state, m.providerCall])).toEqual([["unavailable", "failed"], ["unavailable", "failed"], ["unavailable", "failed"]]);
     expect(x.lines.slice(0, 2)).toEqual([HEADLINE, CALLS]);
     expect(x.lines.slice(2).every((l) => l.endsWith(UNAVAILABLE))).toBe(true);
+    // The model name (which may carry its own qualifier, e.g. "· model not recorded") is separated from the state.
+    expect(x.lines.slice(2).some((l) => /: unavailable/.test(l))).toBe(false);
+    expect(x.prominent).toBe(true);
+    expect(x.affected.every((m) => m.material)).toBe(true);
   });
   it("a complete run has no derived disclosure", async () => {
     const j = await body(COMPLETE);

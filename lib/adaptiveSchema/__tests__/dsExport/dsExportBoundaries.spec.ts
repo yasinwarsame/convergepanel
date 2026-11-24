@@ -30,7 +30,9 @@ const UNCHANGED: [string, string][] = [
   // ITEM6A-REPIN lib/adaptiveSchema/jsonExportSchema.ts: sha256 e50f144b619e0c81faf78bbc61adc71ac27ab944795649cb9fdbc864bb6aeacb → 464993af33e23b81d11f00d1c6a686a8614649457f3fcf7c3bfe53661664af07. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
   // ITEM7A-REPIN lib/adaptiveSchema/jsonExportSchema.ts: sha256 464993af33e23b81d11f00d1c6a686a8614649457f3fcf7c3bfe53661664af07 → a796f6c5137e302a669f1b0c74cc34d03b752235f58ca14cf1a5bc303bfa94b8. Item 7A: ONLY the optional
   // derivedStructuredOutputDisclosure object.
-  ["lib/adaptiveSchema/jsonExportSchema.ts", "a796f6c5137e302a669f1b0c74cc34d03b752235f58ca14cf1a5bc303bfa94b8"],
+  // ITEM7A-REPIN lib/adaptiveSchema/jsonExportSchema.ts: sha256 a796f6c5137e302a669f1b0c74cc34d03b752235f58ca14cf1a5bc303bfa94b8 → 36f6c2b226fa0af343fcf8656fa8e9ea6359f6868933c4eb5d8ae1bc925e2681. Item 7A final correction round
+  // (owner-authorized 2026-11-24): ONLY the material-rule fields of the same optional derivedStructuredOutputDisclosure object.
+  ["lib/adaptiveSchema/jsonExportSchema.ts", "36f6c2b226fa0af343fcf8656fa8e9ea6359f6868933c4eb5d8ae1bc925e2681"],
   ["lib/pdf/renderAdaptiveResearchPdf.ts", "efc6da0857c4a3734cf0eb97f5387d1eadd6319330e4b61202d5c3ca46f266fd"],
   ["lib/docx/renderAdaptiveResearchDocx.ts", "80fb811d7df16b2c303f1583b748f68d98e0b283c300d128a9ffd87ce575fec1"],
   // OWNER EXACT-FILE EXCEPTION (2026-11-03, research deletion integrity). This file was byte-identical to 0249a4e5,

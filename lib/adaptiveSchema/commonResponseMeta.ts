@@ -353,7 +353,7 @@ export function buildCommonResponseMeta(args: BuildCommonResponseMetaArgs): Comm
 
 /**
  * Item 7A: the per-slot completeness record, or undefined when every selected slot produced complete structured output
- * (nothing unavailable, nothing salvaged, no item cut by an item cap; word-cap trimming alone does not count). Slot i is modelResults[i]; its validated result is
+ * (nothing unavailable, nothing salvaged, nothing shortened by a word or item cap). Slot i is modelResults[i]; its validated result is
  * adaptiveResults[i] when present (orchestrate.ts maps one to one) — a missing one is "unavailable". Field keys and
  * counts only.
  */
@@ -366,13 +366,15 @@ export function buildStructuredOutputRecord(modelResults: ModelResult[], adaptiv
     const invalidFields = r.invalidFields && r.invalidFields.length > 0 ? [...r.invalidFields] : undefined;
     const droppedItems = r.droppedItems && Object.keys(r.droppedItems).length > 0 ? { ...r.droppedItems } : undefined;
     const itemsOverLimit = r.itemsOverLimit && Object.keys(r.itemsOverLimit).length > 0 ? { ...r.itemsOverLimit } : undefined;
+    const shortenedFields = r.truncatedFields && r.truncatedFields.length > 0 ? Array.from(new Set(r.truncatedFields)) : undefined;
     return {
       modelId: m.modelId,
       call,
-      result: invalidFields || droppedItems || itemsOverLimit ? "partial" : "complete",
+      result: invalidFields || droppedItems || itemsOverLimit || shortenedFields ? "partial" : "complete",
       ...(invalidFields ? { invalidFields } : {}),
       ...(droppedItems ? { droppedItems } : {}),
       ...(itemsOverLimit ? { itemsOverLimit } : {}),
+      ...(shortenedFields ? { shortenedFields } : {}),
     };
   });
   const degraded = slots.some((s) => s.result !== "complete");

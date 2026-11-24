@@ -269,12 +269,6 @@ function PaginatingCard({ heading, children, keepAhead = CARD_HEADING_PRESENCE_A
 }
 
 /**
- * A titled card. Content-bearing cards paginate (`PaginatingCard`). Only
- * cards whose content is structurally bounded and always far shorter than
- * one page (`bounded`) stay on one page as a single non-breaking block —
- * their heading then moves with them and can never be stranded.
- */
-/**
  * Item 7A: the structured-output completeness section — the same shared disclosure and wording as the live report.
  * Renders nothing for a complete run, a legacy-family export, or a record without the counts.
  */
@@ -299,6 +293,12 @@ function StructuredOutputSection({ record }: { record: AdaptiveResearchExportV1 
   );
 }
 
+/**
+ * A titled card. Content-bearing cards paginate (`PaginatingCard`). Only
+ * cards whose content is structurally bounded and always far shorter than
+ * one page (`bounded`) stay on one page as a single non-breaking block —
+ * their heading then moves with them and can never be stranded.
+ */
 function SectionCard({ label, bounded = false, children }: { label: string; bounded?: boolean; children: React.ReactNode }) {
   if (bounded) {
     // The anchor: a non-breaking first child that moves to the next page would make react-pdf keep its parent whole

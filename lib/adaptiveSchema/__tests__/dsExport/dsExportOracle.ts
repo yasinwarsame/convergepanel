@@ -92,7 +92,7 @@ export function docxStatusRegionV1(caseName: string): string[] {
  * summary of a run carrying the per-slot record — only the two fixtures with fewer usable than selected models, whose
  * missing slots errored at the provider. Written out literally, never derived from the disclosure module.
  */
-const NR7A = (name: string) => `${name} · model not recorded: unavailable — the provider call did not complete.`;
+const NR7A = (name: string) => `${name} · model not recorded — unavailable: the provider call did not complete.`;
 export const ITEM7A_STRUCTURED_OUTPUT: Record<string, string[]> = {
   uncontested_go_with_failed_slots: ["Structured output completeness", "5 models selected · 2 usable structured results", "2 of 5 provider calls completed.", NR7A("Gemini"), NR7A("Grok"), NR7A("Perplexity")],
   all_models_failed: ["Structured output completeness", "3 models selected · 0 usable structured results", "0 of 3 provider calls completed.", NR7A("ChatGPT"), NR7A("Claude"), NR7A("Gemini")],

@@ -86,10 +86,15 @@ const jsonExportResultSchema = z.discriminatedUnion("schemaFamily", [
               fieldsNotRecovered: z.number().int().nonnegative(),
               itemsDiscarded: z.number().int().nonnegative(),
               itemsOverLimit: z.number().int().nonnegative(),
+              textShortenedFields: z.number().int().nonnegative(),
+              affectedFields: z.number().int().nonnegative(),
+              decisionCriticalAffected: z.boolean(),
+              material: z.boolean(),
             })
           ),
           z.null(),
         ]),
+        prominent: z.boolean(),
         lines: z.array(z.string()),
       })
       .optional(),

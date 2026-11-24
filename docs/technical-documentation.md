@@ -726,23 +726,31 @@ A full requirement-by-requirement audit of the query-routing redesign against it
 
 **Limitations adapter** (`getAdaptiveLimitations`): concrete, computed, per-schema statements (existing shortfall notes, missing-cell counts, dispute/ambiguity flags, `decision_support`'s own recommendation caveats plus an inferred-vs-user-provided-criteria check), deduplicated by exact string match (these are programmatically generated, not model prose, so the fuzzy near-duplicate merging `textSimilarity.ts` uses elsewhere isn't needed) — plus one universal statement the shared builder itself adds when `modelsWithUsableOutput < totalModels`.
 
-**Structured-output degradation disclosure (Item 7A, 2026-11-23; corrected 2026-11-24).** One shared module, `lib/adaptiveSchema/structuredOutputDisclosure.ts`, decides what a report or export says about selected vs usable models. It reads only the persisted `CommonResponseMeta`.
+**Structured-output degradation disclosure (Item 7A, 2026-11-23; corrected 2026-11-24, twice).** One shared module, `lib/adaptiveSchema/structuredOutputDisclosure.ts`, decides what a report or export says about selected vs usable models. It reads only the persisted `CommonResponseMeta`.
+- Scope: the 9 Milestone-2 schemas only. The 8 older ("legacy family") adaptive schemas build no `CommonResponseMeta` and get no disclosure. This is a documented 7A limitation, tracked as an Item 7 closeout residual. Item 7 is not complete because of 7A.
 - Counts: `totalModels` (selected), `successfulModels` (provider calls that completed) and `modelsWithUsableOutput` (usable structured output). A completed call is never counted as usable.
 - `meta.structuredOutput` (`StructuredOutputRecordV1`, built by `buildStructuredOutputRecord` in `commonResponseMeta.ts`) is the per-slot record:
   - `call`: `completed` / `failed`;
   - `result`: `complete` / `partial` / `unavailable`;
-  - `invalidFields` keys, plus `droppedItems` and `itemsOverLimit` counts.
-  It is written ONLY when a slot was not complete, so complete runs persist what they did before.
-- Material shortening rule: only whole items cut because a field exceeded the schema's item cap (`itemsOverLimit`) count. Prose trimmed to a word cap is not disclosed (it stays in `truncatedFields` as before).
+  - `invalidFields` keys, `droppedItems` and `itemsOverLimit` counts, and `shortenedFields` (the result's existing `truncatedFields`: fields shortened by a word cap or an item cap).
+  It is written ONLY when a slot was not complete, so a complete Milestone-2 run's `adaptiveOutput.meta` is unchanged.
+- The reader is strict and fails closed: version 1; one slot per selected model; counts consistent with the meta; non-empty, duplicate-free field lists; and a `partial` slot must carry evidence, while `complete` and `unavailable` slots carry none. Any violation discards the whole record, and a shortfall is then shown as "not recorded".
+- Material shortening rule (owner-approved). A shortening (items discarded as invalid, items cut by an item cap, or text trimmed to a word cap) is material when it affects:
+  - a decision-critical field: `DECISION_CRITICAL_FIELDS`, an explicit per-schema mapping of recommendation, conclusion, risk, next-step, uncertainty and supporting-evidence fields, checked against `SCHEMA_REGISTRY` by test; or
+  - two or more distinct fields.
+  An isolated shortening of one non-critical field is disclosed in a collapsed details element (live) and marked "(not decision-critical)" (live and exports), without the prominent notice. Always prominent: an unavailable model, a field not recovered at all, a shortfall whose models were not recorded, and a schema with no mapping.
 - `droppedItems` and `itemsOverLimit` (on `AdaptiveModelResult`) are set in `validator.ts`. Counts only; discarded content is never kept. `mergeAdaptiveRetry` carries each field's counts from the attempt its value came from. Validation acceptance, retries and aggregation are unchanged.
+- These two optional count maps are also present on results persisted in `legacyAdaptiveOutput.results` for the legacy family. They are additive counts only, never content. So "unchanged persistence" holds only for the Milestone-2 `adaptiveOutput.meta`, not for legacy-family results.
 - Live report: `components/adaptive/StructuredOutputNotice.tsx` renders under the summary bar:
   - the headline (e.g. "5 models selected · 4 usable structured results");
   - the provider-call line;
-  - each affected model, distinguishing "the provider call did not complete" from "completed but returned no usable structured output", plus partial-salvage counts.
+  - each affected model, distinguishing "the provider call did not complete" from "completed but returned no usable structured output", plus partial-salvage and shortening counts.
   Decision Support's Panel detail states the same headline and names unavailable models. Complete runs render the same element tree as before.
 - Legacy runs (no record): when the counts show a shortfall, the live report gives the counts and says which models were affected was not recorded. Nothing is inferred. A malformed or count-inconsistent record is ignored.
 - Exports (PDF, DOCX, JSON) render the same lines in a "Structured output completeness" section, and JSON carries `result.derivedStructuredOutputDisclosure`.
   - This happens ONLY for a run carrying the per-slot record (`deriveRecordedStructuredOutputDisclosure`). A stored historical export therefore re-renders byte-identically and still reproduces its file hash.
+  - Deliberate, owner-accepted consequence: a pre-7A run with a shortfall shows "not recorded" in the live report, while its export adds nothing.
+  - Affected lines read "<model> — <state>." so a qualified name ("Gemini · model not recorded") stays separate from the state.
   - The export snapshot and the Decision Receipt are unchanged; the Receipt's existing "k of N selected models did not produce usable structured output." uses the same counts.
 - Not in 7A: provider output-budget truncation detection and the retry strategy (Item 7B).
 

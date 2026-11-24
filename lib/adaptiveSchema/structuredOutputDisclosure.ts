@@ -7,8 +7,13 @@
  *   (usable structured output). A completed provider call is never counted as a usable result.
  * - `structuredOutput`: the per-slot record (written since Item 7A, only when a slot was not complete).
  *
- * Material shortening rule (Item 7A): only whole items cut because a field exceeded the schema's item cap count.
- * Prose trimmed to a word cap is not disclosed.
+ * Material shortening rule (owner-approved, Item 7A). A slot's shortening — items discarded as invalid, whole items cut
+ * by an item cap, or text trimmed to a word cap — is MATERIAL when it affects:
+ *   - a decision-critical field of the run's schema (DECISION_CRITICAL_FIELDS, an explicit per-schema mapping), or
+ *   - two or more distinct fields.
+ * An isolated shortening of one non-critical field is still disclosed, but only in details, without the prominent
+ * notice. Always prominent: a model with no usable output, a field that was not recovered at all, a shortfall whose
+ * models were not recorded, and any schema without a mapping (importance is never guessed).
  *
  * Fail closed: a missing or malformed per-slot record never becomes a guess. When the counts show a shortfall but no
  * valid per-slot record exists (every run before Item 7A), the disclosure says the affected models were not recorded.
@@ -20,13 +25,21 @@ import type { CommonResponseMeta, StructuredOutputRecordV1, StructuredOutputSlot
 
 export interface StructuredOutputDisclosureModel {
   modelId: string;
-  /** "unavailable" = no usable structured output; "partial" = some fields or items not recovered, or items cut by a limit. */
+  /** "unavailable" = no usable structured output; "partial" = some fields or items not recovered, or shortened by a cap. */
   state: "unavailable" | "partial";
   /** Whether the provider call completed (kept separate from usability). */
   providerCall: "completed" | "failed";
   fieldsNotRecovered: number;
   itemsDiscarded: number;
   itemsOverLimit: number;
+  /** Fields whose text was trimmed to a word cap (shortened fields with no item cut by an item cap). */
+  textShortenedFields: number;
+  /** Distinct schema fields affected in any way. */
+  affectedFields: number;
+  /** At least one affected field is in the schema's decision-critical mapping. */
+  decisionCriticalAffected: boolean;
+  /** Prominent (true) or details-only (false) under the material rule. */
+  material: boolean;
 }
 
 export interface StructuredOutputDisclosure {
@@ -40,10 +53,58 @@ export interface StructuredOutputDisclosure {
   callsLine: string | null;
   /** Per affected slot, in slot order; null when the run did not record per-slot detail. */
   affected: StructuredOutputDisclosureModel[] | null;
+  /**
+   * True: show the prominent notice (a model unavailable, a field lost, a material shortening, or a shortfall whose
+   * models were not recorded). False: every affected model has only an isolated non-critical shortening — disclose in
+   * details only.
+   */
+  prominent: boolean;
 }
 
+/**
+ * Item 7A: the decision-critical fields of each of the 9 Milestone-2 schemas — the fields that carry the run's
+ * recommendation, conclusion, risks, next steps, uncertainty or supporting evidence. Explicit and deterministic; every
+ * key is checked against SCHEMA_REGISTRY by item7aStructuredOutputDisclosure.spec.tsx. A schema missing from this map
+ * makes every shortening material.
+ */
+export const DECISION_CRITICAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  // conclusion: the ranked items themselves.
+  ranked_enumeration: ["items"],
+  // evidence: cells; conclusion: directConclusion; risks: tradeoffs; recommendations: bestUseRecommendations; uncertainty.
+  comparison_matrix: ["cells", "directConclusion", "tradeoffs", "bestUseRecommendations", "uncertainties"],
+  // conclusion: directAnswer; evidence: sources.
+  definition_explanation: ["directAnswer", "sources"],
+  // conclusion: directAnswer, directCauses; uncertainty: unknowns; next steps: testsOrEvidenceNeeded; evidence: sources.
+  causal_explanation: ["directAnswer", "directCauses", "unknowns", "testsOrEvidenceNeeded", "sources"],
+  // conclusion: the checklist items themselves.
+  checklist_taxonomy: ["items"],
+  // conclusion: executiveSummary; evidence: findings, sources; uncertainty: disagreements, evidenceGaps, openQuestions;
+  // next steps: recommendedNextSteps.
+  deep_research: ["executiveSummary", "findings", "disagreements", "evidenceGaps", "openQuestions", "recommendedNextSteps", "sources"],
+  // conclusion: overallAssessment; evidence: dimensions, sources; risks: redFlags; uncertainty: applicabilityCaveats;
+  // next steps: recommendedChecks.
+  evidence_review: ["overallAssessment", "dimensions", "redFlags", "applicabilityCaveats", "recommendedChecks", "sources"],
+  // conclusion: summary; next steps: followUpQuestions; evidence: sources.
+  bias_blindspot_audit: ["summary", "followUpQuestions", "sources"],
+  // recommendation: action, option, rationale, caveats; evidence: assessments, sources; risks; uncertainty:
+  // uncertainties, sensitivityFindings; next steps: reversibleNextStep.
+  decision_support: [
+    "recommendationAction",
+    "recommendedOption",
+    "recommendationRationale",
+    "recommendationCaveats",
+    "assessments",
+    "risks",
+    "uncertainties",
+    "sensitivityFindings",
+    "reversibleNextStep",
+    "sources",
+  ],
+};
+
 const isNonNegInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
-const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0);
+const isStringArray = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string" && x.length > 0) && new Set(v).size === v.length;
 
 function readCounts(v: unknown): Record<string, number> | undefined | null {
   if (v === undefined) return undefined;
@@ -60,9 +121,13 @@ function readSlot(raw: unknown): StructuredOutputSlotV1 | null {
   if (o.call !== "completed" && o.call !== "failed") return null;
   if (o.result !== "complete" && o.result !== "partial" && o.result !== "unavailable") return null;
   if (o.invalidFields !== undefined && !isStringArray(o.invalidFields)) return null;
+  if (o.shortenedFields !== undefined && !isStringArray(o.shortenedFields)) return null;
   const droppedItems = readCounts(o.droppedItems);
   const itemsOverLimit = readCounts(o.itemsOverLimit);
   if (droppedItems === null || itemsOverLimit === null) return null;
+  // Fail closed: "partial" must carry the evidence it claims; "complete" and "unavailable" carry none.
+  const hasEvidence = o.invalidFields !== undefined || o.shortenedFields !== undefined || !!droppedItems || !!itemsOverLimit;
+  if ((o.result === "partial") !== hasEvidence) return null;
   return {
     modelId: o.modelId as StructuredOutputSlotV1["modelId"],
     call: o.call,
@@ -70,6 +135,7 @@ function readSlot(raw: unknown): StructuredOutputSlotV1 | null {
     ...(o.invalidFields ? { invalidFields: o.invalidFields as string[] } : {}),
     ...(droppedItems ? { droppedItems } : {}),
     ...(itemsOverLimit ? { itemsOverLimit } : {}),
+    ...(o.shortenedFields ? { shortenedFields: o.shortenedFields as string[] } : {}),
   };
 }
 
@@ -97,6 +163,29 @@ export function readStructuredOutputRecord(meta: Partial<CommonResponseMeta> | n
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const sum = (c?: Record<string, number>) => Object.values(c ?? {}).reduce((a, b) => a + b, 0);
 
+function describeSlot(s: StructuredOutputSlotV1, schemaId: unknown): StructuredOutputDisclosureModel {
+  const base = { modelId: s.modelId, providerCall: s.call };
+  if (s.result === "unavailable") {
+    return { ...base, state: "unavailable", fieldsNotRecovered: 0, itemsDiscarded: 0, itemsOverLimit: 0, textShortenedFields: 0, affectedFields: 0, decisionCriticalAffected: false, material: true };
+  }
+  const invalid = s.invalidFields ?? [];
+  const cut = Object.keys(s.itemsOverLimit ?? {});
+  const affected = new Set([...invalid, ...Object.keys(s.droppedItems ?? {}), ...cut, ...(s.shortenedFields ?? [])]);
+  const critical = typeof schemaId === "string" && Object.prototype.hasOwnProperty.call(DECISION_CRITICAL_FIELDS, schemaId) ? DECISION_CRITICAL_FIELDS[schemaId] : null;
+  const decisionCriticalAffected = critical !== null && [...affected].some((k) => critical.includes(k));
+  return {
+    ...base,
+    state: "partial",
+    fieldsNotRecovered: invalid.length,
+    itemsDiscarded: sum(s.droppedItems),
+    itemsOverLimit: sum(s.itemsOverLimit),
+    textShortenedFields: (s.shortenedFields ?? []).filter((k) => !cut.includes(k)).length,
+    affectedFields: affected.size,
+    decisionCriticalAffected,
+    material: critical === null || invalid.length > 0 || decisionCriticalAffected || affected.size >= 2,
+  };
+}
+
 /**
  * The disclosure for a run, or null when there is nothing to disclose (every selected model produced complete
  * structured output, or the run predates the counts).
@@ -108,20 +197,7 @@ export function deriveStructuredOutputDisclosure(meta: Partial<CommonResponseMet
   const record = readStructuredOutputRecord(meta);
   if (usable === selected && !record) return null;
   const affected: StructuredOutputDisclosureModel[] | null = record
-    ? record.slots.flatMap((s): StructuredOutputDisclosureModel[] =>
-        s.result === "complete"
-          ? []
-          : [
-              {
-                modelId: s.modelId,
-                state: s.result === "unavailable" ? "unavailable" : "partial",
-                providerCall: s.call,
-                fieldsNotRecovered: s.result === "partial" ? (s.invalidFields?.length ?? 0) : 0,
-                itemsDiscarded: s.result === "partial" ? sum(s.droppedItems) : 0,
-                itemsOverLimit: s.result === "partial" ? sum(s.itemsOverLimit) : 0,
-              },
-            ]
-      )
+    ? record.slots.filter((s) => s.result !== "complete").map((s) => describeSlot(s, meta?.schemaId))
     : null;
   if (affected && affected.length === 0) return null;
   const successful = meta?.successfulModels;
@@ -133,6 +209,7 @@ export function deriveStructuredOutputDisclosure(meta: Partial<CommonResponseMet
     headline: `${plural(selected, "model", "models")} selected · ${plural(usable, "usable structured result", "usable structured results")}`,
     callsLine: completedCalls === null ? null : `${completedCalls} of ${selected} provider ${selected === 1 ? "call" : "calls"} completed.`,
     affected,
+    prominent: affected === null || affected.some((m) => m.material),
   };
 }
 
@@ -140,14 +217,15 @@ export function deriveStructuredOutputDisclosure(meta: Partial<CommonResponseMet
 export function describeAffectedState(m: StructuredOutputDisclosureModel): string {
   if (m.state === "unavailable") {
     return m.providerCall === "failed"
-      ? "unavailable — the provider call did not complete"
-      : "unavailable — the provider call completed but returned no usable structured output";
+      ? "unavailable: the provider call did not complete"
+      : "unavailable: the provider call completed but returned no usable structured output";
   }
   const parts: string[] = [];
   if (m.fieldsNotRecovered > 0) parts.push(`${plural(m.fieldsNotRecovered, "field", "fields")} not recovered`);
   if (m.itemsDiscarded > 0) parts.push(`${plural(m.itemsDiscarded, "item", "items")} discarded as invalid`);
   if (m.itemsOverLimit > 0) parts.push(`${plural(m.itemsOverLimit, "item", "items")} beyond field limits not included`);
-  return `partially used — ${parts.join("; ")}`;
+  if (m.textShortenedFields > 0) parts.push(`text shortened to the word limit in ${plural(m.textShortenedFields, "field", "fields")}`);
+  return `partially used: ${parts.join("; ")}`;
 }
 
 /** Shown when the counts show a shortfall but the run did not record which models were affected. */
@@ -160,6 +238,7 @@ export interface DerivedStructuredOutputDisclosure {
   completedCalls: number | null;
   usable: number;
   affected: StructuredOutputDisclosureModel[] | null;
+  prominent: boolean;
   lines: string[];
 }
 
@@ -176,7 +255,7 @@ export function deriveRecordedStructuredOutputDisclosure(meta: unknown): Structu
 export function deriveStructuredOutputExportDisclosure(meta: unknown, nameOf: (modelId: string) => string): DerivedStructuredOutputDisclosure | null {
   const d = deriveRecordedStructuredOutputDisclosure(meta);
   if (!d) return null;
-  return { derivedAtExport: true, selected: d.selected, completedCalls: d.completedCalls, usable: d.usable, affected: d.affected, lines: structuredOutputDisclosureLines(d, nameOf) };
+  return { derivedAtExport: true, selected: d.selected, completedCalls: d.completedCalls, usable: d.usable, affected: d.affected, prominent: d.prominent, lines: structuredOutputDisclosureLines(d, nameOf) };
 }
 
 /** Section heading used by every export format. */
@@ -184,12 +263,13 @@ export const STRUCTURED_OUTPUT_SECTION_HEADING = "Structured output completeness
 
 /**
  * The plain lines every export format (PDF, DOCX, JSON) renders for a disclosure, using the caller's model names.
- * Same wording and order as the live report notice.
+ * Same wording and order as the live report notice. Each affected line reads "<name> — <state>." so a name that itself
+ * carries a qualifier ("Gemini · model not recorded") stays separate from the state.
  */
 export function structuredOutputDisclosureLines(d: StructuredOutputDisclosure, nameOf: (modelId: string) => string): string[] {
   return [
     d.headline,
     ...(d.callsLine ? [d.callsLine] : []),
-    ...(d.affected === null ? [STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED] : d.affected.map((m) => `${nameOf(m.modelId)}: ${describeAffectedState(m)}.`)),
+    ...(d.affected === null ? [STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED] : d.affected.map((m) => `${nameOf(m.modelId)} — ${describeAffectedState(m)}${m.material ? "" : " (not decision-critical)"}.`)),
   ];
 }

@@ -16,11 +16,15 @@ import { buildAdaptiveDecisionReceipt } from "@/lib/adaptiveSchema/decisionRecei
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import {
+  DECISION_CRITICAL_FIELDS,
   deriveStructuredOutputDisclosure,
   describeAffectedState,
   readStructuredOutputRecord,
   STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED,
+  structuredOutputDisclosureLines,
 } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
+import StructuredOutputNotice from "@/components/adaptive/StructuredOutputNotice";
+import { SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
 import type { AdaptiveModelResult, CommonResponseMeta, QueryClassification } from "@/lib/adaptiveSchema/types";
 import type { PersistedAdaptiveOutputV1 } from "@/lib/adaptiveSchema/persistedOutput";
 import type { ModelId, ModelResult } from "@/lib/types";
@@ -132,15 +136,21 @@ describe("structured-output record (persisted meta)", () => {
     });
   });
 
-  it("material shortening rule: items cut by an item cap are recorded; prose trimmed to a word cap is not", () => {
+  it("records every shortening as evidence: text trimmed to a word cap and items cut by an item cap", () => {
     const pair = [modelResult("chatgpt" as ModelId), modelResult("claude" as ModelId)];
     const wordOnly = buildStructuredOutputRecord(pair, [usable("chatgpt" as ModelId, { truncatedFields: ["reversibleNextStep"] }), usable("claude" as ModelId)]);
-    expect(wordOnly).toBeUndefined();
+    expect(wordOnly).toEqual({
+      version: 1,
+      slots: [
+        { modelId: "chatgpt", call: "completed", result: "partial", shortenedFields: ["reversibleNextStep"] },
+        { modelId: "claude", call: "completed", result: "complete" },
+      ],
+    });
     const itemCap = buildStructuredOutputRecord(pair, [usable("chatgpt" as ModelId, { truncatedFields: ["risks"], itemsOverLimit: { risks: 2 } }), usable("claude" as ModelId)]);
     expect(itemCap).toEqual({
       version: 1,
       slots: [
-        { modelId: "chatgpt", call: "completed", result: "partial", itemsOverLimit: { risks: 2 } },
+        { modelId: "chatgpt", call: "completed", result: "partial", itemsOverLimit: { risks: 2 }, shortenedFields: ["risks"] },
         { modelId: "claude", call: "completed", result: "complete" },
       ],
     });
@@ -181,8 +191,8 @@ describe("end to end through finalizeAdaptiveRun (real validation, slot order, s
       ],
     });
     expect(deriveStructuredOutputDisclosure(meta)!.affected!.map((m) => [m.modelId, describeAffectedState(m)])).toEqual([
-      ["gemini", "unavailable — the provider call completed but returned no usable structured output"],
-      ["grok", "unavailable — the provider call did not complete"],
+      ["gemini", "unavailable: the provider call completed but returned no usable structured output"],
+      ["grok", "unavailable: the provider call did not complete"],
     ]);
   });
 
@@ -198,8 +208,11 @@ describe("shared disclosure", () => {
   it("2d2e shape: '5 models selected · 4 usable structured results', claude named unavailable", () => {
     const d = deriveStructuredOutputDisclosure(twoDTwoEMeta())!;
     expect(d.headline).toBe("5 models selected · 4 usable structured results");
-    expect(d.affected).toEqual([{ modelId: "claude", state: "unavailable", providerCall: "completed", fieldsNotRecovered: 0, itemsDiscarded: 0, itemsOverLimit: 0 }]);
-    expect(describeAffectedState(d.affected![0])).toBe("unavailable — the provider call completed but returned no usable structured output");
+    expect(d.affected).toEqual([
+      { modelId: "claude", state: "unavailable", providerCall: "completed", fieldsNotRecovered: 0, itemsDiscarded: 0, itemsOverLimit: 0, textShortenedFields: 0, affectedFields: 0, decisionCriticalAffected: false, material: true },
+    ]);
+    expect(d.prominent).toBe(true);
+    expect(describeAffectedState(d.affected![0])).toBe("unavailable: the provider call completed but returned no usable structured output");
     expect(d.callsLine).toBe("5 of 5 provider calls completed.");
   });
 
@@ -245,9 +258,9 @@ describe("shared disclosure", () => {
     expect(d.headline).toBe("3 models selected · 2 usable structured results");
     expect(d.callsLine).toBe("2 of 3 provider calls completed.");
     expect(d.affected!.map(describeAffectedState)).toEqual([
-      "partially used — 2 items beyond field limits not included",
-      "partially used — 1 field not recovered; 1 item discarded as invalid",
-      "unavailable — the provider call did not complete",
+      "partially used: 2 items beyond field limits not included",
+      "partially used: 1 field not recovered; 1 item discarded as invalid",
+      "unavailable: the provider call did not complete",
     ]);
   });
 });
@@ -271,7 +284,7 @@ describe("G1/G2 — live and reopened report presentation (real AdaptivePanelRes
     expect(html).toContain('data-testid="structured-output-notice"');
     expect(html).toContain('role="note"');
     expect(html.split("5 models selected · 4 usable structured results").length - 1).toBe(2); // notice + panel detail
-    expect(html).toMatch(/data-testid="structured-output-affected"[^]*Claude[^]*unavailable — the provider call completed but returned no usable structured output/);
+    expect(html).toMatch(/data-testid="structured-output-affected"[^]*Claude[^]*unavailable: the provider call completed but returned no usable structured output/);
     expect(html).toContain("5 of 5 provider calls completed.");
     expect(html).toContain("Panel detail (5 models selected · 4 usable structured results)");
     expect(html).toMatch(/data-testid="ds-unavailable-models"[^]*Unavailable:[^]*Claude/);
@@ -317,5 +330,138 @@ describe("G4 parity — Receipt and exports use the same counts", () => {
   it("the export snapshot itself is unchanged: no model is marked failed from the record", () => {
     const { reportSnapshot } = buildExportSnapshot({ question: "q", selectedModels: FIVE, runDocument: {}, milestone2: { output: dsOutput(twoDTwoEMeta()) } } as never);
     expect((reportSnapshot as { models: { ok?: boolean }[] }).models.every((m) => m.ok === undefined)).toBe(true);
+  });
+});
+
+describe("owner-approved material shortening rule (decision-critical field OR two or more distinct fields)", () => {
+  const META = { schemaId: "decision_support", totalModels: 2, successfulModels: 2, modelsWithUsableOutput: 2 } as const;
+  const withSlot = (slot: Record<string, unknown>, meta: Record<string, unknown> = META) =>
+    ({ ...meta, structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", call: "completed", result: "complete" }, { modelId: "claude", call: "completed", result: "partial", ...slot }] } }) as unknown as CommonResponseMeta;
+  const one = (slot: Record<string, unknown>, meta?: Record<string, unknown>) => {
+    const d = deriveStructuredOutputDisclosure(withSlot(slot, meta))!;
+    return { d, m: d.affected![0] };
+  };
+
+  it("the mapping covers exactly the 9 Milestone-2 schemas, and every mapped key is a real field of that schema", () => {
+    expect(Object.keys(DECISION_CRITICAL_FIELDS).sort()).toEqual(Object.keys(SCHEMA_ANSWER_SHAPE).sort());
+    for (const [schemaId, keys] of Object.entries(DECISION_CRITICAL_FIELDS)) {
+      const real = (SCHEMA_REGISTRY as any)[schemaId].fields.map((f: { key: string }) => f.key);
+      expect([schemaId, keys.filter((k) => !real.includes(k))]).toEqual([schemaId, []]);
+      expect(keys.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("an isolated shortening of one non-critical field is disclosed in details only, without the prominent notice", () => {
+    const { d, m } = one({ shortenedFields: ["decisionQuestion"] });
+    expect([m.material, m.decisionCriticalAffected, m.affectedFields, m.textShortenedFields, d.prominent]).toEqual([false, false, 1, 1, false]);
+    expect(describeAffectedState(m)).toBe("partially used: text shortened to the word limit in 1 field");
+    const html = renderToStaticMarkup(createElement(StructuredOutputNotice, { disclosure: d }));
+    expect(html).toContain('data-testid="structured-output-details"');
+    expect(html).not.toContain('role="note"');
+    expect(html).not.toContain("structured-output-notice");
+    expect(html).toContain("text shortened to the word limit in 1 field (not decision-critical)");
+    expect(structuredOutputDisclosureLines(d, (id) => id)).toEqual([
+      "2 models selected · 2 usable structured results",
+      "2 of 2 provider calls completed.",
+      "claude — partially used: text shortened to the word limit in 1 field (not decision-critical).",
+    ]);
+    // Same for one non-critical field with items cut by its item cap, or items discarded as invalid.
+    expect(one({ itemsOverLimit: { assumptions: 2 }, shortenedFields: ["assumptions"] }).m.material).toBe(false);
+    expect(one({ droppedItems: { criteria: 1 } }).m.material).toBe(false);
+  });
+
+  it("word-cap trimming of a decision-critical field is material (never automatically immaterial)", () => {
+    const { d, m } = one({ shortenedFields: ["reversibleNextStep"] });
+    expect([m.material, m.decisionCriticalAffected, m.affectedFields, d.prominent]).toEqual([true, true, 1, true]);
+    const html = renderToStaticMarkup(createElement(StructuredOutputNotice, { disclosure: d }));
+    expect(html).toContain('role="note"');
+    expect(html).not.toContain("not decision-critical");
+    expect(one({ shortenedFields: ["recommendationRationale"] }).m.material).toBe(true);
+    expect(one({ itemsOverLimit: { risks: 1 }, shortenedFields: ["risks"] }).m.material).toBe(true);
+    expect(one({ droppedItems: { assessments: 1 } }).m.material).toBe(true);
+  });
+
+  it("two or more distinct non-critical fields are material; the same field counted twice is not", () => {
+    expect(one({ shortenedFields: ["decisionQuestion"], droppedItems: { criteria: 1 } }).m).toMatchObject({ material: true, affectedFields: 2, decisionCriticalAffected: false });
+    expect(one({ itemsOverLimit: { assumptions: 1 }, droppedItems: { assumptions: 1 }, shortenedFields: ["assumptions"] }).m).toMatchObject({ material: false, affectedFields: 1 });
+  });
+
+  it("a field not recovered at all is always prominent, even when it is a single non-critical field", () => {
+    expect(one({ invalidFields: ["assumptions"] }).m).toMatchObject({ material: true, decisionCriticalAffected: false, affectedFields: 1 });
+  });
+
+  it("importance is never guessed: an unmapped or missing schema makes every shortening material", () => {
+    expect(one({ shortenedFields: ["decisionQuestion"] }, { ...META, schemaId: "contested_empirical" }).m.material).toBe(true);
+    const { schemaId: _drop, ...noSchema } = META;
+    expect(one({ shortenedFields: ["decisionQuestion"] }, noSchema).m.material).toBe(true);
+    expect(one({ shortenedFields: ["decisionQuestion"] }, { ...META, schemaId: "hasOwnProperty" }).m.material).toBe(true);
+  });
+
+  it("one material model makes the notice prominent; a minor model beside it is still marked minor", () => {
+    const meta = {
+      ...META,
+      totalModels: 3,
+      successfulModels: 3,
+      modelsWithUsableOutput: 2,
+      structuredOutput: {
+        version: 1,
+        slots: [
+          { modelId: "chatgpt", call: "completed", result: "partial", shortenedFields: ["decisionQuestion"] },
+          { modelId: "claude", call: "completed", result: "unavailable" },
+          { modelId: "gemini", call: "completed", result: "complete" },
+        ],
+      },
+    } as unknown as CommonResponseMeta;
+    const d = deriveStructuredOutputDisclosure(meta)!;
+    expect([d.prominent, d.affected!.map((m) => m.material)]).toEqual([true, [false, true]]);
+    expect(structuredOutputDisclosureLines(d, (id) => id).slice(2)).toEqual([
+      "chatgpt — partially used: text shortened to the word limit in 1 field (not decision-critical).",
+      "claude — unavailable: the provider call completed but returned no usable structured output.",
+    ]);
+  });
+
+  it("end to end: the real validator's word cap reaches the record and the rule (critical vs non-critical field)", async () => {
+    const long = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
+    const run = async (over: Partial<DecisionSupportFields>) => {
+      const raw = JSON.stringify(fields({ options: ["Option A"], recommendationAction: "go", ...over }));
+      const results: ModelResult[] = ["chatgpt", "claude"].map((m, i) => ({ modelId: m as ModelId, status: "ok", rawText: i === 0 ? raw : JSON.stringify(fields({ options: ["Option A"], recommendationAction: "go" })), latencyMs: 1 }));
+      const out: any = await finalizeAdaptiveRun(SCHEMA_REGISTRY.decision_support, results, "Which option?", undefined, classification());
+      return out.persistedOutput.meta as CommonResponseMeta;
+    };
+    const minor = await run({ decisionQuestion: long(45) });
+    expect(minor.structuredOutput!.slots[0]).toEqual({ modelId: "chatgpt", call: "completed", result: "partial", shortenedFields: ["decisionQuestion"] });
+    expect(deriveStructuredOutputDisclosure(minor)!.prominent).toBe(false);
+    const critical = await run({ reversibleNextStep: long(45) });
+    expect(critical.structuredOutput!.slots[0]).toEqual({ modelId: "chatgpt", call: "completed", result: "partial", shortenedFields: ["reversibleNextStep"] });
+    expect(deriveStructuredOutputDisclosure(critical)!.prominent).toBe(true);
+  });
+});
+
+describe("fail closed: a record must carry the evidence its state claims", () => {
+  const base = { schemaId: "decision_support", totalModels: 2, successfulModels: 2, modelsWithUsableOutput: 2 };
+  const rec = (slot: Record<string, unknown>) =>
+    readStructuredOutputRecord({ ...base, structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", call: "completed", result: "complete" }, { modelId: "claude", call: "completed", ...slot }] } } as never);
+
+  it("rejects a partial slot with no evidence, and complete or unavailable slots that carry evidence", () => {
+    expect(rec({ result: "partial" })).toBeNull();
+    expect(rec({ result: "partial", shortenedFields: ["decisionQuestion"] })).not.toBeNull();
+    expect(rec({ result: "complete", shortenedFields: ["decisionQuestion"] })).toBeNull();
+    expect(rec({ result: "complete", droppedItems: { risks: 1 } })).toBeNull();
+    expect(readStructuredOutputRecord({ ...base, modelsWithUsableOutput: 1, structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", call: "completed", result: "complete" }, { modelId: "claude", call: "completed", result: "unavailable", invalidFields: ["sources"] }] } } as never)).toBeNull();
+  });
+
+  it("rejects empty or duplicated field lists", () => {
+    expect(rec({ result: "partial", shortenedFields: [] })).toBeNull();
+    expect(rec({ result: "partial", invalidFields: [] })).toBeNull();
+    expect(rec({ result: "partial", shortenedFields: ["a", "a"] })).toBeNull();
+    expect(rec({ result: "partial", shortenedFields: [""] })).toBeNull();
+  });
+
+  it("an evidence-less partial slot never displays a partial-salvage claim: the shortfall is shown as not recorded", () => {
+    const d = deriveStructuredOutputDisclosure({ ...base, modelsWithUsableOutput: 1, structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", call: "completed", result: "partial" }, { modelId: "claude", call: "completed", result: "unavailable" }] } } as never)!;
+    expect(d.affected).toBeNull();
+    expect(structuredOutputDisclosureLines(d, (id) => id).join("\n")).not.toMatch(/partially used/);
+    // With no shortfall in the counts, an invalid record discloses nothing.
+    expect(deriveStructuredOutputDisclosure({ ...base, structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", call: "completed", result: "partial" }, { modelId: "claude", call: "completed", result: "complete" }] } } as never)).toBeNull();
   });
 });

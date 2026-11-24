@@ -1,29 +1,29 @@
 {
- "note": "Item 7A (owner-authorized 2026-11-23): the only pages that change are the ones whose run records a structured-output shortfall (all_models_failed: 3 selected, 0 usable). They now show the structured-output notice and name the unavailable slots (a substituted slot keeps its executing-model label). Captured on this branch; every other page stays at its earlier pin.",
+ "note": "Item 7A (owner-authorized 2026-11-23): the only pages that change are the ones whose run records a structured-output shortfall (all_models_failed: 3 selected, 0 usable). They now show the structured-output notice and name the unavailable slots (a substituted slot keeps its executing-model label). Captured on this branch; every other page stays at its earlier pin. Re-pinned in the final correction round (owner-authorized 2026-11-24): only the state wording changed ('unavailable — the provider' → 'unavailable: the provider', 3 occurrences per page); reverting that text reproduces each earlier pin exactly.",
  "notice": "3 models selected · 0 usable structured results",
  "cases": {
   "p1.owner|all_models_failed|awc": {
-   "domSha256": "959469598f916490abc9a77571780d407f6e1fb0dd59d65109f51876d108621e",
+   "domSha256": "1a2f0d7f4ae848dfaa978f32690c39065297aca54f5b63ce5c253031d512f358",
    "labelCount": 2,
    "executingChipCount": 2
   },
   "p1.rev.content|all_models_failed|awc": {
-   "domSha256": "959469598f916490abc9a77571780d407f6e1fb0dd59d65109f51876d108621e",
+   "domSha256": "1a2f0d7f4ae848dfaa978f32690c39065297aca54f5b63ce5c253031d512f358",
    "labelCount": 2,
    "executingChipCount": 2
   },
   "p1.rev.reduced|all_models_failed|awc": {
-   "domSha256": "0a8a4d1f296c6b3d2b9dad9e39c5689bff9f3f2c44b8001384147fd2a4ae3aa0",
+   "domSha256": "b84644384ea98b429c0fd47a9d6a2c225f6df5d04ed648137ae9e4952c5b4e7a",
    "labelCount": 2,
    "executingChipCount": 2
   },
   "w1.member|all_models_failed|awc": {
-   "domSha256": "263a1269446a0d74373aa7d877fb59cb48b50492385489ab32773e74c36f0d03",
+   "domSha256": "a2bb78fd6b3bf7bac79277c2099830fa8ff87c3ef0460c14e64555efd9c81b9d",
    "labelCount": 2,
    "executingChipCount": 2
   },
   "w1.reviewer|all_models_failed|awc": {
-   "domSha256": "263a1269446a0d74373aa7d877fb59cb48b50492385489ab32773e74c36f0d03",
+   "domSha256": "a2bb78fd6b3bf7bac79277c2099830fa8ff87c3ef0460c14e64555efd9c81b9d",
    "labelCount": 2,
    "executingChipCount": 2
   }
