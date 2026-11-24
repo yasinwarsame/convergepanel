@@ -72,30 +72,59 @@ export const DECISION_CRITICAL_FIELDS: Readonly<Record<string, readonly string[]
   ranked_enumeration: ["items"],
   // evidence: cells; conclusion: directConclusion; risks: tradeoffs; recommendations: bestUseRecommendations; uncertainty.
   comparison_matrix: ["cells", "directConclusion", "tradeoffs", "bestUseRecommendations", "uncertainties"],
-  // conclusion: directAnswer; evidence: sources.
-  definition_explanation: ["directAnswer", "sources"],
-  // conclusion: directAnswer, directCauses; uncertainty: unknowns; next steps: testsOrEvidenceNeeded; evidence: sources.
-  causal_explanation: ["directAnswer", "directCauses", "unknowns", "testsOrEvidenceNeeded", "sources"],
-  // conclusion: the checklist items themselves.
-  checklist_taxonomy: ["items"],
+  // conclusion: directAnswer, keyPoints (the points a reader should retain); risk of misunderstanding:
+  // commonMisconceptions; evidence: sources. Not critical (elaboration): term, explanation, example, analogyText,
+  // analogyLimits, distinctions, processSteps, advancedDetail, relatedConcepts.
+  definition_explanation: ["directAnswer", "keyPoints", "commonMisconceptions", "sources"],
+  // conclusion: directAnswer, directCauses; uncertainty: alternativeExplanations, confounders, disputedInterpretations,
+  // unknowns; next steps: testsOrEvidenceNeeded; evidence: sources. Not critical (elaboration of the stated causes):
+  // contributingFactors, triggers, amplifiers, causalLinks.
+  causal_explanation: [
+    "directAnswer",
+    "directCauses",
+    "alternativeExplanations",
+    "confounders",
+    "disputedInterpretations",
+    "unknowns",
+    "testsOrEvidenceNeeded",
+    "sources",
+  ],
+  // conclusion: the checklist items; limitations: notes (stated caveats). Not critical: summary (framing only).
+  checklist_taxonomy: ["items", "notes"],
   // conclusion: executiveSummary; evidence: findings, sources; uncertainty: disagreements, evidenceGaps, openQuestions;
-  // next steps: recommendedNextSteps.
-  deep_research: ["executiveSummary", "findings", "disagreements", "evidenceGaps", "openQuestions", "recommendedNextSteps", "sources"],
-  // conclusion: overallAssessment; evidence: dimensions, sources; risks: redFlags; uncertainty: applicabilityCaveats;
-  // next steps: recommendedChecks.
-  evidence_review: ["overallAssessment", "dimensions", "redFlags", "applicabilityCaveats", "recommendedChecks", "sources"],
-  // conclusion: summary; next steps: followUpQuestions; evidence: sources.
-  bias_blindspot_audit: ["summary", "followUpQuestions", "sources"],
-  // recommendation: action, option, rationale, caveats; evidence: assessments, sources; risks; uncertainty:
-  // uncertainties, sensitivityFindings; next steps: reversibleNextStep.
+  // scope: researchBoundaries; next steps: recommendedNextSteps.
+  deep_research: ["executiveSummary", "findings", "disagreements", "evidenceGaps", "openQuestions", "researchBoundaries", "recommendedNextSteps", "sources"],
+  // conclusion: overallAssessment; evidence: dimensions, strengths, sources; risks: redFlags; uncertainty:
+  // applicabilityCaveats; next steps: recommendedChecks.
+  evidence_review: ["overallAssessment", "dimensions", "redFlags", "strengths", "applicabilityCaveats", "recommendedChecks", "sources"],
+  // conclusion: summary and every bias finding (omitted dimensions, shared assumptions, missing stakeholders,
+  // geographic, source-concentration and evidence-type concerns); next steps: followUpQuestions; evidence: sources.
+  bias_blindspot_audit: [
+    "summary",
+    "omittedDimensions",
+    "sharedAssumptions",
+    "missingStakeholders",
+    "geographicBiases",
+    "sourceConcentrationConcerns",
+    "evidenceTypeConcerns",
+    "followUpQuestions",
+    "sources",
+  ],
+  // the decision's basis: options, criteria, userProvidedCriteria, assumptions; recommendation: action, option,
+  // rationale, caveats; evidence: assessments, sources; risks; uncertainty: uncertainties, sensitivityFindings; next
+  // steps: reversibleNextStep. Not critical: decisionQuestion (restates the question).
   decision_support: [
+    "options",
+    "criteria",
+    "userProvidedCriteria",
+    "assessments",
     "recommendationAction",
     "recommendedOption",
     "recommendationRationale",
     "recommendationCaveats",
-    "assessments",
-    "risks",
+    "assumptions",
     "uncertainties",
+    "risks",
     "sensitivityFindings",
     "reversibleNextStep",
     "sources",

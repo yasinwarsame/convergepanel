@@ -371,11 +371,65 @@ describe("owner-approved material shortening rule (decision-critical field OR tw
       "claude — partially used: text shortened to the word limit in 1 field (not decision-critical).",
     ]);
     // Same for one non-critical field with items cut by its item cap, or items discarded as invalid.
-    const capped = one({ itemsOverLimit: { assumptions: 2 }, shortenedFields: ["assumptions"] }).m;
+    const DEF = { ...META, schemaId: "definition_explanation" };
+    const capped = one({ itemsOverLimit: { relatedConcepts: 2 }, shortenedFields: ["relatedConcepts"] }, DEF).m;
     expect([capped.material, capped.itemsOverLimit, capped.textShortenedFields]).toEqual([false, 2, 0]);
     // An item-capped field is described by its cut items, not counted again as text shortening.
     expect(describeAffectedState(capped)).toBe("partially used: 2 items beyond field limits not included");
-    expect(one({ droppedItems: { criteria: 1 } }).m.material).toBe(false);
+    expect(one({ droppedItems: { distinctions: 1 } }, DEF).m.material).toBe(false);
+  });
+
+  it("the decision-critical / non-critical split is exactly this table (every field of every Milestone-2 schema)", () => {
+    // R3 MINOR-1 (owner decision 2026-11-24): the substantive findings are critical. Only framing and elaboration
+    // fields stay non-critical; removing any critical field from the mapping, or adding one, fails here.
+    const NON_CRITICAL: Record<string, string[]> = {
+      ranked_enumeration: [],
+      comparison_matrix: [],
+      definition_explanation: ["term", "explanation", "example", "analogyText", "analogyLimits", "distinctions", "processSteps", "advancedDetail", "relatedConcepts"],
+      causal_explanation: ["contributingFactors", "triggers", "amplifiers", "causalLinks"],
+      checklist_taxonomy: ["summary"],
+      deep_research: [],
+      evidence_review: [],
+      bias_blindspot_audit: [],
+      decision_support: ["decisionQuestion"],
+    };
+    for (const schemaId of Object.keys(DECISION_CRITICAL_FIELDS)) {
+      const all = (SCHEMA_REGISTRY as any)[schemaId].fields.map((f: { key: string }) => f.key) as string[];
+      expect([schemaId, all.filter((k) => !DECISION_CRITICAL_FIELDS[schemaId].includes(k))]).toEqual([schemaId, NON_CRITICAL[schemaId]]);
+      // Behaviour, not just the table: an isolated shortening of each non-critical field stays details-only.
+      for (const k of NON_CRITICAL[schemaId]) expect([schemaId, k, one({ shortenedFields: [k] }, { ...META, schemaId }).d.prominent]).toEqual([schemaId, k, false]);
+    }
+  });
+
+  it.each([
+    ["bias_blindspot_audit", "omittedDimensions"],
+    ["bias_blindspot_audit", "sharedAssumptions"],
+    ["bias_blindspot_audit", "missingStakeholders"],
+    ["bias_blindspot_audit", "geographicBiases"],
+    ["bias_blindspot_audit", "sourceConcentrationConcerns"],
+    ["bias_blindspot_audit", "evidenceTypeConcerns"],
+    ["causal_explanation", "alternativeExplanations"],
+    ["causal_explanation", "confounders"],
+    ["causal_explanation", "disputedInterpretations"],
+    ["decision_support", "options"],
+    ["decision_support", "criteria"],
+    ["decision_support", "userProvidedCriteria"],
+    ["decision_support", "assumptions"],
+    ["deep_research", "researchBoundaries"],
+    ["evidence_review", "strengths"],
+    ["checklist_taxonomy", "notes"],
+    ["definition_explanation", "keyPoints"],
+    ["definition_explanation", "commonMisconceptions"],
+  ])("R3 MINOR-1: shortening %s.%s alone is material and shows the prominent notice", (schemaId, field) => {
+    const meta = { ...META, schemaId };
+    for (const evidence of [{ itemsOverLimit: { [field]: 2 }, shortenedFields: [field] }, { droppedItems: { [field]: 1 } }]) {
+      const { d, m } = one(evidence, meta);
+      expect([m.material, m.decisionCriticalAffected, m.affectedFields, d.prominent]).toEqual([true, true, 1, true]);
+      const html = renderToStaticMarkup(createElement(StructuredOutputNotice, { disclosure: d }));
+      expect(html).toContain('role="note"');
+      expect(html).not.toContain("not decision-critical");
+      expect(structuredOutputDisclosureLines(d, (id) => id).join("\n")).not.toContain("not decision-critical");
+    }
   });
 
   it("word-cap trimming of a decision-critical field is material (never automatically immaterial)", () => {
@@ -390,12 +444,13 @@ describe("owner-approved material shortening rule (decision-critical field OR tw
   });
 
   it("two or more distinct non-critical fields are material; the same field counted twice is not", () => {
-    expect(one({ shortenedFields: ["decisionQuestion"], droppedItems: { criteria: 1 } }).m).toMatchObject({ material: true, affectedFields: 2, decisionCriticalAffected: false });
-    expect(one({ itemsOverLimit: { assumptions: 1 }, droppedItems: { assumptions: 1 }, shortenedFields: ["assumptions"] }).m).toMatchObject({ material: false, affectedFields: 1 });
+    const DEF = { ...META, schemaId: "definition_explanation" };
+    expect(one({ shortenedFields: ["example"], droppedItems: { relatedConcepts: 1 } }, DEF).m).toMatchObject({ material: true, affectedFields: 2, decisionCriticalAffected: false });
+    expect(one({ itemsOverLimit: { relatedConcepts: 1 }, droppedItems: { relatedConcepts: 1 }, shortenedFields: ["relatedConcepts"] }, DEF).m).toMatchObject({ material: false, affectedFields: 1 });
   });
 
   it("a field not recovered at all is always prominent, even when it is a single non-critical field", () => {
-    expect(one({ invalidFields: ["assumptions"] }).m).toMatchObject({ material: true, decisionCriticalAffected: false, affectedFields: 1 });
+    expect(one({ invalidFields: ["decisionQuestion"] }).m).toMatchObject({ material: true, decisionCriticalAffected: false, affectedFields: 1 });
   });
 
   it("importance is never guessed: an unmapped or missing schema makes every shortening material", () => {
