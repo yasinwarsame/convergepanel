@@ -303,7 +303,7 @@ export function buildCommonResponseMeta(args: BuildCommonResponseMetaArgs): Comm
   const schemaId = schema.id as PersistedAdaptiveSchemaId;
 
   const totalModels = modelResults.length;
-  const successfulModels = modelResults.filter(providerCallCompleted).length;
+  const successfulModels = modelResults.filter((r) => r.status === "ok" || r.status === "substituted").length;
   const failedModels = totalModels - successfulModels;
   const modelsWithUsableOutput = adaptiveResults.filter((r) => r.ok && r.data).length;
 
@@ -361,10 +361,10 @@ export function buildCommonResponseMeta(args: BuildCommonResponseMetaArgs): Comm
 export function buildStructuredOutputRecord(modelResults: ModelResult[], adaptiveResults: AdaptiveModelResult[]): StructuredOutputRecordV1 | undefined {
   const slots: StructuredOutputSlotV1[] = modelResults.map((m, i) => {
     const r = adaptiveResults[i];
-    const call: StructuredOutputSlotV1["call"] = providerCallCompleted(m) ? "completed" : "failed";
+    const call: StructuredOutputSlotV1["call"] = m.status === "ok" || m.status === "substituted" ? "completed" : "failed";
     const usable = !!r && r.modelId === m.modelId && r.ok && !!r.data;
     if (!usable) {
-      const cause = structuredOutputCause(m, "unavailable", true);
+      const cause = structuredOutputCause(m, r && r.modelId === m.modelId ? r : undefined, "unavailable", true);
       return { modelId: m.modelId, call, result: "unavailable", ...(cause ? { cause } : {}) };
     }
     const invalidFields = r.invalidFields && r.invalidFields.length > 0 ? [...r.invalidFields] : undefined;
@@ -372,7 +372,7 @@ export function buildStructuredOutputRecord(modelResults: ModelResult[], adaptiv
     const itemsOverLimit = r.itemsOverLimit && Object.keys(r.itemsOverLimit).length > 0 ? { ...r.itemsOverLimit } : undefined;
     const shortenedFields = r.truncatedFields && r.truncatedFields.length > 0 ? Array.from(new Set(r.truncatedFields)) : undefined;
     const result: StructuredOutputSlotV1["result"] = invalidFields || droppedItems || itemsOverLimit || shortenedFields ? "partial" : "complete";
-    const cause = structuredOutputCause(m, result, !!(invalidFields || droppedItems));
+    const cause = structuredOutputCause(m, r, result, !!(invalidFields || droppedItems));
     return {
       modelId: m.modelId,
       call,
@@ -394,24 +394,34 @@ export function distinctContributingModels(adaptiveResults: AdaptiveModelResult[
 }
 
 /**
- * Item 7B: whether the provider call for a slot completed. "ok" and "substituted" always did. A non-ok first attempt
- * counts as completed only when its own provider reported that it stopped at the output budget (it answered, with no
- * usable text) — never a timeout, transport, auth or other failure. The connector status itself is never changed.
+ * Item 7B (D1, corrected after review R1): why a non-complete slot was not complete, from provider-reported evidence
+ * about the response the slot actually ADOPTED — never the discarded first attempt.
+ *
+ * Adopted response: when the single adaptive retry was adopted ("adopted_full" / "adopted_partial"), the slot shows the
+ * retry's response; otherwise the first attempt stands. An output-budget repair is only ever adopted after its provider
+ * reported a normal finish (D3), so an adopted repair is never described as truncated. A validation retry's own
+ * termination reason is not carried here, so it is "unknown" rather than guessed.
+ *
+ * "output_budget_exhausted" is recorded only when the standing first attempt itself reported the budget stop AND left
+ * nothing usable — a parsed (closed) answer was not cut by the budget, so a partial slot never carries it. A partial slot
+ * shortened only by a schema word or item cap carries no cause (by design, a separate Item 7A disclosure).
+ *
+ * Connector status is the only source of call completion: an empty answer that hit its budget is still a failed call
+ * (governance's failedModels and the 7A `call` field are unchanged); its cause says why.
  */
-export function providerCallCompleted(m: ModelResult): boolean {
-  return m.status === "ok" || m.status === "substituted" || m.terminationReason === "output_budget";
-}
-
-/**
- * Item 7B (D1): why a non-complete slot was not complete, from provider-reported evidence only. `validationEvidence`:
- * fields or items were rejected by validation (as opposed to shortened by a schema cap, which is by design).
- */
-export function structuredOutputCause(m: ModelResult, result: StructuredOutputSlotV1["result"], validationEvidence: boolean): StructuredOutputCause | undefined {
+export function structuredOutputCause(
+  m: ModelResult,
+  r: AdaptiveModelResult | undefined,
+  result: StructuredOutputSlotV1["result"],
+  validationEvidence: boolean
+): StructuredOutputCause | undefined {
   if (result === "complete") return undefined;
-  // A substituted slot was answered by another provider; the primary's termination reason never describes it.
-  if (m.status !== "substituted" && m.terminationReason === "output_budget") return "output_budget_exhausted";
-  if (!providerCallCompleted(m)) return "provider_failure";
   if (result === "partial" && !validationEvidence) return undefined;
+  if (r?.retryOutcome === "adopted_full" || r?.retryOutcome === "adopted_partial") {
+    return m.status === "ok" && m.terminationReason === "output_budget" ? "validation_failure" : "unknown";
+  }
+  if (m.status !== "substituted" && m.terminationReason === "output_budget") return result === "unavailable" ? "output_budget_exhausted" : "unknown";
+  if (m.status !== "ok" && m.status !== "substituted") return "provider_failure";
   if (m.status === "ok" && m.terminationReason === "natural") return "validation_failure";
   return "unknown";
 }

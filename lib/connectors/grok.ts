@@ -122,9 +122,11 @@ export async function callGrok(
     };
   }
 
-    // Item 7B: the provider-reported finish reason once a response body was parsed; carried onto the error result too
-    // (an empty "length" answer still throws below, unchanged), never inferred from a thrown error.
+    // Item 7B: the provider-reported finish reason of the parsed response. It reaches an error result ONLY through the
+    // one empty-response error thrown below for that same response (identity-checked), never through any other
+    // exception (transport, timeout, parsing, or anything thrown later).
     let terminationReason: ProviderTerminationReason | undefined;
+    let emptyResponseError: Error | undefined;
     try {
       /**
        * Make API call using fetch (X.AI uses OpenAI-compatible format)
@@ -285,7 +287,8 @@ export async function callGrok(
       
       // Check if response is empty - throw error if so
       if (!rawText || rawText.length === 0) {
-        throw new Error("Grok API returned an empty response.");
+        emptyResponseError = new Error("Grok API returned an empty response.");
+        throw emptyResponseError;
       }
       
       // Quick sanity logging for Grok - log final answer length to monitor response health
@@ -393,7 +396,7 @@ export async function callGrok(
         errorMessage: message, // Clear error message for UI display
         latencyMs,
         tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
-        ...(terminationReason ? { terminationReason } : {}),
+        ...(terminationReason && emptyResponseError !== undefined && error === emptyResponseError ? { terminationReason } : {}),
       };
     }
 }

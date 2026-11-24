@@ -764,12 +764,17 @@ A full requirement-by-requirement audit of the query-routing redesign against it
 
   A missing value is unknown. Malformed JSON is never evidence.
 - **Status is never changed.** An empty answer that hit its budget is still `"error"`, so `runPanel` retry and DeepSeek substitution behave exactly as before. `failedPlaceholder` carries the reason. The field is in memory only and never public or persisted.
-- **7A call completion** (`providerCallCompleted` in `commonResponseMeta.ts`): such a call counts as completed, in `successfulModels` and in the slot's `call`. Timeouts and transport failures never do.
+- **Governance counts unchanged (R1 correction).** `successfulModels` and `failedModels`, and the 7A slot `call`, stay connector-status based. An empty answer that hit its budget is still a failed call, so `evaluateAdaptiveGovernance` (`reviewIfAnyModelFailed`) sees exactly the same inputs; a test pins this. The slot's `cause` says why.
 - **Cause (D1).** The 7A per-slot record gains an optional `cause`, one of `output_budget_exhausted`, `validation_failure`, `provider_failure` or `unknown` (`structuredOutputCause`).
-  - It is absent on complete slots, on cap-only shortenings, and on every earlier record.
-  - The strict reader rejects unknown values and contradictions, for example `provider_failure` on a completed call.
-  - Only `output_budget_exhausted` adds wording: "the response reached the provider's output-token limit".
+  - It describes the ADOPTED answer. After an adopted retry, the discarded first attempt never sets it. An adopted output-budget repair finished normally (D3), so it is never described as truncated.
+  - `output_budget_exhausted` appears only on an unavailable slot whose standing answer's own provider reported the budget stop.
+  - It is absent on complete slots, on schema word- or item-cap shortenings (which keep their own 7A wording), and on every earlier record.
+  - The strict reader rejects unknown values and contradictions: `provider_failure` on a completed call, `validation_failure` on a failed call, `output_budget_exhausted` on a slot that is not unavailable. The 7A count checks are unchanged.
+  - Wording:
+    - failed call: "unavailable: the provider stopped at its output-token limit before returning any output";
+    - completed call: "…returned no usable structured output; the response reached the provider's output-token limit".
   - JSON exports carry the cause, and `jsonExportSchema.ts` validates it. Exports of records without a cause are unchanged.
+- **runPanel's existing same-cap retries:** they apply only to retryable statuses or messages. No connector's empty output-budget result is retryable; a test pins this. So no path makes more than the one adaptive retry.
 - **Bounded repair (D2).** When the first attempt reported `output_budget`, the one existing adaptive retry becomes an output-budget repair: the compact-output instruction (`OUTPUT_BUDGET_REPAIR_INSTRUCTION`) plus the pinned cap from `lib/outputBudgetRepairPolicy.ts`.
   - Pinned caps: Claude `claude-haiku-4-5-20251001` 4,000 → 4,800; OpenAI `gpt-4o-mini` 2,200 → 3,300.
   - Each cap is greater than the first cap, at most 1.5× it, at most 8,192, and at most the documented model limit. Exact model only.

@@ -25,7 +25,9 @@ import {
   readStructuredOutputRecord,
   structuredOutputDisclosureLines,
 } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
-import { providerCallCompleted, structuredOutputCause } from "@/lib/adaptiveSchema/commonResponseMeta";
+import { structuredOutputCause } from "@/lib/adaptiveSchema/commonResponseMeta";
+import { evaluateAdaptiveGovernance } from "@/lib/governance/evaluateAdaptiveGovernance";
+import { getDefaultGovernancePolicy } from "@/lib/governance/evaluateGovernance";
 import type { CommonResponseMeta, QueryClassification } from "@/lib/adaptiveSchema/types";
 import type { ModelId, ModelResult } from "@/lib/types";
 
@@ -253,17 +255,17 @@ describe("the established validation retry is unchanged; exhaustion is never inf
 });
 
 describe("provider-call completion, termination cause and usability stay distinct", () => {
-  it("an EMPTY answer that hit its budget (status error) is a completed call, never retried, never 'did not complete'", async () => {
+  it("an EMPTY answer that hit its budget (status error) stays a FAILED call (governance counts unchanged); its cause says why", async () => {
     const empty = primary("gemini" as ModelId, { status: "error", rawText: "Gemini returned an empty response. The panel ran with the other models." });
     const { meta, slot } = await run([empty, completeSlot("chatgpt" as ModelId)]);
     expect(totalCalls()).toBe(0);
     expect(slot("gemini")).not.toHaveProperty("retryOutcome"); // a non-ok primary never gains an adaptive retry
-    expect([meta.totalModels, meta.successfulModels, meta.failedModels, meta.modelsWithUsableOutput]).toEqual([2, 2, 0, 1]);
-    expect(meta.structuredOutput?.slots[0]).toEqual({ modelId: "gemini", call: "completed", result: "unavailable", cause: "output_budget_exhausted" });
+    expect([meta.totalModels, meta.successfulModels, meta.failedModels, meta.modelsWithUsableOutput]).toEqual([2, 1, 1, 1]);
+    expect(meta.structuredOutput?.slots[0]).toEqual({ modelId: "gemini", call: "failed", result: "unavailable", cause: "output_budget_exhausted" });
     expect(structuredOutputDisclosureLines(deriveStructuredOutputDisclosure(meta)!, (id) => id)).toEqual([
       "2 models selected · 1 usable structured result",
-      "2 of 2 provider calls completed.",
-      "gemini — unavailable: the provider call completed but returned no usable structured output; the response reached the provider's output-token limit.",
+      "1 of 2 provider calls completed.",
+      "gemini — unavailable: the provider stopped at its output-token limit before returning any output.",
     ]);
   });
 
@@ -285,34 +287,137 @@ describe("provider-call completion, termination cause and usability stay distinc
     expect(meta.structuredOutput?.slots[0]).toEqual({ modelId: "claude", call: "completed", result: "unavailable", cause: "unknown" });
   });
 
-  it("the pure helpers agree", () => {
+  it("the pure cause rule", () => {
     const m = (o: Partial<ModelResult>) => ({ modelId: "claude", status: "ok", rawText: "", latencyMs: 1, ...o }) as ModelResult;
-    expect(providerCallCompleted(m({ status: "error", terminationReason: "output_budget" }))).toBe(true);
-    expect(providerCallCompleted(m({ status: "error", terminationReason: "other" }))).toBe(false);
-    expect(providerCallCompleted(m({ status: "timeout" }))).toBe(false);
-    expect(structuredOutputCause(m({}), "complete", true)).toBeUndefined();
-    expect(structuredOutputCause(m({ terminationReason: "natural" }), "partial", false)).toBeUndefined(); // cap-only shortening is by design
-    expect(structuredOutputCause(m({ terminationReason: "natural" }), "partial", true)).toBe("validation_failure");
-    expect(structuredOutputCause(m({ terminationReason: "output_budget" }), "partial", false)).toBe("output_budget_exhausted");
-    expect(structuredOutputCause(m({ status: "substituted", terminationReason: "natural" }), "unavailable", true)).toBe("unknown");
+    const a = (o: Record<string, unknown> = {}) => ({ modelId: "claude", schemaId: "decision_support", ok: true, data: {}, ...o }) as never;
+    expect(structuredOutputCause(m({}), undefined, "complete", true)).toBeUndefined();
+    expect(structuredOutputCause(m({ terminationReason: "natural" }), a(), "partial", false)).toBeUndefined(); // cap-only shortening is by design
+    expect(structuredOutputCause(m({ terminationReason: "output_budget" }), a(), "partial", false)).toBeUndefined(); // never budget wording on a cap shortening
+    expect(structuredOutputCause(m({ terminationReason: "natural" }), a(), "partial", true)).toBe("validation_failure");
+    expect(structuredOutputCause(m({ terminationReason: "output_budget" }), a(), "partial", true)).toBe("unknown"); // a parsed answer was not cut
+    expect(structuredOutputCause(m({ terminationReason: "output_budget" }), undefined, "unavailable", true)).toBe("output_budget_exhausted");
+    expect(structuredOutputCause(m({ status: "error", terminationReason: "output_budget" }), undefined, "unavailable", true)).toBe("output_budget_exhausted");
+    expect(structuredOutputCause(m({ status: "error" }), undefined, "unavailable", true)).toBe("provider_failure");
+    expect(structuredOutputCause(m({ status: "substituted", terminationReason: "natural" }), undefined, "unavailable", true)).toBe("unknown");
+    // adopted retry: the discarded first attempt never describes the result
+    expect(structuredOutputCause(m({ terminationReason: "output_budget" }), a({ retryOutcome: "adopted_full" }), "partial", true)).toBe("validation_failure");
+    expect(structuredOutputCause(m({ terminationReason: "output_budget" }), a({ retryOutcome: "adopted_full" }), "partial", false)).toBeUndefined();
+    expect(structuredOutputCause(m({ terminationReason: "natural" }), a({ retryOutcome: "adopted_partial" }), "partial", true)).toBe("unknown");
+  });
+});
+
+describe("R1 MAJOR-2 — the cause describes the ADOPTED answer, never the discarded first attempt", () => {
+  const longStep = Array.from({ length: 45 }, (_, i) => `w${i}`).join(" "); // > reversibleNextStep's 30-word cap
+  const repaired = (over: Record<string, unknown>) => JSON.stringify({ ...JSON.parse(VALID), ...over });
+
+  it("first attempt exhausted → repair finished normally → usable but partial only by a schema word cap: no budget cause, no budget wording", async () => {
+    calls.claude.mockResolvedValueOnce(reply("claude" as ModelId, { rawText: repaired({ reversibleNextStep: longStep }) }));
+    const { slot, meta } = await run([primary("claude" as ModelId), completeSlot("chatgpt" as ModelId)]);
+    expect(slot("claude")).toMatchObject({ ok: true, retryOutcome: "adopted_full" });
+    expect(meta.structuredOutput?.slots[0]).toEqual({ modelId: "claude", call: "completed", result: "partial", shortenedFields: ["reversibleNextStep"] });
+    const lines = structuredOutputDisclosureLines(deriveStructuredOutputDisclosure(meta)!, (id) => id);
+    expect(lines[2]).toBe("claude — partially used: text shortened to the word limit in 1 field.");
+    expect(lines.join("\n")).not.toContain("output-token");
+  });
+
+  it("first attempt exhausted → repair finished normally but one field failed validation: validation_failure, no budget wording", async () => {
+    calls.claude.mockResolvedValueOnce(reply("claude" as ModelId, { rawText: repaired({ sources: "not-an-array" }) }));
+    const { slot, meta } = await run([primary("claude" as ModelId), completeSlot("chatgpt" as ModelId)]);
+    expect(slot("claude")).toMatchObject({ ok: true, retryOutcome: "adopted_full" });
+    const s = meta.structuredOutput!.slots[0];
+    expect(s).toMatchObject({ modelId: "claude", call: "completed", result: "partial", cause: "validation_failure" });
+    expect(s.invalidFields).toContain("sources");
+    expect(structuredOutputDisclosureLines(deriveStructuredOutputDisclosure(meta)!, (id) => id).join("\n")).not.toContain("output-token");
+  });
+
+  it("repair failed → the first attempt stands → output_budget_exhausted (accurate final attribution)", async () => {
+    calls.claude.mockResolvedValueOnce(reply("claude" as ModelId, { status: "timeout", rawText: null, terminationReason: undefined }));
+    const { meta } = await run([primary("claude" as ModelId)]);
+    expect(meta.structuredOutput?.slots[0]).toEqual({ modelId: "claude", call: "completed", result: "unavailable", cause: "output_budget_exhausted" });
+  });
+});
+
+describe("R1 MINOR-1 — provider output budget and schema word cap are separate limitations", () => {
+  it("mixed run: each slot states only its own limitation", async () => {
+    const longStep = Array.from({ length: 45 }, (_, i) => `w${i}`).join(" ");
+    const shortened = { ...completeSlot("chatgpt" as ModelId), rawText: JSON.stringify({ ...JSON.parse(VALID), reversibleNextStep: longStep }) };
+    // gemini: provider budget, nothing usable (no repair); chatgpt: schema word cap only; claude: a parsed answer that
+    // reported a budget stop and is shortened only by a schema cap → no budget wording.
+    const claudeParsed = primary("claude" as ModelId, { rawText: JSON.stringify({ ...JSON.parse(VALID), reversibleNextStep: longStep }) });
+    const { meta } = await run([primary("gemini" as ModelId), shortened, claudeParsed]);
+    expect(totalCalls()).toBe(0);
+    expect(meta.structuredOutput?.slots).toEqual([
+      { modelId: "gemini", call: "completed", result: "unavailable", cause: "output_budget_exhausted" },
+      { modelId: "chatgpt", call: "completed", result: "partial", shortenedFields: ["reversibleNextStep"] },
+      { modelId: "claude", call: "completed", result: "partial", shortenedFields: ["reversibleNextStep"] },
+    ]);
+    expect(structuredOutputDisclosureLines(deriveStructuredOutputDisclosure(meta)!, (id) => id).slice(2)).toEqual([
+      "gemini — unavailable: the provider call completed but returned no usable structured output; the response reached the provider's output-token limit.",
+      "chatgpt — partially used: text shortened to the word limit in 1 field.",
+      "claude — partially used: text shortened to the word limit in 1 field.",
+    ]);
+  });
+});
+
+describe("R1 MAJOR-1 — governance inputs and outcome are identical with or without an output-budget signal", () => {
+  const record = { version: 1, schemaId: "decision_support", answerShape: "decision_support_view", adaptiveOutputVersion: 1, humanReview: { status: "unreviewed" }, decisionReceipt: {}, createdAt: "2026-11-24T00:00:00.000Z", updatedAt: "2026-11-24T00:00:00.000Z" } as never;
+  const governance = (meta: CommonResponseMeta) =>
+    evaluateAdaptiveGovernance({ governanceRecord: record, policy: getDefaultGovernancePolicy(), modelFailureCount: meta.failedModels, successfulModelCount: meta.successfulModels, evaluatedAt: "2026-11-24T00:00:00.000Z" });
+
+  it.each([
+    ["unrepaired: an empty failed answer", { status: "error" as const, rawText: null }, false],
+    ["unrepaired: a cut-off answer with no cap (gemini)", {}, false],
+  ])("%s → same counts, still FLAGGED by reviewIfAnyModelFailed when the connector failed", async (_n, over, _repair) => {
+    const ordinary: ModelResult = { ...primary("gemini" as ModelId, over), terminationReason: undefined };
+    const budget: ModelResult = primary("gemini" as ModelId, over);
+    const a = await run([ordinary, completeSlot("chatgpt" as ModelId)]);
+    const b = await run([budget, completeSlot("chatgpt" as ModelId)]);
+    expect([b.meta.successfulModels, b.meta.failedModels]).toEqual([a.meta.successfulModels, a.meta.failedModels]);
+    expect(governance(b.meta)).toEqual(governance(a.meta));
+    if ((over as { status?: string }).status === "error") {
+      expect(governance(b.meta).status).toBe("flagged");
+      expect(governance(b.meta).reasons.join(" ")).toMatch(/failed/);
+    }
+  });
+
+  it("repaired: a recovered repair and an ordinary recovered validation retry produce the same governance input", async () => {
+    calls.claude.mockResolvedValueOnce(reply("claude" as ModelId));
+    const repairedRun = await run([primary("claude" as ModelId), completeSlot("chatgpt" as ModelId)]);
+    calls.claude.mockResolvedValueOnce(reply("claude" as ModelId));
+    const validationRun = await run([primary("claude" as ModelId, { rawText: INVALID_FIELDS, terminationReason: "natural" }), completeSlot("chatgpt" as ModelId)]);
+    expect([repairedRun.meta.successfulModels, repairedRun.meta.failedModels]).toEqual([2, 0]);
+    expect(governance(repairedRun.meta)).toEqual(governance(validationRun.meta));
+  });
+
+  it("repaired path that failed: same counts as an ordinary failed validation retry", async () => {
+    calls.claude.mockResolvedValueOnce(reply("claude" as ModelId, { status: "timeout", rawText: null, terminationReason: undefined }));
+    const budgetRun = await run([primary("claude" as ModelId), completeSlot("chatgpt" as ModelId)]);
+    calls.claude.mockResolvedValueOnce(reply("claude" as ModelId, { status: "timeout", rawText: null, terminationReason: undefined }));
+    const ordinaryRun = await run([primary("claude" as ModelId, { terminationReason: "natural", rawText: "not json" }), completeSlot("chatgpt" as ModelId)]);
+    expect([budgetRun.meta.successfulModels, budgetRun.meta.failedModels]).toEqual([ordinaryRun.meta.successfulModels, ordinaryRun.meta.failedModels]);
+    expect(governance(budgetRun.meta)).toEqual(governance(ordinaryRun.meta));
   });
 });
 
 describe("D1 — the cause is strictly read, additive, and exported", () => {
   const base = { totalModels: 2, successfulModels: 1, modelsWithUsableOutput: 1, schemaId: "decision_support" } as Partial<CommonResponseMeta>;
   const rec = (slot: Record<string, unknown>) => ({ ...base, structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", call: "completed", result: "complete" }, slot] } }) as never;
-  it("accepts each valid cause and rejects unknown values or contradictions (fail closed)", () => {
+  it("accepts each valid cause and rejects unknown values or contradictions (fail closed); count checks unchanged", () => {
     expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: "provider_failure" }))).not.toBeNull();
     expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: "unknown" }))).not.toBeNull();
+    expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: "output_budget_exhausted" }))).not.toBeNull();
     expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable" }))).not.toBeNull(); // pre-7B record
     const both = { ...base, successfulModels: 2 };
     const rec2 = (slot: Record<string, unknown>) => ({ ...both, structuredOutput: { version: 1, slots: [{ modelId: "chatgpt", call: "completed", result: "complete" }, slot] } }) as never;
     expect(readStructuredOutputRecord(rec2({ modelId: "claude", call: "completed", result: "unavailable", cause: "output_budget_exhausted" }))).not.toBeNull();
     expect(readStructuredOutputRecord(rec2({ modelId: "claude", call: "completed", result: "unavailable", cause: "validation_failure" }))).not.toBeNull();
+    // the 7A count check still binds: a completed-call slot against successfulModels 1 is rejected
+    expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "completed", result: "unavailable", cause: "output_budget_exhausted" }))).toBeNull();
     // contradictions and unknown values reject the whole record
-    expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: "output_budget_exhausted" }))).toBeNull();
     expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: "validation_failure" }))).toBeNull();
     expect(readStructuredOutputRecord(rec2({ modelId: "claude", call: "completed", result: "unavailable", cause: "provider_failure" }))).toBeNull();
+    const partialBudget = { totalModels: 1, successfulModels: 1, modelsWithUsableOutput: 1, structuredOutput: { version: 1, slots: [{ modelId: "claude", call: "completed", result: "partial", invalidFields: ["risks"], cause: "output_budget_exhausted" }] } };
+    expect(readStructuredOutputRecord(partialBudget as never)).toBeNull();
     expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: "timeout" }))).toBeNull();
     expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: "" }))).toBeNull();
     expect(readStructuredOutputRecord(rec({ modelId: "claude", call: "failed", result: "unavailable", cause: 1 }))).toBeNull();
@@ -321,13 +426,15 @@ describe("D1 — the cause is strictly read, additive, and exported", () => {
     expect(readStructuredOutputRecord(withComplete as never)).toBeNull();
   });
 
-  it("only output_budget_exhausted adds wording; partial lines carry it too", () => {
-    const part = deriveStructuredOutputDisclosure({ totalModels: 1, successfulModels: 1, modelsWithUsableOutput: 1, schemaId: "decision_support", structuredOutput: { version: 1, slots: [{ modelId: "claude", call: "completed", result: "partial", invalidFields: ["risks"], cause: "output_budget_exhausted" }] } } as never)!;
-    expect(describeAffectedState(part.affected![0])).toBe("partially used: 1 field not recovered; the response reached the provider's output-token limit");
+  it("only output_budget_exhausted adds wording, and only on an unavailable slot", () => {
+    const failedCall = deriveStructuredOutputDisclosure({ totalModels: 1, successfulModels: 0, modelsWithUsableOutput: 0, structuredOutput: { version: 1, slots: [{ modelId: "claude", call: "failed", result: "unavailable", cause: "output_budget_exhausted" }] } } as never)!;
+    expect(describeAffectedState(failedCall.affected![0])).toBe("unavailable: the provider stopped at its output-token limit before returning any output");
     for (const cause of ["validation_failure", "unknown"]) {
       const d = deriveStructuredOutputDisclosure({ totalModels: 1, successfulModels: 1, modelsWithUsableOutput: 0, structuredOutput: { version: 1, slots: [{ modelId: "claude", call: "completed", result: "unavailable", cause }] } } as never)!;
       expect(describeAffectedState(d.affected![0])).toBe("unavailable: the provider call completed but returned no usable structured output");
     }
+    const part = deriveStructuredOutputDisclosure({ totalModels: 1, successfulModels: 1, modelsWithUsableOutput: 1, schemaId: "decision_support", structuredOutput: { version: 1, slots: [{ modelId: "claude", call: "completed", result: "partial", invalidFields: ["risks"], cause: "validation_failure" }] } } as never)!;
+    expect(describeAffectedState(part.affected![0])).toBe("partially used: 1 field not recovered");
   });
 
   it("the export disclosure carries the cause; a pre-7B record exports exactly as before", () => {

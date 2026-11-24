@@ -156,6 +156,18 @@ describe("Grok connector (detection only — no repair)", () => {
     expect(empty.errorMessage).toBe("Grok API returned an empty response.");
     expect(empty.terminationReason).toBe("output_budget");
   });
+  it("R1 MINOR-2: a recorded length reason never leaks onto an unrelated later exception", async () => {
+    // The response parses with finish_reason "length" and text, then something unrelated throws later in the same try.
+    (console.log as unknown as jest.SpyInstance).mockImplementation((msg?: unknown) => {
+      if (typeof msg === "string" && msg.includes("Final answer length")) throw new Error("unrelated failure after parsing");
+    });
+    global.fetch = jest.fn().mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: "{\"a\":" }, finish_reason: "length" }], usage: {} })) as never;
+    const r = await callGrok("q", null, KEY);
+    expect(r.status).toBe("error");
+    expect(r.errorMessage).toBe("unrelated failure after parsing");
+    expect(r).not.toHaveProperty("terminationReason");
+  });
+
   it("ignores a repair cap entirely and never gains a reason from an HTTP or network failure", async () => {
     global.fetch = jest.fn().mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: "{}" }, finish_reason: "stop" }], usage: {} })) as never;
     const ok = await callGrok("q", null, KEY, { outputBudgetRepairMaxTokens: 3300 });

@@ -39,6 +39,21 @@ describe("Item 7B — runPanel slot results", () => {
     }
   });
 
+  it("R1 NIT: no connector's empty output-budget answer is retryable in runPanel (each primary is called once)", async () => {
+    // The exact error shapes each connector returns for an empty answer that hit its budget (see the connector sources).
+    const shapes: Record<string, ModelResult> = {
+      claude: { modelId: "claude" as ModelId, status: "error", rawText: "Claude did not return any content.", latencyMs: 5, terminationReason: "output_budget" },
+      chatgpt: { modelId: "chatgpt" as ModelId, status: "error", rawText: "ChatGPT did not return any content.", latencyMs: 5, terminationReason: "output_budget" },
+      gemini: { modelId: "gemini" as ModelId, status: "error", rawText: "Gemini returned an empty response. The panel ran with the other models.", errorMessage: "Gemini returned an empty response.", latencyMs: 5, terminationReason: "output_budget" },
+      grok: { modelId: "grok" as ModelId, status: "error", rawText: null, errorMessage: "Grok API returned an empty response.", latencyMs: 5, terminationReason: "output_budget" },
+      perplexity: { modelId: "perplexity" as ModelId, status: "error", rawText: null, errorMessage: "Perplexity agent run incomplete/max_output_tokens: no_error_type (no_code)", latencyMs: 5, terminationReason: "output_budget" },
+    };
+    for (const [id, r] of Object.entries(shapes)) connectorMap[id] = jest.fn(async () => r);
+    const rows = await runPanel("q", Object.keys(shapes) as ModelId[], Object.fromEntries(Object.keys(shapes).map((k) => [k, "k"])) as never, null);
+    for (const id of Object.keys(shapes)) expect(connectorMap[id]).toHaveBeenCalledTimes(1);
+    expect(rows.every((r) => r.status === "failed" && r.terminationReason === "output_budget")).toBe(true);
+  });
+
   it("a timeout keeps no reason, and an ok answer keeps its own", async () => {
     connectorMap.claude = jest.fn(async () => ({ modelId: "claude", status: "timeout", rawText: null, latencyMs: 5, errorMessage: "timed out" }));
     connectorMap.chatgpt = jest.fn(async () => ({ modelId: "chatgpt", status: "ok", rawText: ANSWER, latencyMs: 5, terminationReason: "output_budget" }));
