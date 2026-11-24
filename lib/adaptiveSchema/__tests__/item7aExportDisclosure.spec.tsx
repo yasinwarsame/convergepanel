@@ -57,7 +57,7 @@ describe("JSON (rendered bytes, validated by the export schema)", () => {
   const body = async (name: typeof DEGRADED) => JSON.parse(Buffer.from((await renderAdaptiveResearchExport(asStored(exportRecord(name, "json")))).bytes).toString("utf8"));
   it("a degraded run carries the derived disclosure with counts, affected models and the same lines", async () => {
     const j = await body(DEGRADED);
-    const d = adaptiveResearchJsonExportV1Schema.parse(j).result as { derivedStructuredOutputDisclosure?: { selected: number; completedCalls: number; usable: number; affected: { state: string; providerCall: string }[]; lines: string[] } };
+    const d = adaptiveResearchJsonExportV1Schema.parse(j).result as { derivedStructuredOutputDisclosure?: { selected: number; completedCalls: number; usable: number; affected: { state: string; providerCall: string; material: boolean }[]; prominent: boolean; lines: string[] } };
     expect(d.derivedStructuredOutputDisclosure).toBeDefined();
     const x = d.derivedStructuredOutputDisclosure!;
     expect([x.selected, x.completedCalls, x.usable]).toEqual([5, 2, 2]);
