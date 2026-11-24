@@ -102,7 +102,8 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "9013684425a4776a0f2ad26560d765752917d5be",
+  // ITEM7A-REPIN lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json: 9013684425a4776a0f2ad26560d765752917d5be → f75cf845ebd7c207d17ae227ad61a6cf983a7891. Item 7A R3 MINOR-1 mapping correction (owner decision 2026-11-24): ONE added entry, non-user — the "disputedInterpretations" schema field key in structuredOutputDisclosure.ts DECISION_CRITICAL_FIELDS (never rendered); no other entry changed.
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "f75cf845ebd7c207d17ae227ad61a6cf983a7891",
 };
 
 /**

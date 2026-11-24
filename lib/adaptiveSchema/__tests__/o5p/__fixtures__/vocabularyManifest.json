@@ -2926,6 +2926,13 @@
   "rule": "test id"
  },
  {
+  "file": "lib/adaptiveSchema/structuredOutputDisclosure.ts",
+  "literal": "\"disputedInterpretations\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "schema field key in the Item 7A decision-critical mapping (never rendered)"
+ },
+ {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",
   "literal": "\"Top finding (stored placeholder text among the supporting slots; not an independent consensus)\"",
   "count": 1,
