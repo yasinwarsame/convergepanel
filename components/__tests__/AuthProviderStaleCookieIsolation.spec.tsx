@@ -383,6 +383,22 @@ describe("#332 identity isolation — a late mint for A after switching to B", (
     expect(jar.value).toBeNull();
   });
 
+  it("B's explicit logout has begun when A's late cookie lands → no repair re-mints B during the logout; the late cookie is removed", async () => {
+    const a = new FakeUser("uid-a");
+    const b = new FakeUser("uid-b");
+    await show(a);
+    await show(b);
+    await arrive("uid-b");
+    act(() => probe.beginLogout());
+    const posts = net.posts.length;
+    await arrive("uid-a");
+    await flush();
+    expect(net.posts.length).toBe(posts);
+    expect(net.pending).toHaveLength(0);
+    expect(jar.value).toBeNull();
+    expect(probe.canMutate).toBe(false);
+  });
+
   it("same identity: a late mint for the SHOWN identity triggers no repair (no extra mint)", async () => {
     const a = new FakeUser("uid-a");
     await show(a);
