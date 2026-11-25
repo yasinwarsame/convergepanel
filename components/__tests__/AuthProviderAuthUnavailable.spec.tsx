@@ -29,13 +29,18 @@ jest.mock("posthog-js", () => ({ __esModule: true, default: { reset: () => mockR
 import { AuthProvider, useAuth, SESSION_UNAVAILABLE_RETRY_DELAYS_MS } from "@/components/AuthProvider";
 
 // ── the session endpoint double ───────────────────────────────────────────────
-type Answer = "ok" | "unavailable" | "revoked" | "server_500" | "proxy_503" | "unavailable_500_body";
+type Answer = "ok" | "unavailable" | "revoked" | "server_500" | "proxy_503" | "unavailable_500_body" | "deferred_ok";
+let releaseDeferred: (() => void) | null = null;
 let postAnswers: Answer[] = [];
 const calls: string[] = [];
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-function answerPost(uid: string): Response {
+function answerPost(uid: string): Response | Promise<Response> {
   const a = postAnswers.length ? postAnswers.shift()! : "ok";
   switch (a) {
+    case "deferred_ok": // a successful mint whose response arrives only when the test releases it
+      return new Promise<Response>((resolve) => {
+        releaseDeferred = () => resolve(json(200, { authenticated: true, uid }));
+      });
     case "ok":
       return json(200, { authenticated: true, uid });
     case "unavailable": // the exact mint contract (app/api/auth/session/route.ts authUnavailableResponse)
@@ -73,6 +78,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   calls.length = 0;
   postAnswers = [];
+  releaseDeferred = null;
   tokenCallback = undefined;
   local = new FakeStorage();
   session = new FakeStorage();
@@ -167,13 +173,42 @@ describe("#332 R7 — temporary Auth outage: no destructive sign-out, protected 
     expect(probe.syncState).toBe("authenticated");
   });
 
-  it("a newer identity callback cancels the pending retry (no stale mint call after it)", async () => {
+  it("a newer identity callback cancels the pending retry (no stale mint call after it, no timer left behind)", async () => {
     postAnswers = ["unavailable"];
     await emit(userA);
     expect(posts()).toBe(1);
+    expect(jest.getTimerCount()).toBe(1); // exactly the one scheduled retry
     await emit(null); // explicit sign-out while unavailable
+    expect(jest.getTimerCount()).toBe(0); // cancelled, not merely ignored when it fires
     await advance(10 * 60_000);
     expect(posts()).toBe(1);
+  });
+
+  it("unmount cancels the pending retry", async () => {
+    postAnswers = ["unavailable"];
+    await emit(userA);
+    expect(jest.getTimerCount()).toBe(1);
+    act(() => renderer.unmount());
+    expect(jest.getTimerCount()).toBe(0);
+    act(() => {
+      renderer = TestRenderer.create(createElement(AuthProvider, null, createElement(Probe))); // for afterEach
+    });
+  });
+
+  it("a retry whose answer arrives AFTER a newer callback (sign-out) is discarded: it never authenticates", async () => {
+    postAnswers = ["unavailable", "deferred_ok"];
+    await emit(userA);
+    await advance(SESSION_UNAVAILABLE_RETRY_DELAYS_MS[0]); // the retry is now in flight
+    expect(posts()).toBe(2);
+    expect(probe.syncState).toBe("syncing_session");
+    await emit(null); // the user signs out while that retry is pending
+    expect(probe.syncState).toBe("signed_out");
+    await act(async () => {
+      releaseDeferred!(); // the late success arrives
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(probe.syncState).toBe("signed_out");
+    expect(probe.canMutate).toBe(false);
   });
 });
 
