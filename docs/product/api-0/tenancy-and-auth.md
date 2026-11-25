@@ -63,6 +63,7 @@ Membership is created **only** by accepting an invitation. The flow mirrors the 
 - Routes under `/api/developer/*` (**new**) on the main app domain authenticate **only** with the existing Firebase session through `resolveRequestIdentity()` (`lib/auth/resolveRequestIdentity.ts`: cookie `__session` or bearer ID token, fails closed on mismatch).
 - Any `Authorization: Bearer cpk_…` on a management route is rejected with 401 before identity resolution. A leaked API key can never create keys, webhooks or change settings.
 - **Disabled Firebase accounts** obtain nothing (consistent with `docs/operations/admin-authority-tiers.md`).
+  *Addendum 2:* a disabled account returns `401 session_required`, identical to no session, so the account's existence is not revealed; an unverified email returns `403 identity_not_verified` (reserved for #327). Order of checks: `error-catalog.md` §3.2.
 - **Fresh session** (`auth_time` ≤ 15 min) for: live key creation, webhook create/update, spend-limit change, retention change, enabling model-response access, deletion, member invite, invite acceptance, member role change, ownership transfer, org deletion.
 - Membership is read server-side from `apiOrgMemberships/{membershipId}`, where the ID is a domain-separated, length-prefixed SHA-256 of `(orgId, uid)`, the construction of `lib/workspaces/membershipId.ts` with its own domain separator. Client-supplied org or role values are ignored.
 - The platform admin tiers do not grant org roles. SYSTEM_ADMIN has a separate metadata-only support view (OD-13) and no org membership.
@@ -85,7 +86,7 @@ Example prefix shown in dashboards and logs: `cpk_live_7Hk2mQ9xLp3A`.
 
 `hash = HMAC-SHA-256(pepper, secret)`, stored as hex with `hashVersion`.
 
-**Why not Argon2id.** Argon2id and other slow password hashes exist to resist offline guessing of **low-entropy** secrets. An API key secret is 256 bits from a CSPRNG; offline guessing is infeasible at any hash speed. A slow hash would add tens of milliseconds and memory pressure on every request at API volume for no security gain. **Why a pepper.** If the Firestore `apiKeys` collection leaks, hashes without the pepper are useless for verifying guesses; the pepper is held outside Firestore. **Pepper storage:** read through `lib/env.ts` (requires the Order 6 boundary change, OD-21), or held as a managed KMS MAC key if that is selected in API-1 design (OD-12 alignment). **Rotation:** `API_KEY_PEPPER_PREVIOUS` accepted during a window; each successful verify under the old pepper rewrites the hash under the new one.
+**Why not Argon2id.** Argon2id and other slow password hashes exist to resist offline guessing of **low-entropy** secrets. An API key secret is 256 bits from a CSPRNG; offline guessing is infeasible at any hash speed. A slow hash would add tens of milliseconds and memory pressure on every request at API volume for no security gain. **Why a pepper.** If the Firestore `apiKeys` collection leaks, hashes without the pepper are useless for verifying guesses; the pepper is held outside Firestore. **Pepper storage:** read through `lib/env.ts` (requires the Order 6 boundary change, OD-21) *(amended by Addendum 1 §1.1 SB: read only by the server-only `lib/apiPlatform/secrets.server.ts`; `lib/env.ts` is unchanged)*, or held as a managed KMS MAC key if that is selected in API-1 design (OD-12 alignment). **Rotation:** `API_KEY_PEPPER_PREVIOUS` accepted during a window; each successful verify under the old pepper rewrites the hash under the new one. *(Superseded by Addendum 3, #327 R-7: automatic lazy rehash-on-read is **deferred**. Credential authentication is read-only and never rewrites the stored hash. Moving a key off the previous pepper is done by explicit key replacement and revocation; the previous pepper is accepted only for a bounded window during an approved rotation. Details are documented in #327.)*
 
 ### 4.3 Verification (constant-time)
 1. Parse the bearer with a strict regex; reject on mismatch (same 401).
@@ -100,7 +101,7 @@ Example prefix shown in dashboards and logs: `cpk_live_7Hk2mQ9xLp3A`.
 | Scope | Grants | Default |
 |---|---|---|
 | `verifications:write` | create, cancel | ✅ |
-| `verifications:read` | get result, report, compact models | ✅ |
+| `verifications:read` | get result, report, compact models, list history (`GET /v1/verifications`, Addendum 1 §3; scoped by org, app scope and mode) | ✅ |
 | `verifications:delete` | `DELETE /v1/verifications/{id}` (OD-11) | — |
 | `model_responses:read` | full model text with `?include=response_text`; grantable only while org model-response access is enabled (OD-19) | — |
 | `usage:read` | `GET /v1/usage` | — |

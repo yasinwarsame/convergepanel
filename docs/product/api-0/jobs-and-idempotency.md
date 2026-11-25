@@ -10,8 +10,8 @@ Every current research, synthesis and video route sets `maxDuration = 300`, and 
 
 A Firestore transaction cannot include a queue publish, so job creation never "enqueues in the transaction". It uses a **transactional outbox**:
 
-1. **Before any write** (no state is created, the idempotency key stays free): parse and validate the body, authenticate the key, check scope, apply the Redis-class rate limit, and refuse with `503 queue_unavailable` if the dispatcher's health check currently marks the queue unavailable.
-2. **One Firestore transaction (T-create)** reads the idempotency record, the org and the current period, then either replays, rejects, or writes **all** of:
+1. **Before any write** (no state is created, the idempotency key stays free): authenticate the key, apply the Redis-class rate limit, check organization state and scope, then decode, validate and canonicalize the body. *(Addendum 3, m3: the queue health check moved into T-create, after the idempotency read, so it can never turn a replay into `503`; the full order is §5A.)*
+2. **One Firestore transaction (T-create)** reads the idempotency record first, re-checks the key and the organization, and replays a committed record before any new-job-only check. Only for a new job does it then check options, availability, queue health (`503 queue_unavailable`), concurrency, credits and capacity, and write **all** of:
    - the job document with internal state `pending_dispatch`, `dispatchAttempts: 0`, `dispatchDueAt: now`;
    - the `reserve_{verId}` ledger entry and the period counter increment (`ledger-and-billing.md` §2.3);
    - the idempotency record (§5) holding the request hash, the verification ID and the exact `202` response body.
@@ -19,7 +19,8 @@ A Firestore transaction cannot include a queue publish, so job creation never "e
    It commits all of them or none.
 3. **After commit, dispatch.** The API route publishes the `panel` message (deterministic message ID `verId:panel:1`). On a publish acknowledgement it moves the job `pending_dispatch → queued` in a conditional transaction (only if still `pending_dispatch`). The route returns `202` **whether or not the publish succeeded**: the job and the reservation are already durable.
 4. **Sweeper re-dispatch.** A cron sweeper (every 1 min, placeholder) selects jobs in `pending_dispatch` whose `dispatchDueAt` is older than 30 s. It re-publishes with the same message ID, increments `dispatchAttempts` and sets `dispatchDueAt = now + backoff`. A job still undispatched when the max queue wait (default 10 min, placeholder) passes goes to `expired` with a full release.
-5. **Idempotent worker.** Publishing more than once is safe: the queue may deduplicate by message ID, and the worker never depends on that (§4: lease, deterministic step documents, per-call records). The worker accepts a `panel` message for a job in `pending_dispatch` or `queued`, so a lost `queued` update changes nothing.
+   **Open defect (Phase 1D-C; owner ruling Addendum 1 §1.1 Q):** a queue that deduplicates by message ID may silently drop this same-ID re-publish, so a job whose first publish was accepted but never delivered can stall until expiry. This applies equally to step-to-step dispatch and every sweeper re-publish of an overdue `nextStep` (§4.1 step 6, `verId:step:attempt`). Before API-3 the design must use a replacement dispatch with a safe, distinct message identifier (for example `verId:panel:{dispatchAttempts}`), rely on worker idempotency rather than queue deduplication, and prove that no job can stay stuck because a duplicate dispatch was suppressed.
+5. **Idempotent worker.** Publishing more than once is safe: the queue may deduplicate by message ID (which is exactly why a re-dispatch must not reuse a delivered-or-dropped ID; see the open defect in step 4), and the worker never depends on that (§4: lease, deterministic step documents, per-call records). The worker accepts a `panel` message for a job in `pending_dispatch` or `queued`, so a lost `queued` update changes nothing.
 
 Public status: `pending_dispatch` is internal and is reported as `queued`. The public `JobStatus` vocabulary is unchanged.
 
@@ -64,7 +65,7 @@ Public status: `pending_dispatch` is internal and is reported as `queued`. The p
 | `running` | < 2 usable models (`insufficient_usable_models`) | `failed` | release; internal cost recorded; failed-job counters (OD-8) |
 | `running` | no primary outcome although ≥ 2 models answered: research `no_comparable_claims` (claims-matrix, empty `alignedClaims`) or `adaptive_finalize_failed` (result-schema §4.0) | `failed` | release; internal cost recorded; excluded from failed-job count and ratio, included in failed-job cost |
 | `running` | research routed to a non-executing outcome (handoff, disabled, clarification, graceful limitation) | `failed: query_not_executable` | release; classification cost recorded; excluded from failed-job count and ratio, included in failed-job cost |
-| `running` | lease expired 3× | `failed: worker_timeout` | release; internal cost recorded |
+| `running` / `synthesizing` | lease expired 3× (*Addendum 6*: `synthesizing` included) | `failed: worker_timeout`, *Addendum 9:* also when a cancellation or a deletion is pending (the deletion then completes; §6.3) | release; internal cost recorded; *Addendum 6:* platform-caused, excluded from the failed-job count and ratio, included in failed-job cost |
 | `running` / `synthesizing` | cancel | stops after current step → `canceled` | settle work done |
 | `synthesizing` | step-start check fails (hard abuse, suspension, spend ceiling) or synthesis yield cap | (finalize) | synthesis section `failed` with that reason code; synthesis credits released |
 | `synthesizing` | ok / synthesis failed | (finalize) | synthesis failure → section `failed`, synthesis credits released |
@@ -91,6 +92,7 @@ Terminal states never change, except to deleted (a tombstone, OD-11). Class (a) 
 5. Step output is written under a deterministic document ID (`steps/{step}`) with `tx.create()` semantics, so a duplicate execution cannot write twice.
 6. **Advance transaction.** Advance state, clear the lease, and write the next step's dispatch into the job (`nextStep`, `dispatchDueAt`) in the same transaction. Then publish the next message (ID `verId:step:attempt`). The sweeper re-publishes any job whose `nextStep` dispatch is older than 30 s, which is the same outbox rule as §2.
 7. Release all step permits in a `finally`, and also on lease loss. Permits additionally expire by TTL (§4.3).
+8. *Addendum 10:* **Lease fencing.** The lease is identified by a fencing token: the job's `leaseEpoch`, which every lease grant (step 2) increments, together with its recorded expiry count `leaseExpiries`. Recording a lease expiry revokes the lease: an expired lease is recorded, by the sweeper (§4.4) or by the lease transaction that replaces it, in a transaction that increments `leaseExpiries`. Every worker transaction that writes a call record (§4.4), step output (step 5), an advance (step 6) or a terminal transition reads the job and commits only if the job's token still equals the token the worker was granted. That read is version-checked, so a revocation that commits while the transaction is open aborts it, and the retry is refused. A worker whose lease has been revoked commits no call record, no step output, no advance and no terminal transition, so it commits no charge (owner decision Q3, Addendum 10). It stops, and writes only the internal cost entry of a provider result it holds (`ledger-and-billing.md` §3.1, *Dispatch record and cost recovery*). A worker also stops by itself before its own `leaseExpiresAt`, but correctness rests on the durable token, never on clocks. The work the revoked lease committed (its call records) stays committed; controlled recovery reconciles it: a retried step under a new lease replays it (§4.4) and the job's single terminal transition settles it under its tariff, or the sweeper ends the job (§4.4, §6.3). The sweeper and the API transactions (`cancel`, `DELETE`) hold no lease and are not fenced; each is conditional on the job's state at commit.
 
 ### 4.2 Step-start checks (every step, not only at create)
 
@@ -98,11 +100,12 @@ Read inside the lease transaction (Firestore) or immediately before it (Redis-cl
 
 | Check | Source | Before the `panel` step | Before `synthesis` |
 |---|---|---|---|
-| `cancelRequested` | job | → `canceled`, full release | → finalize with work done; synthesis `not_requested`-by-cancel (`reason.code: canceled`) |
-| Org `status = suspended` or `abuseState` hard (`ledger-and-billing.md` §4.3) | org doc | → `canceled`, full release | synthesis `failed` (`org_suspended` / `failed_job_threshold_exceeded`); finalize `partial` |
-| Platform daily API spend ceiling reached | `apiPlatformCounters/{YYYY-MM-DD}` (sharded, summed) | → `canceled` (`platform_spend_ceiling`), full release | synthesis `failed` (`platform_spend_ceiling`); finalize `partial` |
+| `cancelRequested` | job | → `canceled`, settling the committed usable work (none before the first panel attempt, so a full release). *Addendum 10 (Q1):* a retried `panel` step keeps the work an earlier attempt committed (§6.3 T18); earlier text read "full release" | → `canceled`, settling the committed usable work; synthesis `not_requested`-by-cancel (`reason.code: canceled`). *Addendum 10:* the terminal state is `canceled`, as in §3, §6 and §6.3 T11; earlier text read "finalize with work done", with the same charge |
+| Org `status = suspended` or `abuseState` hard (`ledger-and-billing.md` §4.3) | org doc | → `canceled`, full release (open: Addendum 10 §7 OQ-B, for a retried `panel` step with committed work) | synthesis `failed` (`org_suspended` / `failed_job_threshold_exceeded`); finalize `partial` |
+| Platform daily API spend ceiling reached | `apiPlatformCounters/{YYYY-MM-DD}` (sharded, summed) | → `canceled` (`platform_spend_ceiling`), full release (open: Addendum 10 §7 OQ-B, for a retried `panel` step with committed work) | synthesis `failed` (`platform_spend_ceiling`); finalize `partial` |
 | Pipeline switches (research needs `ADAPTIVE_SCHEMAS_ENABLED` and `ADAPTIVE_VERIFICATION_ENABLED`, result-schema §4.0) | `lib/env.ts` values at boot | → `failed: pipeline_disabled`, full release, excluded from failed-job count and ratio | — |
 | CR-2 load shedding engaged for this step class | Redis-class shedding state | yield (§4.3) | yield (§4.3) |
+| *Addendum 4:* research job and the organization's D6 acknowledgement withdrawn | org doc | → `canceled` (`pipeline_processing_acknowledgement_withdrawn`), full release | stop before the next provider call; settle completed work; release the remainder; `canceled` |
 
 `finalize` makes no provider call, so it runs even when the ceiling or a hard abuse state is reached. It settles only work already done.
 
@@ -133,14 +136,15 @@ Permit TTL = step budget + 30 s, so a crashed worker cannot leak capacity.
 Every instrumented provider call (PRD §6.5) has a deterministic **call key** `{site}:{slot|aux}:{seq}`. Parallel per-model auxiliary calls (stance backfill) are keyed by **slot**, not by invocation order: `stance_backfill:{slotModelId}:{n}`. Their keys therefore don't depend on `Promise.all` scheduling. `site` is one of `primary`, `transient_retry`, `fallback`, `corrective_retry`, `classification`, `claim_cluster`, `stance_backfill`, `bias_detection`, `coverage_audit`, `synthesis_narrative`, `synthesis`, `synthesis_fallback`. `seq` is the per-site sequence number within the step. Completed calls are replayed with identical results, so the pipeline issues the same call sequence on a resumed attempt, and the keys line up.
 
 - The record stores the outcome **the call site observed**, not the provider's eventual result. When a call site's `withTimeout` fires first (classification and every auxiliary call use it), the record is `timeout` with zero reported usage. A provider response that arrives later is discarded for replay purposes; its cost is still estimated into the internal cost ledger. A resumed step therefore replays exactly what the pipeline used.
-- **After** a call completes (any outcome) and **before** its result is returned to the pipeline, the hook writes `steps/{step}/calls/{callKey}` with `tx.create()`: `{ status, rawText, tokenUsage (as reported for that attempt), latencyMs, provider, actualModel, completedAt }`. In the same transaction it writes the internal cost entry `apiCostLedger/{verId}:{step}:{callKey}` (`ledger-and-billing.md` §3).
+- **After** a call completes (any outcome) and **before** its result is returned to the pipeline, the hook writes `steps/{step}/calls/{callKey}` with `tx.create()`: `{ status, rawText, tokenUsage (as reported for that attempt), latencyMs, provider, actualModel, completedAt }`. In the same transaction it writes the internal cost entry `apiCostLedger/{verId}:{step}:{callKey}:{leaseEpoch}` (`ledger-and-billing.md` §3; *Addendum 10, R6:* per call attempt, keyed with the epoch of the worker's lease, §4.1 step 8, because a resumed attempt re-issues an unrecorded call under the same call key; the call record stays per call key, so replays find it).
 - **Before** each call, the hook reads the call record. If one exists, the hook returns it as a **replay**, and the call site uses that result without calling the provider.
+- *Addendum 10:* if no record exists, the hook writes the call attempt's **dispatch record** before the request is sent (`ledger-and-billing.md` §3.1, *Dispatch record and cost recovery*; data class (c), no content). The call-record transaction is also conditional on the worker's lease token (§4.1, *Lease fencing*): a worker whose lease was revoked writes no call record, so its result is never committed work; only its cost entry is recorded.
 - A record that cannot be written (document over the 1 MiB limit, Firestore error) is logged. That call is not replayable, so a resumed attempt re-issues it and records a second cost entry keyed with the execution attempt. The step retry limit (2 more attempts) bounds this.
 - Call records hold raw model text, so they are data class (a). They are deleted at terminal state and never retained, even with `retain_input`.
 
 **Retries.** Provider-level retries are the existing ones: in `lib/panel.ts` a research slot makes a primary call plus up to 2 transient retries, then the DeepSeek fallback (API: only with `allow_fallback`). Claim slots (`runClaimVerificationPanel`) make exactly one call each. The adaptive corrective retry (`retryModelOnce` in `lib/adaptiveSchema/orchestrate.ts`) is bounded by `retryBudget.ts`. Step-level retries: a step whose lease expired is retried up to 2 more times. Queue redelivery without a lease change is a no-op.
 
-**Sweeper (cron).** It re-publishes `pending_dispatch` jobs and jobs with an overdue `nextStep` dispatch (§2, §4.1), expires jobs past the max queue wait, and fails `running` jobs whose lease expired three times (`worker_timeout`). It never touches terminal jobs. It needs the collection-group index (`state` asc, `dispatchDueAt` asc) (PRD §12.2).
+**Sweeper (cron).** It re-publishes `pending_dispatch` jobs and jobs with an overdue `nextStep` dispatch (§2, §4.1), expires `pending_dispatch` and `queued` jobs past the max queue wait, and fails `running` **and `synthesizing`** jobs whose lease expired three times (`worker_timeout`) (*Addendum 6*). Deletion-pending jobs are **not** skipped: a deletion-pending queued job is canceled with a full release, and a deletion-pending running or synthesizing job past the same lease bound ends `failed: worker_timeout`, charged 0, exactly as without the deletion (*Addendum 9*, §6.3); the deletion then completes. *Addendum 10:* it records each expired lease (§4.1, *Lease fencing*), and it records the estimated cost of every dispatch record that has no cost entry and whose worker can no longer commit (`ledger-and-billing.md` §3.1). It then retries every `pending` deletion operation (`retention-and-deletion.md` §3.1). It never changes a terminal job. It needs the collection-group index (`state` asc, `dispatchDueAt` asc) (PRD §12.2).
 
 **Load shedding (CR-2).** When shedding is engaged, step-start checks yield the affected step classes (§4.2, §4.3) in the PRD §13A order. Provider calls already running finish.
 
@@ -150,24 +154,274 @@ Every instrumented provider call (PRD §6.5) has a deterministic **call key** `{
 |---|---|
 | Header | `Idempotency-Key`, 1–255 printable ASCII. **Required** for live keys on `POST /v1/verifications`; optional for test keys |
 | Scope | `(orgId, appId, mode, key)`. Two applications, or the test and live mode of one application, may use the same key value independently. Stored at `apiOrganizations/{orgId}/idempotency/{sha256(appId + "\|" + mode + "\|" + key)}` |
-| Request hash | SHA-256 of the canonical JSON of the request body (sorted keys, no insignificant whitespace) plus `type` and the `Prefer` header |
+| Request hash | SHA-256 of the canonical JSON of the request body (sorted keys, no insignificant whitespace) plus `type` and the `Prefer` header. *Addendum 2:* the body is hashed after server-side NFC normalization of every string and only after validation passes, so bodies differing only in normalization form, member order or whitespace replay; any other difference is `409 idempotency_key_reused` (`error-catalog.md` §4.5) |
 | Creation | Inside T-create (§2) with `tx.create()` (the `runSnapshotLocks` pattern in `lib/workspaces/runSnapshotLock.ts`), together with the job (`pending_dispatch`) and the reservation. All three commit together or not at all |
 | TTL | 24 h from creation (Firestore TTL on `expiresAt`) |
 | Same key, same body, record exists | Return the stored original `202` status and body (`id` unchanged) with header `Idempotent-Replayed: true`. No new reservation, job or dispatch. This holds whether the job is still `pending_dispatch` or long terminal |
 | Same key, different body | `409 idempotency_key_reused`. Nothing created |
 | Two concurrent requests, same key | Firestore serializes the two transactions on the idempotency document. One commits; the other retries inside its own transaction, reads the committed record, and returns the replay (or `409 idempotency_key_reused` if its body differs). Only if a transaction exhausts its contention retries without reading a committed record does the request return `409 request_in_progress` with `Retry-After: 1`. Nothing was written by that request. A retry with the same key gets the replay, or creates the job if no other request committed |
-| Rejected before T-create (validation `400`, `401`, `403` scope, `413`, `422`, `429` rate, `503 queue_unavailable` from the pre-write health check) | No record is written. The key may be reused |
-| Rejected inside T-create (`402 quota_exceeded` / `spend_limit_reached`, `403 org_suspended` / `failed_job_threshold_exceeded` / `live_key_requires_plan`, `429 concurrency_limit`, `503 capacity_protection` / `platform_spend_ceiling`) | The transaction writes nothing, so no record exists. The key may be reused, and the same request may succeed later. Error responses are never stored or replayed |
+| Rejected before T-create (`401`, `403` org state, plan or scope, `413`, `415`, `429 rate_limited`, validation `400` and the schema-bound `422`s) | No record is written. The key may be reused |
+| Rejected inside T-create (*Addendum 3:* `401` / `403` from the in-transaction re-check of the key and organization; and, for a new job only, the beta-option and availability `422`s, `403 pipeline_processing_not_acknowledged`, `503 queue_unavailable`, `429 concurrency_limit`, `403 failed_job_threshold_exceeded`, `402 quota_exceeded` / `spend_limit_reached`, `503 capacity_protection` / `platform_spend_ceiling`) | The transaction writes nothing, so no record exists. The key may be reused, and the same request may succeed later. Error responses are never stored or replayed |
 | T-create committed but publishing failed | The record exists, the job is `pending_dispatch` and the sweeper dispatches it (§2). Replays return the same `id` and never create a second reservation |
-| Verification later deleted (OD-11) | Record kept as a content-free `deleted` marker until TTL; replay returns `410 verification_deleted` |
+| Verification later deleted (OD-11) | Record kept as a content-free `deleted` marker until TTL; replay returns `410 verification_deleted`. *Addendum 7:* only if the record still represents that verification's own acceptance; a record for a newer job under the same key is never changed |
+
+*Addendum 3 (m3):* the rows above are unchanged in meaning; the **order** in which they are evaluated, and the behaviour when conditions change between the original request and its replay, are specified in §5A, which wins where it is more specific.
+
+## 5A. Replay precedence, transaction ordering and concurrency (Addendum 3, m3)
+
+**Requirement (owner, Addendum 3 §2).** A caller that is authenticated **and currently authorized** can replay the original accepted request, with the same `Idempotency-Key` and the same canonical request, and receives the original accepted response even if dynamic conditions changed since: a model became unavailable, credits decreased, the queue is unhealthy, the plan's model limit changed, a type was switched off, concurrency or capacity is exhausted. Revoked credentials, removed scope, a suspended organization or a lapsed live plan **never** regain access through a replay. A replay creates no job, no reservation, no dispatch and no charge. Rate limiting may throttle a replay (`429 rate_limited`, nothing written), but never causes duplicate work or billing.
+
+### 5A.1 Decision procedure
+
+| Step | Where | Check | Outcome on failure |
+|---|---|---|---|
+| 0–2 | before authentication | global availability; transport (`Content-Length` / streamed byte count, media type); coarse edge abuse limit per source address, no lockout (`error-catalog.md` §3.4, Addendum 4) | `503`, `413`, `415`, `429 rate_limited`; nothing read about any tenant |
+| 3 | outside T-create | authenticate the key (revoked, expired, unknown → one code); failed-authentication throttling per presented key ID (Addendum 4) | `401 invalid_api_key`; `429 rate_limited` for a throttled failing key ID |
+| 4 | outside T-create | authenticated rate limit, per key then per organization | `429 rate_limited` (replays count) |
+| 5–6 | outside T-create | organization state and live plan, then scope `verifications:write` | `403 org_suspended`, `live_key_requires_plan`, `insufficient_scope` |
+| 7 | outside T-create | decode, validate, NFC, canonicalize (bounded: at most 524,288 bytes are ever parsed); `Idempotency-Key` format, and its presence for live keys | `400` codes, schema-bound `422`s |
+| 8a | **T-create, first read** | lock and read the idempotency record of `(org, app, mode, key)` | contention retries exhausted → `409 request_in_progress` |
+| 8b | T-create | **re-read the key and the organization** and repeat steps 3, 5 and 6 against them | `401` / `403` as above; **no replay is ever returned to a caller that fails here** |
+| 8c | T-create | a record whose `expiresAt` is in the future (`now < expiresAt`; at `now ≥ expiresAt` it is expired and treated as absent) decides the response, and evaluation **stops**: `committed` + same canonical request → the stored `202` with `Idempotent-Replayed: true`; `committed` + different → `409 idempotency_key_reused`; `deleted` marker → `410 verification_deleted` | — |
+| 9–14 | T-create, **new job only** | beta options; type and model availability, D6 acknowledgement, plan model limit, repeated-failing input, research schema (proposed); queue health; concurrency; failed-job threshold, credits and spend limit; capacity and the platform spend ceiling (`error-catalog.md` §3.1) | the step's `422` / `403` / `503` / `429` / `402`; the transaction commits **no write** |
+| 15 | T-create | write the job (`pending_dispatch`), the `reserve_{verId}` ledger entry and period counter, and the idempotency record (`committed`, canonical request hash, the exact `202` body, `expiresAt = now + 24 h`) | commit conflict → retry from 8a |
+| 16 | after commit | dispatch (transactional outbox, §2) | the sweeper re-dispatches; the `202` does not depend on it |
+
+*Addendum 4 (ruling D6W) supersedes the Addendum 3 classification of the D6 acknowledgement as a new-jobs-only condition.* Withdrawing the acknowledgement does not undo a provider call that already completed, but it **prevents every new provider call** once the withdrawal is effective: a new create is refused at step 10b (`403 pipeline_processing_not_acknowledged`); a queued research job is canceled with a full release; a running research job stops **before its next provider call**, settles the work already completed, and releases the remainder (§4.2, §6). A replay causes no new processing, so it still returns the original accepted body to an authorized caller (truth table T10); the job it names is then canceled or stopped as above, and remains readable where authorized.
+
+**Validation is not a dynamic condition.** Step 7 runs before the lookup because the canonical request (the lookup's comparison value) only exists after it. A contract change that tightens validation therefore also applies to replays of earlier requests; such a change is a breaking change (PRD §8.7) and is announced in advance.
+
+### 5A.2 Transaction ordering (T-create)
+
+Inside the one Firestore transaction, in this order:
+1. **Lock and read** `apiOrganizations/{orgId}/idempotency/{sha256(appId|mode|key)}` (first read; omitted when no `Idempotency-Key` is sent, which only a test key may do).
+2. **Read** `apiKeys/{keyId}` and `apiOrganizations/{orgId}` (revocation, scope, status, plan) and decide 8b.
+3. Decide 8c from the record. On a replay, `409` or `410` the transaction commits **with no write**.
+4. New job only: read the current period document (`periods/{YYYY-MM}`: credits and reservations only) and, *Addendum 5*, the organization's concurrency record `apiOrgConcurrency/{orgId}` (§5B), and evaluate steps 9–14. The concurrency check (step 12) is decided from that **transactional** count. Redis-class state (shedding, queue health, provider health) is read here, inside the transaction callback, but is not part of the Firestore snapshot; the outcome a request receives is decided only after these reads.
+5. New job only: `tx.create` the job (with its admission marker, §5B), `tx.create` the ledger entry, update the period document (reservation), increment the concurrency record (§5B), `tx.create` the idempotency record (or overwrite a record whose `expiresAt` has passed; Firestore TTL deletion is lazy, so expiry is checked explicitly). All commit together or none does.
+
+Every read in 1, 2 and 4 is validated at commit. A concurrent key revocation, organization suspension, credit change or record creation aborts the commit, and the transaction retries from 1 with fresh reads. The `lastUsedAt` sampling write on the key (`tenancy-and-auth.md` §4, at most once per minute) can cause such a retry; it never changes the outcome.
+
+### 5A.3 Truth table (normative; parsed by the reference-model spec)
+
+`any` in *New-job conditions* means: the same outcome for every value of that column (`pass`, `model_unavailable`, `credits_exhausted`, `queue_unhealthy`, `plan_models_reduced`, `type_disabled`, `ack_withdrawn`, `concurrency_full`, `capacity_shed`). *Record in scope* is the record of the caller's own `(org, app, mode, key)`: `in_progress` means another T-create for the same scope holds the record and has not committed during this request's bounded retries; `other_mode` / `other_app` mean a committed record exists only under the same key value in the other mode or another application. The original request of every `committed`, `expired`, `deleted`, `other_mode` and `other_app` row was accepted while every condition was `pass`.
+
+| Row | Record in scope | Canonical request | Caller | New-job conditions | Response | Job created |
+|---|---|---|---|---|---|---|
+| T1 | none | n/a | authorized | pass | 202 new | yes |
+| T2 | none | n/a | authorized | model_unavailable | 422 model_unavailable | no |
+| T3 | none | n/a | authorized | credits_exhausted | 402 quota_exceeded | no |
+| T4 | none | n/a | authorized | queue_unhealthy | 503 queue_unavailable | no |
+| T5 | none | n/a | authorized | plan_models_reduced | 422 model_limit_exceeded | no |
+| T6 | none | n/a | authorized | type_disabled | 422 type_unavailable | no |
+| T7 | none | n/a | authorized | ack_withdrawn | 403 pipeline_processing_not_acknowledged | no |
+| T8 | none | n/a | authorized | concurrency_full | 429 concurrency_limit | no |
+| T9 | none | n/a | authorized | capacity_shed | 503 capacity_protection | no |
+| T10 | committed | same | authorized | any | 202 replay | no |
+| T11 | committed | different | authorized | any | 409 idempotency_key_reused | no |
+| T12 | in_progress | same | authorized | any | 409 request_in_progress | no |
+| T13 | in_progress | different | authorized | any | 409 request_in_progress | no |
+| T14 | expired | same | authorized | pass | 202 new | yes |
+| T15 | expired | same | authorized | model_unavailable | 422 model_unavailable | no |
+| T16 | expired | different | authorized | pass | 202 new | yes |
+| T17 | deleted | same | authorized | any | 410 verification_deleted | no |
+| T18 | deleted | different | authorized | any | 410 verification_deleted | no |
+| T19 | other_mode | same | authorized | pass | 202 new | yes |
+| T20 | other_app | same | authorized | pass | 202 new | yes |
+| T21 | none | n/a | key_revoked | any | 401 invalid_api_key | no |
+| T22 | committed | same | key_revoked | any | 401 invalid_api_key | no |
+| T23 | committed | different | key_revoked | any | 401 invalid_api_key | no |
+| T24 | deleted | same | key_revoked | any | 401 invalid_api_key | no |
+| T25 | committed | same | scope_reduced | any | 403 insufficient_scope | no |
+| T26 | committed | same | org_suspended | any | 403 org_suspended | no |
+| T27 | committed | same | plan_lapsed | any | 403 live_key_requires_plan | no |
+| T28 | committed | same | rate_limited | any | 429 rate_limited | no |
+| T29 | none | n/a | scope_reduced | any | 403 insufficient_scope | no |
+| T30 | none | n/a | org_suspended | any | 403 org_suspended | no |
+
+Rows T12–T13: once the other transaction commits, a retry follows T10 or T11. Row T28: once the rate window resets, a retry follows T10. Row T18 (a different request under a deleted record's key also gets `410`) follows from the marker being **content-free**: it keeps no request hash, so the two cases cannot be told apart. *Confirmed by the owner (Addendum 4, ruling DM):* an authorized request under an **unexpired** deleted marker gets 410 whatever its body; deleted request content is not retained to compare hashes.
+
+### 5A.4 Concurrency argument (two or more simultaneous identical first requests)
+
+1. Every request for the same `(org, app, mode, key)` reads and locks **the same** idempotency document as the first operation of T-create (§5A.2 step 1). Firestore serializes transactions on that document: while one holds it, another's read aborts and retries.
+2. The job, the reservation and the idempotency record are written in **one** commit (§5A.2 step 5), and the record is written with `tx.create` (or an expiry-checked overwrite). So the first transaction to commit creates exactly one job, one reservation and one record; no other commit can create a second record for the scope, and no job or reservation is ever written without its record.
+3. Every later transaction for the scope, on retry, reads the committed record at step 1 and stops at step 8c (replay or `409`), before any write. It therefore creates nothing.
+4. A transaction that exhausts its bounded retries while another holds the record returns `409 request_in_progress` and wrote nothing; its retry follows step 3.
+5. Hence, for any interleaving of N identical first requests: exactly one job, one reservation and one dispatch exist; every `202` carries the same `id` and body; every other response is `409 request_in_progress` with no write. The reference-model spec enumerates every interleaving of two and three requests and asserts exactly this.
+
+**Reference model and tests.** `docs/__tests__/support/idempotencyReferenceModel.ts` models **part** of §5A.1–5A.2 over an in-memory transactional store with the Firestore semantics above; `docs/__tests__/apiIdempotencyReplayPrecedence.spec.ts` parses the table in §5A.3 and runs every row (each `any` expanded), the state transitions, the interleavings and the negative cases. The model is documentation, not the implementation.
+
+- **Modelled:** steps 3, 4, 5–6, a reduced step 7 (object body, `type`, model-ID shape and 2..5 bound, NFC, canonical JSON, `Idempotency-Key` presence for live keys), 8a–8c, 10a, 10b, 10d, 10e, 11, 12, 13 (only `quota_exceeded`), 14 (only `capacity_protection`), 15, and dispatch after commit (16, as a list; no sweeper).
+- *Addendum 8:* also modelled, 10f (`repeated_failing_input`) and step 13's `failed_job_threshold_exceeded` (count and cost hard limits) with the soft ratio's concurrency 1, for live keys, evaluated from rolling windows over the model's terminal-outcome records (`ledger-and-billing.md` §4.3, including the short-circuit attribution rule). Not modelled: the persistent `abuseState = review` and its SYSTEM_ADMIN lift, the plan-price cost limit, the provider circuit breaker. The settlement rule is `ledger-and-billing.md` §2.4–§2.5: a fully failed or expired job is charged 0, whatever calls it made; every provider call writes an internal cost entry with its call record.
+- *Addendum 9:* also modelled, the settlement transitions of §6.3: a call commits its record and cost entry in one transaction with a crash point before the commit; the sweeper's crash recovery ends `failed: worker_timeout` whatever is pending; the acceptance identity is drawn from an injectable generator whose default is `crypto.randomBytes`.
+- *Addendum 10:* also modelled, the lease fencing token of §4.1 (a grant increments `leaseEpoch`; a recorded expiry increments `leaseExpiries`), fenced call-record and terminal commits, a retried step under a new lease (and the lease transaction recording the unrecorded expiry it replaces, R6), deterministic call keys reused on re-issue with per-attempt cost-entry keys (R6), dispatch records and the sweeper's cost recovery, and the soft failed-job ratio compared in integer percent. Not modelled: the `leaseOwner` and `leaseExpiresAt` fields, a worker's clock-based self-stop, advances and step outputs.
+- **Omitted:** steps 0–2; the full §4 validation; step 9 (beta options); 10c, 10g; step 13's `spend_limit_reached`, `payment_required`; step 14's `platform_spend_ceiling`; the sweeper and expiry of undispatched jobs. The omitted checks **after 8c** (steps 9, 10c, 10g and the omitted parts of 13 and 14) are all new-job-only, so they cannot change a replay. Steps 0–2 and the full §4 validation are also omitted, but they **precede** 8c and apply to replays exactly as to new requests; the model does not exercise them. The omitted outcomes themselves are not exercised by the model.
+- **Concurrency.** *Addendum 4 superseded the over-admission caveat recorded here in Addendum 3; Addendum 5 corrects the location.* The design and the model keep the accepted-job count in the same place, the organization's single concurrency record `apiOrgConcurrency/{orgId}` (§5B), read inside T-create and version-checked at commit, with the same release rule. A test parses §5B's declared counter location and release marker and compares them with the model's constants. Distinct keys racing at the limit can never over-admit; tests race them across every interleaving.
+- **Defaults.** Omitted and explicit-default members canonicalize differently, so they are different requests (`409 idempotency_key_reused`, fail-safe; `error-catalog.md` §4.5). Pinned by a test.
+
+## 5B. Concurrency accounting (Addendum 4, ruling CC; corrected by Addendum 5, MAJOR-1)
+
+Concurrency control for **accepted** jobs is exact. No over-admission is allowed across distinct API keys or idempotency keys. *Addendum 5 supersedes the Addendum 4 text of this section, which placed the count in the monthly (and possibly sharded) period document: a count there changes identity at month rollover, has no stable release target, and is not atomic across shards.*
+
+**Counter location:** `apiOrgConcurrency/{orgId}`
+
+**Release marker:** `concurrencyReleased`
+
+**Admission marker:** `concurrencyCounted`
+
+- **One record, never sharded, never per period.** The organization's accepted-job count `active` (accepted jobs in any non-terminal state: `pending_dispatch`, `queued`, `running`, `synthesizing`) is a field of the single document `apiOrgConcurrency/{orgId}`. Its identity depends only on the organization: never on a calendar month, billing period, shard or application. Admission and release always address this same document, so a month or year rollover never changes the limit or the release target. **Why a dedicated document, not a field on `apiOrganizations/{orgId}`:** the organization document carries status, plan and settings that management actions write; a counter there would make every admission and every job completion contend with those writes, and would mix a high-churn operational value into a configuration record. **Why not the period document:** see the supersession note above. The monthly period documents (`ledger-and-billing.md` §2) keep only billing counters.
+- **The limit** is the plan's admission limit for accepted non-terminal jobs, read from the organization's plan at step 12; it is not stored per period. A plan change takes effect at the next admission; jobs already admitted are not evicted.
+- **Admission (atomic).** In T-create (§5A.2): read `apiOrgConcurrency/{orgId}` (absent = `active: 0`), check `active < limit` (otherwise 429 `concurrency_limit`), then in the **same commit** create the job with `concurrencyCounted: true`, `concurrencyReleased: false` and `admissionId` (= the verification ID), create the reservation ledger entry, update the period document, and write `active + 1`. A job is counted **only when this commit succeeds**; an aborted or rejected T-create writes nothing.
+- **Release (exactly once).** The count is decremented only by the **first valid non-terminal → terminal transition** of a job with `concurrencyCounted: true` and `concurrencyReleased: false`, in the **same transaction** that writes the terminal state, which also sets `concurrencyReleased: true` on the job. The transition is conditional on the job being non-terminal at commit (the job document is version-checked), so duplicate workers, retries, sweeper runs and a cancellation followed by a late worker completion cannot decrement twice. *Addendum 6:* **deletion intent never suppresses or replaces this transition.** A deletion-pending job is released by its own terminal transition (worker stop at a safe boundary, normal completion, or sweeper recovery); the deletion purges it only afterwards (§6.2), and the purged tombstone is terminal and released, so recovery and reconciliation always see an unfinished counted job.
+- **Never negative.** If the record's `active` is already 0 when a counted job's release is due, the terminal transition **still commits** (a job's outcome is never held hostage by the counter): the job records `concurrencyReleased: true` and `concurrencyReleaseAnomaly: true`, the record's `anomalies` count is incremented in the same transaction, `active` is not changed, and an audit and alert event `concurrency.release_anomaly` is emitted. The count is then corrected only by the audited repair below.
+- **Failed or incomplete release fails safe.** Because release and terminal transition share one transaction, a failure leaves **both** undone: the job stays non-terminal and counted. That holds capacity (under-admission), never frees it twice (over-admission). It is detectable (a non-terminal job past its lease or queue deadline) and recoverable for **every** non-terminal state: the sweeper (§4.4) ends `running` and `synthesizing` jobs after three expired leases (`worker_timeout`, whether or not a cancellation or a deletion is pending; *Addendum 9*), and `pending_dispatch` and `queued` jobs after the max queue wait (`expired`), each a terminal transition that releases. There is no other release path.
+- **Reconciliation never overwrites from a query.** The sweeper's reconciliation is **detection only**: it compares `active` with the number of the organization's jobs that are counted and not released (deletion-pending jobs included), and on a difference writes a `concurrency.drift_detected` audit and alert event, and **writes nothing to the record**. *Addendum 6:* the record and the job query are read **at one read time**, in one read-only transaction, so a concurrent admission or release cannot produce a spurious alert; if the snapshot cannot be validated, the detection is retried, never reported. Correction is an **audited operator repair** that runs in one transaction: read `apiOrgConcurrency/{orgId}` first, then read (a transactional query) every job of the organization with `concurrencyCounted: true` and `concurrencyReleased: false`, and set `active` to that number. Every admission and every release writes the record, so any of them committing between the repair's reads and its commit aborts the repair, which retries with fresh reads. The repair writes `concurrency.repaired` with the before and after values.
+- **Redis-class store: provider permits only** (§4.3, CR-2 pools), plus rate windows (OD-5 unchanged for those). A provider permit limits concurrent provider calls; it never decides whether a job is accepted.
+- **Throughput (Addendum 6: disclosed, not guaranteed).** Every admission **and every terminal transition** of an organization writes `apiOrgConcurrency/{orgId}`, so they all serialize on one document, together with the repair transaction, which reads and (Admin SDK transactions lock what they read) briefly locks the record and every counted job of the organization. Firestore's documentation gives **no fixed per-document write rate**: "The exact maximum rate that an app can update a single document depends highly on the workload" and "The best way to characterize your workload's performance is to perform load testing" (Firestore *Best practices*, firebase.google.com/docs/firestore/best-practices, read 2026-11-18); its distributed-counter guide states, as a sizing rule for one counter document, "Each shard can support being incremented once per second" (firebase.google.com/docs/firestore/solutions/counters, read 2026-11-18). Exact, unsharded accounting is therefore a deliberate bottleneck: an organization's sustained admissions plus completions must stay within one document's write capacity. **No capacity figure is claimed here;** it must be measured in API-3 load tests, and the per-organization create rate limit (`error-catalog.md` §3.4) is then set below it. A contention-induced failure of a terminal transition is retried by the transaction and then by the step; if it ends in `worker_timeout` or `persistence_failed`, that outcome is **platform-caused** and is never counted against the customer (`ledger-and-billing.md` §4.3, Addendum 6). Repair and detection need the composite index (`orgId`, `concurrencyCounted`, `concurrencyReleased`) on the jobs collection group (PRD §12.2, to be added in API-3).
+
+### 5B.1 Release truth table (normative; parsed by the reference-model spec)
+
+*Count before* / *Count after* are `active` of `apiOrgConcurrency/{orgId}`; every job in the table was admitted (counted). *Released before* is the job's `concurrencyReleased`.
+
+| Row | Job before | Released before | Event | Count before | Job after | Count after | Anomaly |
+|---|---|---|---|---|---|---|---|
+| E1 | queued | no | complete | 1 | completed | 0 | no |
+| E2 | running | no | worker_timeout | 1 | failed | 0 | no |
+| E3 | queued | no | expire | 1 | expired | 0 | no |
+| E4 | queued | no | cancel | 1 | canceled | 0 | no |
+| E5 | completed | yes | complete | 0 | completed | 0 | no |
+| E6 | canceled | yes | complete | 0 | canceled | 0 | no |
+| E7 | failed | yes | worker_timeout | 0 | failed | 0 | no |
+| E8 | running | no | complete | 0 | completed | 0 | yes |
+| E9 | completed | yes | delete | 0 | completed | 0 | no |
+| E10 | queued | no | delete | 1 | canceled | 0 | no |
+| E11 | running | no | delete | 1 | running | 1 | no |
+
+E5–E7 are duplicate or late terminal events (a duplicate worker, a late worker after cancellation, a sweeper after normal completion). E8 is the never-negative path. E9–E11: deletion of a terminal job changes nothing; deletion of a queued job cancels it at once, which releases it (the deletion then completes); *Addendum 6:* deletion of a running job only records the intent and requests cancellation, and the job **stays counted** until its own terminal transition (§6.2).
+
+### 5B.2 What the reference model and these tests do not prove
+
+The model runs the rules above against an in-memory store with Firestore-like transaction semantics. It does **not** prove the distributed implementation. Before any release decision, API-3 must add, at minimum:
+1. **Firestore-emulator tests** of T-create, the terminal transition and the repair transaction, with concurrent admissions under distinct keys at the limit, and real transaction retries and aborts;
+2. **failure-injection tests**: aborted commits, worker crashes between provider calls and finalize, lost queue publishes, sweeper and worker racing on the same job, a release due while `active` is 0; *Addendum 6:* the deletion lifecycle of §6.2 (deletion of running, synthesizing and queued jobs, in-flight calls, worker crashes during deletion, purge followed by late writes, blocked deletion operations);
+3. **month and year rollover tests** in the emulator with a controlled clock (admission before, release after);
+4. **isolated-environment tests** (no Production resources) of the same scenarios end to end, including the audit and alert events.
+5. *Addendum 10:* **lease-fencing and cost-recovery tests** in the emulator with failure injection: a worker paused past its lease and then resumed, racing the sweeper and a retried step, with every one of its call-record, step-output, advance and terminal commits refused; and a worker killed between dispatch and call record, with exactly one cost entry recovered.
 
 ## 6. Cancellation
 
 `POST /v1/verifications/{id}/cancel`:
 - `pending_dispatch` / `queued` → `canceled` immediately in a transaction; reservation released; outbox `verification.canceled`. A worker that later receives the message finds a terminal state and does nothing.
 - `running` / `synthesizing` → `cancelRequested = true`. The step-start check (§4.2) stops the job at the next step boundary and settles for work already done (provider work happened). State `canceled`.
-- Terminal → `409 not_cancelable`.
+- Terminal → `409 not_cancelable`. *Addendum 4:* the caller's own **deleted** verification → `410 verification_deleted`; another organization's (deleted or not) or a nonexistent ID → the identical `404 verification_not_found`.
 - Org suspension cancels all `pending_dispatch` and `queued` jobs with full release. Running jobs are stopped by the step-start check.
+- *Addendum 6:* `cancel` on a verification whose deletion was accepted (pending or completed) returns `410 verification_deleted`; deletion requests cancellation itself (§6.2).
+- *Addendum 4 (ruling D6W):* withdrawal of the D6 pipeline-processing acknowledgement, once effective, cancels the organization's `pending_dispatch` and `queued` **research** jobs with a full release (`failure.code: pipeline_processing_acknowledgement_withdrawn`). A `running` research job stops **before its next provider call**: the step-start check (§4.2) and the instrumented call site (PRD §6.5) both re-read the organization's acknowledgement, a call already in flight completes (it cannot be recalled), completed calls are settled, and the remainder of the reservation is released; the job ends `canceled` with the same failure code. Claim jobs do not use the auxiliary pipeline and are unaffected.
+
+### 6.1 Cancel truth table (Addendum 4; parsed by the reference-model spec)
+
+Caller authenticated and authorized (`verifications:write`). *Target* is relative to the caller's organization and mode. Rows C5–C8 are byte-identical except `request_id`.
+
+| Row | Target | Job state | Response | Active-job count |
+|---|---|---|---|---|
+| C1 | own | queued | 200 canceled | released |
+| C2 | own | running | 200 cancel_requested | kept until the step boundary |
+| C3 | own | completed | 409 not_cancelable | unchanged |
+| C4 | own | deleted | 410 verification_deleted | unchanged |
+| C5 | foreign | queued | 404 verification_not_found | unchanged |
+| C6 | foreign | deleted | 404 verification_not_found | unchanged |
+| C7 | nonexistent | n/a | 404 verification_not_found | unchanged |
+| C8 | malformed | n/a | 404 verification_not_found | unchanged |
+
+### 6.2 Deletion lifecycle (Addendum 6: cancellation and settlement before purge; parsed by the reference-model spec)
+
+`DELETE` answers `202` with one idempotent deletion operation; the operation is `completed` only after the job is terminal, its admission released and its content purged (`retention-and-deletion.md` §3.1). *Read while pending* is the owner's `GET` between `DELETE` and completion. *Releases* is the number of releases of the job's admission over its whole life. *Settlements* likewise.
+
+| Row | Job at DELETE | Then | Read while pending | Releases | Settlements | Deletion | Content after |
+|---|---|---|---|---|---|---|---|
+| D1 | queued | sweeper | 410 | 1 | 1 | completed | purged |
+| D2 | running | worker reaches the next step boundary | 410 | 1 | 1 | completed | purged |
+| D3 | running | in-flight provider call completes, then the boundary | 410 | 1 | 1 | completed | purged |
+| D4 | synthesizing | worker reaches the next step boundary | 410 | 1 | 1 | completed | purged |
+| D5 | running | worker crashes; leases expire; sweeper | 410 | 1 | 1 | completed | purged |
+| D6 | running | normal completion races the deletion | 410 | 1 | 1 | completed | purged |
+| D7 | completed | sweeper | 410 | 1 | 1 | completed | purged |
+| D8 | running | a second DELETE, then the boundary | 410 | 1 | 1 | completed | purged |
+| D9 | running | sweeper runs before the worker stops | 410 | 1 | 1 | completed | purged |
+| D10 | running | worker stops; purge; then a late worker write | 410 | 1 | 1 | completed | purged |
+| D11 | running | first stop attempt crashes before commit; retried | 410 | 1 | 1 | completed | purged |
+| D12 | running | worker stops responding; fewer than three leases have expired so far | 410 | 0 | 0 | pending | kept |
+
+D5 (*Addendum 9*): the job ends `failed: worker_timeout`, charged 0, with its whole reservation released, exactly as the same crash without `DELETE`; then the deletion completes (§6.3, T15). D9: the sweeper retries the operation, which stays `pending` (`awaiting_terminal`) until the worker stops. D12 (*Addendum 7:* reworded; a lease cannot stay live forever, §4.1): until the third lease expiry the operation stays observable as `pending` and is never reported complete; the job keeps its admission (capacity held, never leaked) until the sweeper's bounded recovery ends it, which is row D5. *Job at DELETE* and *Then* are bound to the spec: it selects each scenario by the exact *Then* text and checks the job's state at `DELETE` against *Job at DELETE*.
+
+### 6.3 Settlement state transitions (Addendum 9; parsed by the reference-model spec)
+
+*Owner rule (Addendum 9 §2):* a worker crash never changes a customer charge because a `DELETE` (or a `cancel`) was pending. A settlement is derived from durable state and committed work only.
+
+**Durable state.** These are the only inputs to a settlement. Each is read inside the terminal transaction:
+- the job's lifecycle state (`pending_dispatch`, `queued`, `running`, `synthesizing`, or a terminal state) and its expired-lease count;
+- the reservation `reserve_{verId}` of *R* credits, and the admission markers (§5B);
+- the job's **committed work**. A provider call is committed when its per-call record `steps/{step}/calls/{callKey}` and its internal cost entry are created in **one** transaction while the job is still non-terminal (§4.4). It is **committed usable work** when that record's status is `ok` or `substituted` (`ledger-and-billing.md` §2.4). Synthesis and retry credits count only when their output is committed in the same way;
+- once terminal: the single settlement (`settle_{verId}` or `release_{verId}`), which the purge copies to the tombstone;
+- *Addendum 10:* the lease fencing token (§4.1), which decides only **whether** a worker may commit. It is never an input to the charge.
+
+*Addendum 10:* dispatch records and cost entries are internal cost accounting (`ledger-and-billing.md` §3.1). They are never an input to a settlement.
+
+`cancelRequested` and the deletion intent are durable too. They only make the worker stop at its next safe boundary. They are **never** an input to the charge.
+
+**Atomicity.**
+1. **Call commit.** The call record and its cost entry commit together, conditional on a non-terminal job (*Addendum 10:* and on the worker's current lease token, §4.1). A crash before this commit leaves no record, no cost entry and no committed work. A result that arrives after the terminal transition is refused, and only its cost entry is recorded.
+2. **Terminal transaction.** The terminal state, the settlement (charged + released = *R*), the reservation release, the admission release (§5B), the outcome record and the outbox event commit in one transaction. It is conditional on the job being non-terminal at commit (*Addendum 10:* and, for a worker's transaction, on its current lease token, §4.1). A crash or a conflict before commit leaves everything undone. The retried transaction recomputes the settlement from fresh reads, and the first committed terminal transition wins.
+3. **Deletion.** A pending deletion completes only after the terminal transaction (§6.2). The purge never changes a settlement.
+
+**Charge rule** (`ledger-and-billing.md` §2.4–§2.5, unchanged). The charge depends only on the terminal state written and the committed usable work:
+- `failed` and `expired` are charged 0, with the whole reservation released;
+- `canceled` before execution has no committed work, so it is charged 0;
+- `completed`, `partial` and `canceled` at a safe boundary settle the committed usable work under §2.4 and release the rest.
+- *Addendum 10 (owner decision Q1):* committed usable work stays committed through a crash and is billed once, when the terminal state's tariff above bills it; uncommitted work is never billable.
+
+**Crash recovery.** The sweeper ends a job after its third expired lease as `failed: worker_timeout`, charged 0, whether or not a cancellation or a deletion is pending. A pending deletion then completes. *Addendum 10:* a worker whose lease was revoked cannot commit a competing terminal transition (§4.1, T25–T26).
+
+In the table:
+- ***Pending*** is the request recorded before the event. *any* means none, `cancel` or `DELETE`; every value listed is executed and must give the same settlement.
+- ***none yet*** means no settlement exists and the reservation is still held.
+- ***the rest*** means *R* − charged.
+- *terminal* rows start from `completed`, `partial`, `failed` and `canceled`.
+
+| Row | From | Pending | Event | To | Charged | Released |
+|---|---|---|---|---|---|---|
+| T1 | queued | none | cancel | canceled | 0 | whole reservation |
+| T2 | queued | none | DELETE | canceled | 0 | whole reservation |
+| T3 | queued | none | max queue wait, sweeper | expired | 0 | whole reservation |
+| T4 | running | none | provider result committed | running | none yet | none yet |
+| T5 | running | none | worker crashes after the provider returned, before the call record commits | running | none yet | none yet |
+| T6 | running | any | lease expires, fewer than three times | running | none yet | none yet |
+| T7 | running | none | cancel | running | none yet | none yet |
+| T8 | running | none | DELETE | running | none yet | none yet |
+| T9 | running | DELETE | DELETE again | running | none yet | none yet |
+| T10 | running | cancel or DELETE | worker stops at the next safe boundary | canceled | committed usable work | the rest |
+| T11 | synthesizing | cancel or DELETE | worker stops at the next safe boundary | canceled | committed usable work | the rest |
+| T12 | running | cancel or DELETE | the stop transaction crashes before commit, then is retried | canceled | committed usable work | the rest |
+| T13 | running | cancel or DELETE | an in-flight provider result commits while the stop transaction is open | canceled | committed usable work | the rest |
+| T14 | running | none | third lease expiry, sweeper | failed: worker_timeout | 0 | whole reservation |
+| T15 | running | cancel or DELETE | third lease expiry, sweeper | failed: worker_timeout | 0 | whole reservation |
+| T16 | synthesizing | any | third lease expiry, sweeper | failed: worker_timeout | 0 | whole reservation |
+| T17 | running | any | the sweeper's terminal transaction crashes before commit, then is retried | failed: worker_timeout | 0 | whole reservation |
+| T18 | running | cancel or DELETE | lease expires once, the retried panel step starts | canceled | committed usable work | the rest |
+| T19 | running | any | finalize, every requested section completed | completed | committed usable work | the rest |
+| T20 | running | any | finalize, a requested section failed | partial | committed usable work | the rest |
+| T21 | running | any | job failure | failed | 0 | whole reservation |
+| T22 | terminal | any | provider result arrives late | unchanged | unchanged | unchanged |
+| T23 | terminal | any | duplicate terminal event | unchanged | unchanged | unchanged |
+| T24 | terminal | none | DELETE, then the deletion completes | unchanged | unchanged | unchanged |
+| T25 | running | any | a worker whose lease was revoked commits a provider result | running | none yet | none yet |
+| T26 | running | cancel or DELETE | a worker whose lease was revoked reaches its boundary | running | none yet | none yet |
+
+**Notes on the table.**
+- **T5:** the call was not committed, so it is not billable. *Addendum 10 (owner decision Q2; supersedes "its cost entry is lost with the worker"):* its dispatch record survives the worker, and the sweeper records its estimated cost once the worker can no longer commit (`ledger-and-billing.md` §3.1). If the job continues, a resumed attempt re-issues the call, because no record exists (§4.4).
+- **T14–T17:** this is the owner rule. The same crash gives the same terminal state and the same settlement whatever is pending (Addendum 9 supersedes `canceled: deletion_requested` for this case).
+- **T18** (*Addendum 10*, owner decision Q1, which closes Addendum 9 §7 Q1): a job whose worker crashed once, mid-`panel`, after committing some calls, so that the panel step is retried with a cancellation pending. The crash does not erase the committed usable work: the retried step's start check ends the job `canceled` and settles that work under §2.4 of the ledger ("canceled during execution settles for work done"); the uncommitted work is not billable. §4.2 now says the same. `cancel` and `DELETE` give the same result.
+- **T25–T26** (*Addendum 10*, owner decision Q3, which closes Addendum 9 §7 Q3 and supersedes the earlier "Rows not covered" note): a slow worker whose lease was revoked (an expiry was recorded, or the lease was granted again) commits nothing: no call record, so no committed work, and no terminal transition, so no charge. Its provider result's cost is still recorded. The job is settled once by controlled recovery: a retried step under a new lease (T18, T19–T20) or the sweeper (T14–T17). A worker whose lease is still current when its stop commits wins as before (T10), and a revocation that commits first refuses it. The outcome is the same for `cancel` and `DELETE` (tested).
 
 ## 7. Polling
 

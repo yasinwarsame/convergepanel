@@ -53,7 +53,7 @@
 | T | Body `orgId` / `application_id` tampering; idempotency key collision across orgs, applications or test/live mode | All paths built from the authenticated key; idempotency scoped to `(orgId, appId, mode, key)` | T-D2 tampered fields ignored; same key in test and live creates two independent jobs |
 | R | Customer denies having created a job | Request log (`logger`) with key prefix, request ID; ledger reserve entry | T-D3 reserve entry exists per accepted job |
 | I | Org A reads Org B's result; enumeration via 403/404; inputs in logs; full model text leak | Path-scoped queries; foreign IDs 404; `redact` in `lib/logger.ts`; OD-19 four-condition gate | T-D4 isolation matrix (every endpoint × key × ID); T-D5 full text absent unless all four conditions |
-| D | Create flood; huge inputs; polling storms | Per-key rate (Redis-class, OD-5), per-org concurrency and queue depth, body ≤ 64 KB, input caps, separate read limits | T-D6 limits at boundary values |
+| D | Create flood; huge inputs; polling storms | Per-key rate (Redis-class, OD-5), per-org concurrency and queue depth (exact, Firestore-transactional, Addendum 4), body ≤ 512 KiB (524,288 bytes, Addendum 3), input caps, pre-authentication flood limit per source address, separate read and list limits (`error-catalog.md` §3.4) | T-D6 limits at boundary values |
 | E | Scope bypass (read key creates jobs; non-`model_responses:read` key gets text) | Scope guard before any handler logic | T-D7 mutation test on scope guard |
 
 ### 3.3 Worker (queue consumer — new)
@@ -141,6 +141,8 @@ Each obligation becomes a named test in the stage shown and must be proven to fa
 | Stage | Obligations |
 |---|---|
 | API-1 | T-M1..T-M6, T-D1, T-D7 (scopes), T-L1 (rules), T-X1 |
+| API-3 (list, Addendum 1 §3) | **T-X2:** cross-org and sibling-app `application_id` give a byte-identical empty page (same timing class as a nonexistent ID); test keys never list live verifications and live keys never list test ones; cursor tamper, expiry (24 h) and replay under another org, app scope, mode or filter set → `400 invalid_cursor`; summaries contain no input or model text; stable pagination under concurrent creates |
+| API-3 (D6, Addendum 1 §5) | **T-G1:** research create without a current acknowledgement → `403 pipeline_processing_not_acknowledged` with nothing written and no provider call; withdrawal re-checked at every step start (cancel before panel; no further Gemini call after it) |
 | API-2 | T-L2..T-L6 |
 | API-3 | T-D2..T-D6, T-W1..T-W5, T-P2, T-P3, T-P4, T-C1 (web-capacity protection gate); PR A default-hook call-sequence equivalence; PR B web spy equivalence |
 | API-4 | T-D5 (OD-19 matrix), T-P1, CR-1 schema rejection tests, injection corpus |

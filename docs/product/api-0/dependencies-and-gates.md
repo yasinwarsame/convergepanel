@@ -6,8 +6,8 @@
 
 | ID | Dependency | Needed by | Owner / source | Status |
 |---|---|---|---|---|
-| DEP-1 | Current queue stable: report-review activation safeguards (Orders A/B), authenticated Production acceptance of recent research PRs, C1–C3 project reviewer items | API-1 | Owner (PRD §0) | Open |
-| DEP-2 | **Order 6 boundary change** approved so new secrets can be read through `lib/env.ts` (byte-pinned by Order 6 suites): `API_KEY_PEPPER` (+ `_PREVIOUS`), Redis-class store credentials, queue credentials, API Stripe webhook secret, KMS fallback key if needed | API-1 (pepper), API-2, API-3, API-5 | Owner (OD-21; OQ-1) | Open |
+| DEP-1 | Current queue stable: report-review activation safeguards (Orders A/B), authenticated Production acceptance of recent research PRs, C1–C3 project reviewer items | API-1 | Owner (PRD §0) | **Superseded** by Addendum 1 D2 (2026-11-17): API work no longer waits for this queue |
+| DEP-2 | **Order 6 boundary change** approved so new secrets can be read through `lib/env.ts` (byte-pinned by Order 6 suites): `API_KEY_PEPPER` (+ `_PREVIOUS`), Redis-class store credentials, queue credentials, API Stripe webhook secret, KMS fallback key if needed | API-1 (pepper), API-2, API-3, API-5 | Owner (OD-21; OQ-1) | **Narrowed** by Addendum 1 D3/OQ-1: secret-only boundary, design `secret-boundary.md` (no `lib/env.ts` change in the recommended design); merge by separate decision |
 | DEP-3 | Dedicated host `api.convergepanel.com` (DNS, TLS, attachment method decided in API-1 design) | API-1 | Owner (OD-4) | Ruled, not provisioned |
 | DEP-4 | Redis-class store vendor selected and provisioned (separately authorized) | API-1 (rate limits), API-3 (pools) | Owner (OD-5) | Ruled, not selected |
 | DEP-5 | Managed durable queue confirmed available on the account/plan; else Google Cloud Tasks | API-3 | Owner (OD-3) | Ruled, not confirmed |
@@ -21,7 +21,7 @@
 | DEP-13 | Secret-scanning registration for `cpk_` | API-7 | Owner (OD-17) | Not started |
 | DEP-14 | Metrics backend decision from pilot load | API-7 | Owner (OD-18) | Deferred by ruling |
 | DEP-15 | **Model-selection independence (owner-recorded dependency A, 2026-11-03).** Research classification (`classifyQuery`) and the other auxiliary pipeline calls send the question to Gemini whatever models the customer selected (threat model R7). This must be **corrected** (an auxiliary provider that respects the selection) **or deliberately constrained** (no such claim is made, and Gemini is disclosed as a pipeline provider for every research job, per DEP-10) before the API, its documentation or its sales material claims that a customer's model selection controls which providers receive their content. API-0 does **not** change Gemini routing | Any external claim of model-selection independence; API-6 at the latest | Owner (separate decision; it changes the shared web pipeline) | Open |
-| DEP-16 | **Secret-management design (owner-recorded dependency B, 2026-11-03).** API-1 secrets (DEP-2) must respect the frozen Order 6 environment boundary. They need a **separately approved configuration design** that names each secret, where it is read, and how the Order 6 evidence is re-baselined. API-0 does **not** change `lib/env.ts`, and no secret is created before that approval | API-1 | Owner (OD-21; OQ-1) | Open |
+| DEP-16 | **Secret-management design (owner-recorded dependency B, 2026-11-03).** API-1 secrets (DEP-2) must respect the frozen Order 6 environment boundary. They need a **separately approved configuration design** that names each secret, where it is read, and how the Order 6 evidence is re-baselined. API-0 does **not** change `lib/env.ts`, and no secret is created before that approval | API-1 | Owner (OD-21; OQ-1) | **Design approved** (`secret-boundary.md`, Addendum 1 D3 and §1.1 SB). Implementation merges only by a separate owner decision, through its own release gate; no secret is created by that approval |
 
 ## 2. Web-capacity protection gate (CR-2)
 
@@ -90,3 +90,40 @@
 | OQ-3 | Maximum retention for class (c) billing records and class (d) evidence (7-year placeholders) | Customer terms, DPA | Counsel to confirm before API-6 |
 | OQ-4 | Is `retain_input` (keeping raw input with results) offered in the pilot, or held back until terms are reviewed? | Data minimization vs customer convenience | Offer, default off, org may forbid |
 | OQ-5 | Default `api_share` of provider capacity and web SLO thresholds | CR-2 sizing | Set from DEP-9 baseline; start conservative (≤ 40 %) |
+
+## 5. Addendum 1 amendments (owner, 2026-11-17)
+
+Source: `owner-decision-addendum-1.md`. Sections 1–4 above are the 2026-11-03 record and stay as written; this section states what now applies. It changes gates explicitly (owner adjustment 4); it does not skip them.
+
+### 5.1 Dependency changes
+| ID | Change |
+|---|---|
+| DEP-1 | Superseded (D2). |
+| DEP-2, DEP-16 | Narrowed to a secret-only boundary (D3, OQ-1); `secret-boundary.md`. |
+| DEP-3 (API host) | Needed for the **external** beta, not for API-1. The internal dark canary uses no public host. |
+| DEP-4 (Redis-class store) | Needed by API-3 (provider pools and rate windows; *Addendum 5:* job-admission concurrency is Firestore-transactional and does not need it). API-1/API-2β may use the existing fail-closed Firestore limiter at beta volumes. Vendor needs Phase 1D-D evidence and owner approval (D5). If the Firestore limiter is used, API identifiers live in a separate `api_rate_limits` collection (never the web `rate_limits` documents), so API traffic cannot contend with web limiter documents (CR-2). |
+| DEP-5 (queue) | Needed by API-3. Phase 1D-C evidence and owner approval (D5). Vercel Queues is approved for an isolated feasibility evaluation only (Addendum 1 §1.1 Q); the same-message-ID re-dispatch defect (`jobs-and-idempotency.md` §2 step 4) is resolved before API-3. |
+| DEP-6 (Stripe API products) | Deferred to API-2S, after the beta. |
+| DEP-7 (KMS) | Deferred to API-5W, after the beta. |
+| DEP-10, DEP-11 | External-beta blockers (B-6, B-7); review starts now (D7). |
+| DEP-12 | Isolated Firebase environment E1–E7 (D8): a parallel priority, required before API-3 load and isolation suites. |
+| DEP-15 | Controlled by Addendum 1 §5 (disclose, acknowledge per org, fail closed). |
+| DEP-17 (new) | Issue #321 (Layer B build-artifact check inside Vercel builds) merged before broader Preview testing of API branches (D8). |
+
+### 5.2 Stage gate changes
+| Stage | Was | Now |
+|---|---|---|
+| API-1 | Entry: DEP-1..DEP-4 | Entry: Addendum 1 independently reviewed CLEAN; secret boundary approved before any secret-dependent path runs (verifier takes the pepper by injection until then); emulator/isolated resources for integration tests; no Production flow change; no exposed host or live credential. Exit unchanged, except "live in Production dark" happens only by a separate release decision. |
+| API-2 → **API-2β** | Stripe products, org customer, separate webhook, ledger | **API-2β:** ledger, reservations, settlement, release, internal cost ledger, hard caps, spend ceiling, failed-job thresholds, suspension, reconciliation, ledger-derived invoice export, compile-time beta plans. No Stripe object. Exit: Phase 1D-F ledger acceptance plan green; reconciliation zero drift in the isolated environment. |
+| **API-2S** (new, post-beta) | — | The original API-2 Stripe scope (DEP-6, OD-7). Entry: beta running; consumer end-to-end signed-webhook reconciliation proven. |
+| API-3 | Entry: API-2 released | Entry: **API-2β** released; **DEP-4 (D5-approved Redis-class store)**, DEP-5, DEP-8, DEP-12; DEP-17 for Preview tests; **the replacement-dispatch fix (no job stuck behind a suppressed duplicate dispatch) proven, and an authenticated scheduler boundary (`CRON_SECRET` decision or managed queue/scheduler identity, no unauthenticated sweeper route) approved** (Addendum 1 §1.1 Q, S). Scope adds `GET /v1/verifications` (list) and `DELETE` in the beta. **Live provider execution of any job type (claim or research), including any Production canary,** additionally requires the web-capacity gate WG-1..WG-7 **and** Addendum 1 B-11 (OQ-2 provider capacity/contract/rate-limit evaluation; OQ-5 measured `api_share` ≤ 40 %). Until then, jobs run only in sandbox (fixtures, $0 provider spend). The **synthesis extraction** (`executeSynthesis`) moves out of API-3 to API-5S (post-beta). |
+| API-4 → **API-4β** | Full projection incl. synthesis and opt-in full text | Projection without synthesis and without full model text (both `422`/`not_requested` in the beta). All availability states, CR-1 fields and parity tests are still required. |
+| API-5 → **API-5β** | Webhooks, KMS, SDKs, docs | **API-5β:** published OpenAPI, docs (methodology, consensus vs verification, Gemini disclosure), HTTP examples, quickstart. Webhooks → **API-5W**, SDKs → **API-5S** (post-beta). |
+| API-6 → **API-6β** | Entry: API-5, DEP-10, DEP-11 | **API-6β (controlled beta):** entry = Addendum 1 §6 B-1..B-14. Its ≥ 30-day evidence (zero isolation defects, ≥ 99 % terminal, unit costs measured, no web SLO breach) is the **Production v1 entry gate**. |
+| API-7 | Entry: API-6 exit | Entry: API-6β evidence; API-2S, API-5W, API-5S released; DEP-13, DEP-14. |
+
+### 5.3 API-0 exit gates (README) after Addendum 1
+- G0-5 (open questions): **satisfied** by Addendum 1 §7 (answered or explicitly deferred).
+- G0-6 (provider-terms plan): **satisfied as a plan** by D7 (review starts now; Phase 1D-B counsel brief). Confirmation itself is beta gate B-6.
+- G0-2 (independent design review CLEAN) must be re-established **for the amended package** before API-1 starts (Phase 1A).
+
