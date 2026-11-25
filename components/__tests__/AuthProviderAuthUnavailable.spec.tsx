@@ -167,8 +167,13 @@ describe("#332 R7 — temporary Auth outage: no destructive sign-out, protected 
     expect(probe.syncState).toBe("session_unavailable");
     expect(mockSignOut).not.toHaveBeenCalled();
 
-    // The next token refresh is a fresh, ordinary attempt, and it recovers.
+    // R8 (owner ruling): a routine same-uid callback after exhaustion does NOT restart the episode.
     postAnswers = [];
+    await emit(userA);
+    expect(posts()).toBe(1 + SESSION_UNAVAILABLE_RETRY_DELAYS_MS.length);
+    expect(probe.syncState).toBe("session_unavailable");
+    // An explicit sign-out and a new sign-in is a genuine new episode, and it recovers.
+    await emit(null);
     await emit(userA);
     expect(probe.syncState).toBe("authenticated");
   });

@@ -62,7 +62,7 @@ describe("establishServerSession", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "stale-previous-user" }));
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: false })); // the DELETE clearServerSession issues
     const outcome = await establishServerSession(mockUser("fresh-current-user"));
-    expect(outcome).toEqual({ ok: false, reason: "uid_mismatch" });
+    expect(outcome).toEqual({ ok: false, reason: "uid_mismatch", serverSessionCleared: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "DELETE" });
   });
@@ -87,17 +87,20 @@ describe("establishServerSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("returns network_error when the initial POST itself throws (no DELETE cleanup attempted — there is nothing to have half-established)", async () => {
-    fetchMock.mockRejectedValueOnce(new Error("network down"));
+  it("#332 R8 (Correction C): an unclassified throw from the POST is network_error AND still attempts the fail-closed DELETE (it used to return first)", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down")); // not a TypeError: not classified as a temporary outage
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: false }));
     const outcome = await establishServerSession(mockUser("user-1"));
-    expect(outcome).toEqual({ ok: false, reason: "network_error" });
+    expect(outcome).toEqual({ ok: false, reason: "network_error", serverSessionCleared: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "DELETE" });
   });
 
   it("returns server_error and clears the session on a non-2xx, non-401 response", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(500, { error: "boom" }));
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: false }));
     const outcome = await establishServerSession(mockUser("user-1"));
-    expect(outcome).toEqual({ ok: false, reason: "server_error" });
+    expect(outcome).toEqual({ ok: false, reason: "server_error", serverSessionCleared: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -105,7 +108,7 @@ describe("establishServerSession", () => {
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ nonsense: true }) } as Response);
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: false }));
     const outcome = await establishServerSession(mockUser("user-1"));
-    expect(outcome).toEqual({ ok: false, reason: "invalid_response" });
+    expect(outcome).toEqual({ ok: false, reason: "invalid_response", serverSessionCleared: true });
   });
 
   it("returns invalid_response and clears the session when JSON parsing throws", async () => {
@@ -118,7 +121,7 @@ describe("establishServerSession", () => {
     } as unknown as Response);
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: false }));
     const outcome = await establishServerSession(mockUser("user-1"));
-    expect(outcome).toEqual({ ok: false, reason: "invalid_response" });
+    expect(outcome).toEqual({ ok: false, reason: "invalid_response", serverSessionCleared: true });
   });
 });
 
