@@ -30,7 +30,14 @@ export type SessionSyncState =
   | "syncing_session"
   | "authenticated"
   | "signing_out"
-  | "session_error";
+  | "session_error"
+  /**
+   * #332 R7 (owner decision 2026-11-25): the server could not VERIFY the identity because Firebase Auth was temporarily
+   * unavailable (the session mint answered 503 `code: "auth_unavailable"`). This is not a verdict on the credential, so
+   * the client is NOT signed out and local data is NOT cleared. It is still never mutable: there is no server session,
+   * so protected operations fail closed until a bounded retry (or the next token refresh) verifies the identity.
+   */
+  | "session_unavailable";
 
 export type SessionSyncEvent =
   /** A login/signup submission has been dispatched to Firebase but not yet resolved — UI-level intent, not a Firebase callback. */
@@ -49,6 +56,10 @@ export type SessionSyncEvent =
   | { type: "token_refresh_started" }
   | { type: "token_refresh_succeeded" }
   | { type: "token_refresh_failed" }
+  /** #332 R7: the sync call (new identity OR same-uid refresh) answered `auth_unavailable`: verification could not run. */
+  | { type: "session_sync_unavailable" }
+  /** #332 R7: a bounded retry of the sync for the SAME client identity has started from `session_unavailable`. */
+  | { type: "session_retry_started" }
   /** Explicit, user-initiated logout has begun (before Firebase sign-out or the DELETE call has resolved). */
   | { type: "logout_started" }
   /** Both the server session was cleared and the Firebase client was signed out. */
@@ -66,6 +77,7 @@ export const NON_MUTABLE_SYNC_STATES: ReadonlySet<SessionSyncState> = new Set<Se
   "syncing_session",
   "signing_out",
   "session_error",
+  "session_unavailable",
 ]);
 
 export function canPerformProtectedMutation(state: SessionSyncState): boolean {
@@ -121,6 +133,14 @@ export function nextSessionSyncState(current: SessionSyncState, event: SessionSy
       // A failed refresh does NOT retain the previous authenticated state —
       // the server session may now be stale relative to the client's token.
       return "session_error";
+
+    case "session_sync_unavailable":
+      // Only from an in-flight sync or refresh. Anything else is an out-of-order event and fails closed as before.
+      return current === "syncing_session" || current === "authenticated" ? "session_unavailable" : "session_error";
+
+    case "session_retry_started":
+      // A retry re-enters the ordinary sync path, so ONLY session_sync_succeeded can reach `authenticated`.
+      return current === "session_unavailable" ? "syncing_session" : "session_error";
 
     case "logout_started":
       return "signing_out";

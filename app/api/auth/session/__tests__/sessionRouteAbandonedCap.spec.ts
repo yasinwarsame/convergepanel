@@ -61,7 +61,7 @@ it("logins whose verification hangs are abandoned (counted); at the cap the next
   const refusedBefore = authVerificationRefusalsTotal();
   const res = await post();
   expect(res.status).toBe(503);
-  expect(await res.json()).toEqual({ error: "Authentication service unavailable" });
+  expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
   expect(res.headers.get("set-cookie")).toBeNull();
   expect(mockVerifyIdToken).not.toHaveBeenCalled();
   expect(mockCreateSessionCookie).not.toHaveBeenCalled();

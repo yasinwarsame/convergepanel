@@ -226,6 +226,10 @@ export default function SignupPage() {
       clearPendingSignup();
       setLoading(false);
       setError("Account created, but sign-in could not be completed. Please sign in.");
+    } else if (syncState === "session_unavailable") {
+      // #332 R7: see app/login/page.tsx. The account exists; only the sign-in verification is temporarily unavailable.
+      setLoading(false);
+      setError("Account created. The sign-in service is temporarily unavailable. We'll keep trying. You can also sign in again in a moment.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSignupUid, syncState, authedUser, router]);

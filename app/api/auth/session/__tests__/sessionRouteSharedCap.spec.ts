@@ -113,7 +113,7 @@ async function attempt(path: Path): Promise<"refused" | "admitted"> {
   if (path === "mint") {
     const res = await mint();
     if (res.status === 503) {
-      expect(await res.json()).toEqual({ error: "Authentication service unavailable" });
+      expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
       expect(res.headers.get("set-cookie")).toBeNull();
       expect(firebaseCalls()).toBe(before);
       return "refused";
@@ -190,7 +190,7 @@ describe("X7 — the mint's second Firebase call (createSessionCookie) is counte
     const res = await mint();
     expect(filled).toBe(true);
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: "Authentication service unavailable" });
+    expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
     expect(res.headers.get("set-cookie")).toBeNull();
     expect(mockCreateSessionCookie).not.toHaveBeenCalled();
     expect(authVerificationsInFlight()).toBe(CAP);

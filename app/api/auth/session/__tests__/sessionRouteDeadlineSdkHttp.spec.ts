@@ -147,7 +147,7 @@ it("accounts:lookup HANGS → 503 at ~10 s (not ~132 s), no Set-Cookie, createSe
   mockState.lookup = "hang";
   const { value: res, ms } = await timed(() => post("hang-user"));
   expect(res.status).toBe(503);
-  expect(await res.json()).toEqual({ error: "Authentication service unavailable" });
+  expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
   expect(res.headers.get("set-cookie")).toBeNull();
   expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
@@ -174,7 +174,7 @@ it(":createSessionCookie HANGS after a fast verification → 503 at ~10 s end-to
   mockState.create = "hang";
   const { value: res, ms } = await timed(() => post("create-hang-user"));
   expect(res.status).toBe(503);
-  expect(await res.json()).toEqual({ error: "Authentication service unavailable" });
+  expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
   expect(res.headers.get("set-cookie")).toBeNull();
   expect(hitsOf("create-hang-user")).toEqual({ lookup: 1, create: 1 });
   expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);

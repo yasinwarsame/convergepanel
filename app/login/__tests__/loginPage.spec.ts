@@ -115,3 +115,21 @@ describe("Login page — source-level wiring guarantees", () => {
     });
   });
 });
+
+describe("#332 R7 — temporary sign-in service outage (session_unavailable)", () => {
+  const branch = (() => {
+    const i = source.indexOf('syncState === "session_unavailable"');
+    return i < 0 ? "" : source.slice(i, source.indexOf("}", i));
+  })();
+  it("handles session_unavailable separately from session_error, with an accurate retryable message", () => {
+    expect(branch).not.toBe("");
+    expect(branch).toMatch(/temporarily unavailable/);
+    expect(branch).toMatch(/setLoading\(false\)/);
+    const message = /setError\("([^"]*)"\)/.exec(branch)?.[1] ?? "";
+    expect(message).toMatch(/temporarily unavailable/);
+    expect(message).not.toMatch(/password|incorrect|invalid/i); // never presented as a credential failure
+  });
+  it("keeps the pending redirect armed so AuthProvider's bounded retry can still complete it", () => {
+    expect(branch).not.toMatch(/clearPendingLogin\(/);
+  });
+});

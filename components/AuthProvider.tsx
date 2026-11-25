@@ -90,6 +90,15 @@ interface AuthContextType {
 
 const noop = () => {};
 
+/**
+ * #332 R7 (owner decision 2026-11-25): delays for the bounded re-sync after the session mint answers
+ * `auth_unavailable` (Firebase Auth could not verify the identity). There are at most 3 retries per identity callback,
+ * each one ordinary mint call under the server's own deadline and in-flight cap. If all fail, the client stays in
+ * `session_unavailable` (signed in, not mutable) until the next token refresh or a reload, and is never signed out by
+ * the outage alone.
+ */
+export const SESSION_UNAVAILABLE_RETRY_DELAYS_MS: readonly number[] = [5_000, 15_000, 45_000];
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
@@ -136,6 +145,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // before the fail-closed signOut). "Was someone signed in?" for the
     // sign-out cleanup must not depend on whether their sync succeeded.
     const lastIdentityRef = { current: null as string | null };
+    // #332 R7: the one pending auth_unavailable retry timer. A newer identity callback or unmount cancels it.
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const cancelRetry = () => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
 
     const timeoutId = setTimeout(() => {
       if (!resolved && isMounted) {
@@ -162,6 +179,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (!isMounted) return;
 
       const myGeneration = generationGuard.next();
+      cancelRetry();
 
       if (!authReadySet) {
         setAuthReady(true);
@@ -237,41 +255,74 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const outcome = await establishServerSession(nextUser, { generation: myGeneration });
+      await settleOutcome(outcome, isNewIdentity, 0);
 
-      if (!generationGuard.isCurrent(myGeneration)) {
-        // A newer callback (another refresh, a switch, a logout) has already
-        // started since this one began — its own processing owns state now.
-        logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
-        return;
-      }
-
-      if (outcome.ok) {
-        prevUidRef.current = outcome.uid;
-        dispatchSync({ type: isNewIdentity ? "session_sync_succeeded" : "token_refresh_succeeded" });
-
-        // Admin claim check — only meaningful once the server agrees this is
-        // the current identity. Non-blocking for isMounted races: guarded by
-        // the SAME generation check above before this point.
-        try {
-          const tokenResult = await getIdTokenResult(nextUser);
-          if (isMounted && generationGuard.isCurrent(myGeneration)) {
-            setIsAdmin(tokenResult.claims.admin === true);
-            setAdminResolved(true);
-          }
-        } catch {
-          if (isMounted && generationGuard.isCurrent(myGeneration)) {
-            setIsAdmin(false);
-            setAdminResolved(true);
-          }
+      async function settleOutcome(
+        result: Awaited<ReturnType<typeof establishServerSession>>,
+        newIdentity: boolean,
+        retriesUsed: number
+      ): Promise<void> {
+        if (!isMounted || !generationGuard.isCurrent(myGeneration)) {
+          // A newer callback (another refresh, a switch, a logout) has already
+          // started since this one began — its own processing owns state now.
+          logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
+          return;
         }
-      } else {
+
+        if (result.ok) {
+          prevUidRef.current = result.uid;
+          dispatchSync({ type: newIdentity ? "session_sync_succeeded" : "token_refresh_succeeded" });
+
+          // Admin claim check — only meaningful once the server agrees this is
+          // the current identity. Non-blocking for isMounted races: guarded by
+          // the SAME generation check above before this point.
+          try {
+            const tokenResult = await getIdTokenResult(nextUser!);
+            if (isMounted && generationGuard.isCurrent(myGeneration)) {
+              setIsAdmin(tokenResult.claims.admin === true);
+              setAdminResolved(true);
+            }
+          } catch {
+            if (isMounted && generationGuard.isCurrent(myGeneration)) {
+              setIsAdmin(false);
+              setAdminResolved(true);
+            }
+          }
+          return;
+        }
+
+        if (result.reason === "auth_unavailable") {
+          // #332 R7: Firebase Auth could not VERIFY the identity. That is not a
+          // verdict that it is revoked or invalid. `establishServerSession` has
+          // already cleared the server cookie, so nothing is authorized (fail
+          // closed: `session_unavailable` is never mutable). But the client is
+          // NOT signed out, so the sign-out cleanup (history cache, unsubmitted
+          // /verify input, analytics reset) does not run because of an outage.
+          // prevUidRef stays unconfirmed: the next callback re-syncs as a new
+          // identity, and a revoked credential then gets the ordinary 401 → sign-out.
+          prevUidRef.current = null;
+          dispatchSync({ type: "session_sync_unavailable" });
+          setIsAdmin(false);
+          setAdminResolved(true);
+          if (retriesUsed >= SESSION_UNAVAILABLE_RETRY_DELAYS_MS.length) return; // bounded: wait for the next refresh/reload
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (!isMounted || !generationGuard.isCurrent(myGeneration)) return;
+            dispatchSync({ type: "session_retry_started" });
+            void establishServerSession(nextUser!, { generation: myGeneration }).then((retried) =>
+              settleOutcome(retried, true, retriesUsed + 1)
+            );
+          }, SESSION_UNAVAILABLE_RETRY_DELAYS_MS[retriesUsed]);
+          return;
+        }
+
         // Fail closed: `establishServerSession` already cleared the server
         // cookie. The previous identity must never be retained on the
         // client either, so sign Firebase out too — this itself fires
         // another onIdTokenChanged(null) callback that completes the
         // transition to `signed_out`.
         prevUidRef.current = null;
-        dispatchSync({ type: isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
+        dispatchSync({ type: newIdentity ? "session_sync_failed" : "token_refresh_failed" });
         setIsAdmin(false);
         setAdminResolved(true);
         try {
@@ -286,6 +337,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     return () => {
       isMounted = false;
+      cancelRetry();
       clearTimeout(timeoutId);
       unsubscribe();
     };

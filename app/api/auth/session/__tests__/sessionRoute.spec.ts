@@ -163,7 +163,7 @@ describe("POST /api/auth/session", () => {
         const res = await POST(postRequest({ idToken: "t" }));
         expect(res.status).toBe(503);
         const body = await res.json();
-        expect(body).toEqual({ error: "Authentication service unavailable" });
+        expect(body).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
         expect(JSON.stringify(body)).not.toMatch(/upstream detail/);
         expectNoCookie(res);
         expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });

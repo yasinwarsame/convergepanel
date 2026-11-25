@@ -12,6 +12,7 @@ const ALL_STATES: SessionSyncState[] = [
   "authenticated",
   "signing_out",
   "session_error",
+  "session_unavailable",
 ];
 
 describe("nextSessionSyncState", () => {
@@ -85,6 +86,25 @@ describe("nextSessionSyncState", () => {
     for (const state of ALL_STATES.filter((s) => s !== "session_error")) {
       expect(nextSessionSyncState(state, { type: "error_acknowledged" })).toBe(state);
     }
+  });
+
+  it("#332 R7: session_sync_unavailable reaches session_unavailable ONLY from an in-flight sync or refresh; otherwise fails closed", () => {
+    expect(nextSessionSyncState("syncing_session", { type: "session_sync_unavailable" })).toBe("session_unavailable");
+    expect(nextSessionSyncState("authenticated", { type: "session_sync_unavailable" })).toBe("session_unavailable");
+    for (const state of ALL_STATES.filter((s) => s !== "syncing_session" && s !== "authenticated")) {
+      expect(nextSessionSyncState(state, { type: "session_sync_unavailable" })).toBe("session_error");
+    }
+  });
+
+  it("#332 R7: session_retry_started re-enters syncing_session ONLY from session_unavailable; only session_sync_succeeded then authenticates", () => {
+    expect(nextSessionSyncState("session_unavailable", { type: "session_retry_started" })).toBe("syncing_session");
+    for (const state of ALL_STATES.filter((s) => s !== "session_unavailable")) {
+      expect(nextSessionSyncState(state, { type: "session_retry_started" })).toBe("session_error");
+    }
+    // No shortcut from unavailable straight to authenticated.
+    expect(nextSessionSyncState("session_unavailable", { type: "session_sync_succeeded" })).toBe("session_error");
+    expect(nextSessionSyncState("session_unavailable", { type: "token_refresh_succeeded" })).toBe("session_error");
+    expect(canPerformProtectedMutation("session_unavailable")).toBe(false);
   });
 
   it("an unrecognized event type fails closed to session_error", () => {

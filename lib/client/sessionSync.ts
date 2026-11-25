@@ -26,7 +26,24 @@ export interface MinimalAuthUser {
 
 export type SessionSyncOutcome =
   | { ok: true; uid: string }
-  | { ok: false; reason: "network_error" | "server_error" | "invalid_response" | "uid_mismatch" };
+  | { ok: false; reason: "network_error" | "server_error" | "invalid_response" | "uid_mismatch" | "auth_unavailable" };
+
+/**
+ * #332 R7: the session mint's retryable "verification could not run" contract (app/api/auth/session/route.ts
+ * `authUnavailableResponse`). It is recognized ONLY when the status is 503 AND the JSON body carries exactly this code,
+ * so a 401 verdict, a 500, or any other 503 (for example a proxy page) still fails closed as an ordinary server error.
+ */
+export const SESSION_AUTH_UNAVAILABLE_CODE = "auth_unavailable";
+
+async function isAuthUnavailable(res: Response): Promise<boolean> {
+  if (res.status !== 503) return false;
+  try {
+    const body: unknown = await res.json();
+    return typeof body === "object" && body !== null && (body as { code?: unknown }).code === SESSION_AUTH_UNAVAILABLE_CODE;
+  } catch {
+    return false;
+  }
+}
 
 interface SessionSyncOptions {
   /** Non-sensitive operation-generation number (see `authGeneration.ts`), logged only for correlating client/server telemetry — never an identity value. */
@@ -84,9 +101,18 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
   }
 
   if (!res.ok) {
-    logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: `http_${res.status}`, operationGeneration: options.generation });
+    const unavailable = await isAuthUnavailable(res);
+    logAuthSessionClientEvent("session_sync_failed", {
+      route: SESSION_ENDPOINT,
+      failureCategory: unavailable ? "auth_unavailable" : `http_${res.status}`,
+      operationGeneration: options.generation,
+    });
+    // Fail closed either way: no cookie may outlive a sync that did not verify the CURRENT identity. That covers an
+    // account switch whose previous user's cookie must never keep authorizing. Only the CALLER's reaction differs:
+    // "auth_unavailable" is not a credential verdict, so AuthProvider keeps the client signed in (no data cleared) and
+    // retries within its bound.
     await clearServerSession();
-    return { ok: false, reason: "server_error" };
+    return { ok: false, reason: unavailable ? "auth_unavailable" : "server_error" };
   }
 
   let body: unknown;

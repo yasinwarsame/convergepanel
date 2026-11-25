@@ -8,7 +8,7 @@
  * SECOND upstream call, `createSessionCookie` (Identity Toolkit
  * `:createSessionCookie`), so the ONE deadline covers both. Contract:
  *   - still pending at 10 s (either call) → the route's existing 503
- *     `{ error: "Authentication service unavailable" }`, no Set-Cookie;
+ *     `{ error: "Authentication service unavailable", code: "auth_unavailable" }`, no Set-Cookie;
  *   - a verification that answers VALID after the deadline never reaches
  *     createSessionCookie, and a cookie created late is never set;
  *   - no verification cache: a token that verified once is verified again.
@@ -39,7 +39,7 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/auth/session/route";
 
 const DEADLINE = 10_000;
-const UNAVAILABLE_BODY = { error: "Authentication service unavailable" };
+const UNAVAILABLE_BODY = { error: "Authentication service unavailable", code: "auth_unavailable" };
 
 const post = (idToken = "id-token-T") =>
   POST(

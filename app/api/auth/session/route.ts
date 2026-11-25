@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
         // tell the client its token is bad.
         logger.error("[auth-session] POST failed: identity verification unavailable", { errorCode: code });
         logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
-        return noStore(NextResponse.json({ error: "Authentication service unavailable" }, { status: 503 }));
+        return authUnavailableResponse();
       }
       // Disabled and revoked are deliberately indistinguishable from an invalid
       // token in the response body (no account-state disclosure); the category
@@ -147,7 +147,16 @@ export async function POST(request: NextRequest) {
     }
     if (created.kind === "rejected") {
       // Code only: a provider error message may echo request content (the ID token); never log it.
-      logger.error("[auth-session] POST failed: session cookie creation threw", { errorCode: errorCodeOf(created.error) });
+      const createCode = errorCodeOf(created.error);
+      if (TRANSIENT_VERIFY_CODES.has(createCode)) {
+        // #332 R7: the same "service could not run" codes as the verifier above. The identity was verified, but no
+        // cookie could be created, so fail closed with the same retryable 503 (no cookie set). The client must not
+        // treat this as a bad credential.
+        logger.error("[auth-session] POST failed: session cookie creation unavailable", { errorCode: createCode });
+        logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
+        return authUnavailableResponse();
+      }
+      logger.error("[auth-session] POST failed: session cookie creation threw", { errorCode: createCode });
       logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "cookie_creation_failed" });
       return noStore(NextResponse.json({ error: "Failed to create session" }, { status: 500 }));
     }
@@ -166,7 +175,21 @@ export async function POST(request: NextRequest) {
 function verificationUnavailable(step: string, cause: Exclude<VerificationOutcome<unknown>["kind"], "fulfilled" | "rejected">): NextResponse {
   logger.error(`[auth-session] POST failed: ${step}`, { cause });
   logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
-  return noStore(NextResponse.json({ error: "Authentication service unavailable" }, { status: 503 }));
+  return authUnavailableResponse();
+}
+
+/**
+ * #332 R7: the single retryable "verification could not run" answer: HTTP 503 plus the machine-readable
+ * `code: "auth_unavailable"` (the same code that getRequestUid / reportReviewCaller answer). The client
+ * (`lib/client/sessionSync.ts`) requires BOTH the status and this code before it treats a failure as temporary, so no
+ * other failure (a 401 credential verdict, a 500, a proxy 503 without this body) can avoid the fail-closed sign-out.
+ * No cookie is set. The body says nothing about the account.
+ */
+const SESSION_AUTH_UNAVAILABLE_CODE = "auth_unavailable";
+function authUnavailableResponse(): NextResponse {
+  return noStore(
+    NextResponse.json({ error: "Authentication service unavailable", code: SESSION_AUTH_UNAVAILABLE_CODE }, { status: 503 })
+  );
 }
 
 function mintedResponse(decodedUid: string, sessionCookie: string): NextResponse {
