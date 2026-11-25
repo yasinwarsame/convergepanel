@@ -156,6 +156,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [syncState, dispatchSync] = useReducer(nextSessionSyncState, "signed_out");
   // #332 R8: the single authoritative sync episode (see SyncEpisode). A ref, so `beginLogout` can end it too.
   const episodeRef = useRef<SyncEpisode | null>(null);
+  // #332 R8: the identity this tab currently shows, or null after a sign-out OR once an explicit logout has begun. A
+  // late successful mint for any other identity (or for anyone after logout began) has its cookie removed
+  // (Correction C).
+  const currentUidRef = useRef<string | null>(null);
   const endEpisode = () => {
     const e = episodeRef.current;
     if (e) {
@@ -179,9 +183,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // before the fail-closed signOut). "Was someone signed in?" for the
     // sign-out cleanup must not depend on whether their sync succeeded.
     const lastIdentityRef = { current: null as string | null };
-    // #332 R8: the identity this tab currently shows, or null after a sign-out. A late successful mint for any OTHER
-    // identity has its cookie removed (Correction C).
-    const currentUidRef = { current: null as string | null };
 
     const timeoutId = setTimeout(() => {
       if (!resolved && isMounted) {
@@ -402,6 +403,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // result is discarded (its cookie removed) rather than adopted.
   const beginLogout = () => {
     endEpisode();
+    currentUidRef.current = null; // from now on no late mint may keep a cookie, even for the same uid
     dispatchSync({ type: "logout_started" });
   };
 

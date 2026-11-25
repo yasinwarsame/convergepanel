@@ -361,6 +361,26 @@ describe("R8 scenario 6 — logout during recovery", () => {
   });
 });
 
+describe("R8 scenario 6b — a late mint between beginLogout and the sign-out callback", () => {
+  it("is never adopted (state stays signing_out) and its cookie is removed, even though it is the same uid", async () => {
+    const a = new FakeUser("uid-a");
+    server.mode = "outage";
+    await signIn(a);
+    server.mode = "ok";
+    (sessionFetch as any).deferOnce = true;
+    await flush(SESSION_UNAVAILABLE_RETRY_DELAYS_MS[0]); // retry in flight
+    act(() => probe.beginLogout()); // TopNav: beginLogout → (DELETE …) → signOut — the null callback has NOT happened yet
+    await act(async () => {
+      server.deferNextOk!(); // the late Set-Cookie for uid-a lands now
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await flush();
+    expect(probe.syncState).toBe("signing_out");
+    expect(probe.canMutate).toBe(false);
+    expect(server.cookieUid).toBeNull();
+  });
+});
+
 // ── 7. direct account switch ──────────────────────────────────────────────────
 describe("R8 scenario 7 — direct account switch", () => {
   it("A in an outage → B signs in: A's episode ends, A's private data is gone, only B can hold the cookie", async () => {
