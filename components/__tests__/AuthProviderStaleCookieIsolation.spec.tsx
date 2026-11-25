@@ -104,6 +104,7 @@ const net = {
   pending: [] as Pending[],
   deleteFails: false,
   postsUnreachable: false,
+  outage: false,
   posts: [] as string[],
   deletes: 0,
   gets: 0,
@@ -126,6 +127,7 @@ async function sessionFetch(_url: string, init?: { method?: string; body?: strin
   const uid = uidOfToken(JSON.parse(init?.body ?? "{}").idToken ?? "") ?? "";
   net.posts.push(uid);
   if (net.postsUnreachable) throw new TypeError("Failed to fetch");
+  if (net.outage) return json(503, { error: "Authentication service unavailable", code: "auth_unavailable" });
   return new Promise<Response>((resolve) => {
     net.pending.push({
       uid,
@@ -209,7 +211,7 @@ beforeEach(() => {
   jest.useFakeTimers({ now: new Date("2026-11-25T12:00:00Z") });
   jest.clearAllMocks();
   Object.assign(fb, { listeners: [], current: null });
-  Object.assign(net, { pending: [], deleteFails: false, postsUnreachable: false, posts: [], deletes: 0, gets: 0 });
+  Object.assign(net, { pending: [], deleteFails: false, postsUnreachable: false, outage: false, posts: [], deletes: 0, gets: 0 });
   jar.value = null;
   g.window = { localStorage: new FakeStorage(), sessionStorage: new FakeStorage() };
   g.fetch = jest.fn(sessionFetch);
@@ -347,6 +349,38 @@ describe("#332 identity isolation — a late mint for A after switching to B", (
     await flush();
     expect(jar.value).toBeNull();
     expect(probe.canMutate).toBe(false);
+  });
+
+  it("B is in an exhausted outage (session_unavailable, shown) when A's late cookie lands → B is re-established, never shown over A's cookie", async () => {
+    const a = new FakeUser("uid-a");
+    const b = new FakeUser("uid-b");
+    await show(a);
+    net.outage = true;
+    await show(b);
+    await flush(120_000); // B: 4 attempts, all auth_unavailable → exhausted, still shown
+    expect(probe.syncState).toBe("session_unavailable");
+    expect(probe.uid).toBe("uid-b");
+    await arrive("uid-a"); // A's slow first mint finally lands (verification was still possible for it)
+    await flush(120_000);
+    await expectIsolated(b);
+    expect(jar.value).not.toBe("sess:uid-a");
+    expect(probe.canMutate).toBe(false);
+  });
+
+  it("B signed out before A's late cookie lands → no repair re-signs anyone in; the late cookie is removed", async () => {
+    const a = new FakeUser("uid-a");
+    const b = new FakeUser("uid-b");
+    await show(a);
+    await show(b);
+    await arrive("uid-b");
+    await show(null);
+    const posts = net.posts.length;
+    await arrive("uid-a");
+    await flush(60_000);
+    expect(net.posts.length).toBe(posts);
+    expect(probe.uid).toBeNull();
+    expect(probe.syncState).toBe("signed_out");
+    expect(jar.value).toBeNull();
   });
 
   it("same identity: a late mint for the SHOWN identity triggers no repair (no extra mint)", async () => {
