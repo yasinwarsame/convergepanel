@@ -116,7 +116,9 @@ const CLAIM_READ_ALLOW: Record<string, { count: number; category: Category; reas
     count: 1, category: "write-log",
     reason: "logs the claim value this guarded SYSTEM_ADMIN route has just WRITTEN; authorizes nothing",
   },
-  "components/AuthProvider.tsx::AuthProvider::member": {
+  // #332 R7: the same single read, now inside AuthProvider's nested settleOutcome (the bounded auth_unavailable retry
+  // re-enters the success path). Same count, same display-only use.
+  "components/AuthProvider.tsx::settleOutcome::member": {
     count: 1, category: "client-ui",
     reason: "browser-side menu affordance; every privileged API re-decides on the server from the live record",
   },
