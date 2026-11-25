@@ -1,6 +1,6 @@
 /**
  * Identity-isolation C1 (owner D-3, 2026-11-25) — the invitation-acceptance
- * browser request carries this tab's Firebase ID token, and a stale shared
+ * browser request carries the shown Firebase user's ID token, and a stale shared
  * `__session` cookie for a different account can never accept an invitation
  * as that account.
  *
@@ -141,7 +141,7 @@ beforeEach(() => {
   mockedAccept.mockImplementation(async ({ uid }: { uid: string }) => acceptedAs(uid));
 });
 
-describe("C1 — the request carries this tab's bearer credential", () => {
+describe("C1 — the request carries the shown user's bearer credential", () => {
   it("sends Authorization: Bearer <shown user's ID token> with the cookie, the exact body, and no secret in the URL", async () => {
     jar.value = "sess:uid-b";
     const user = shownUser("uid-b");

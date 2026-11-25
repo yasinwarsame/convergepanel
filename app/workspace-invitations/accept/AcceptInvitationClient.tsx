@@ -32,8 +32,12 @@
  *   acceptance response has been observed, no later response — however it
  *   might arrive — is ever allowed to regress the UI away from success.
  * - Identity-isolation C1 (owner D-3, 2026-11-25): the acceptance POST is
- *   sent through `authedFetch`, so it carries THIS tab's Firebase ID token
- *   as `Authorization: Bearer` alongside the shared `__session` cookie.
+ *   sent through `authedFetch`, so it carries the Firebase ID token of the
+ *   user this page currently shows (`Authorization: Bearer`) alongside the
+ *   shared `__session` cookie. (The Firebase client session is shared by all
+ *   tabs of this origin; the token is not unique to a tab. What it adds is
+ *   that the server checks the identity the page renders, not whichever
+ *   account last wrote the cookie.)
  *   The server (`resolveRequestIdentity`) then requires both to verify and
  *   name the same uid; a stale cookie for a different account yields a
  *   401 (`credential_mismatch`) and is never accepted as that account.
@@ -189,7 +193,7 @@ export default function AcceptInvitationClient() {
         // We only ever POST after syncState === "authenticated" — a 401
         // here means the server session has since gone stale, not that the
         // caller was never authenticated in the first place. Since C1 it also
-        // covers a cookie that names a different account than this tab's
+        // covers a cookie that names a different account than the page's
         // bearer token (`credential_mismatch`); "Sign in again" clears both.
         return "session_expired";
       case 403:
