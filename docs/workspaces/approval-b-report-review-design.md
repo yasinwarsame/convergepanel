@@ -1,0 +1,269 @@
+# Order B: human approval for Generic and other non-Milestone-2 research (design only, rev 5: final for owner implementation decision)
+
+**Status:** DESIGN. Implementation is NOT authorized.
+
+**Baseline:** main `900aec72`.
+
+**Rev 2** applied the owner rulings D-B1 to D-B5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. **Rev 4** applied the rev 3 re-verification findings: it disclosed the exclusions and corrected two references. **Rev 5** records the owner's final rulings (2026-11-02) on D-B1a, D-B3a, D-B6, D-B7 and D-B8, marked **[R5]**. The decisions are recorded in §10.
+
+## 1. Today
+
+- **Which runs get a review record.** A run gets `runs/{id}.governanceRecord` (`GovernanceRecordV1`) only when it produced a Milestone-2 envelope, which covers 9 result types. The record is created by `initializeAdaptiveGovernanceRecord`, inside `if (adaptiveOutput.persistedOutput)` in `lib/runPanelExecution.ts`. Generic and the 9 other legacy-active types never get one.
+- **Shape limits.** `GovernanceRecordV1.schemaId` is limited to the Milestone-2 ids. Its `decisionReceipt` is required and is built from the adaptive analysis.
+- **Shared readers.** `parseGovernanceRecord` is shared by:
+  - the Approval Queue and the review page;
+  - the decision, override, resubmit and panel routes;
+  - the Team review summary;
+  - exports, Decision Support wording and the Order 6 surfaces.
+- **Decision UI.** The reviewer decision UI requires a usable receipt.
+- **Consequence.** A run without that record never appears in Needs review or Assigned to me, and the review page returns not-found for it, so the UI cannot assign it a reviewer.
+- **[R3] Exception.** `putWorkspaceReviewAssignment` itself has no governance check (`workspaceReviewMutations.ts:226-258`). A manual assignment written through the API before submission becomes live once the run is submitted, and §3 of the Order C design then keeps it as an explicit assignment.
+
+## 2. What approval means (D-B1, ruled)
+
+A report-review approval means:
+
+> The report was reviewed and found acceptable for an explicitly stated purpose.
+
+It does **not** certify:
+- factual correctness;
+- claim verification;
+- model confidence;
+- that missing AI analysis exists.
+
+**[R5] Approval purpose (D-B1a, ruled).** A fixed category, plus an optional note of **at most 280 characters**, shown as plain text:
+
+| Value | Shown as |
+|---|---|
+| `internal_review` | Internal review |
+| `client_delivery` | Client delivery |
+| `publication_review` | Publication review |
+| `other` | Other |
+
+These are workflow labels. They are not certifications of accuracy or factual verification.
+
+**The purpose cannot redefine approval.**
+- It is stored and displayed only as context.
+- No code path branches on it for authorization, governance status or export content.
+- The disclaimer is fixed text. It is rendered next to every approval and pinned by tests: the review page, the Team summary, queue rows, exports and the audit trail.
+- The explanation can never replace or suppress the disclaimer.
+
+## 3. Data model: a separate record (D-B5, ruled)
+
+The new record is `runs/{id}.reportReview` (`ReportReviewRecordV1`). It never touches or widens `GovernanceRecordV1`.
+
+```ts
+{
+  version: 1,
+  kind: "report_review",
+  // What the saved run actually has, copied at submission. Never synthesized, never upgraded later.
+  scope: {
+    schemaId: string | null,                    // e.g. "generic"; null when not recorded
+    unifiedAnswer: "present" | "absent",
+    synthesis: "present" | "absent",
+    consensus: "present" | "absent",
+    respondedModels: number,
+    requestedModels: number,
+  },
+  // [R5] D-B6: the CURRENT review cycle only. Earlier cycles live, immutable, in runs/{id}/reportReviewCycles/{n}.
+  cycle: number,                                // 1, 2, 3, …
+  purpose: { code: "internal_review" | "client_delivery" | "publication_review" | "other", note: string | null },
+  humanReview: { /* same statuses and fields as GovernanceRecordV1.humanReview */ },
+  submittedAt: string, submittedByUserId: string,
+  createdAt: string, updatedAt: string,
+}
+```
+
+**Invariants:**
+- **[R3] Exclusive with `governanceRecord`.** Rev 2's claim that the race "can only happen if the run was unfinished" was wrong.
+  - `completeRun` marks the run complete *before* `persistAdaptiveOutput` and the governance write (`runPanelExecution.ts:495` vs `:806-863`).
+  - The governance write is a non-transactional read followed by `set(..., {merge:true})` (`lib/firestore/runs.ts`).
+  - So a submission inside that window could produce both records.
+
+  Rev 3 closes the window **without changing Milestone-2 flows**. Submission requires *positive evidence* that the run is not, and will never become, a governed run. Inside the submission transaction, the run must have **all** of the following:
+  1. `status == "complete"`;
+  2. **no** `adaptiveOutput` field;
+  3. a saved legacy envelope `legacyAdaptiveOutput` whose `schemaId` is **not** a Milestone-2 id, **or** a `createdAt` from before #274 (`5165761c`). **[R4]** Correction: legacy envelopes date from August 2026 (#12/#19). #274 only added `generic` to their allowlist, so before #274 a Generic run could never have an envelope. The cutoff is valid for exclusivity on that basis.
+
+  Because `persistAdaptiveOutput` writes the Milestone-2 `adaptiveOutput` before any governance record, and a Milestone-2 run never writes a non-Milestone-2 legacy envelope, condition 3 cannot hold for a run that will later get a `governanceRecord`. Condition 3's first branch is only true after persistence has finished.
+
+  This also refuses Milestone-2-schema runs whose governance initialization failed or was skipped (oversized, or `persistenceStatus != saved`). That closes the review's "weaker report review for a Milestone-2 run" gap. Those runs stay on today's path (D-B7, §10).
+
+  Defence in depth: every reader treats a run that carries both records as an integrity failure and fails closed. The stronger alternative, a transactional precondition inside the governance initializer, would change a Milestone-2 flow, so it is offered as D-B7 rather than assumed.
+- **No receipt and no fabricated analysis.** There is no conclusion, confidence, consensus, citation or evidence. `scope` is copied from saved fields only, and the review page shows the saved report with its existing missing-analysis notices.
+- **Canonical status checks.** A new parser, `parseReportReviewRecord`, sits next to `parseGovernanceRecord`. It is strict, fails closed, and reuses `isHumanReviewStatusReviewable` for the status vocabulary.
+
+## 4. Submission (D-B2, D-B3, ruled)
+
+**Explicit only.** `POST /api/workspaces/{W}/runs/{R}/report-review`. New research is never submitted automatically.
+
+**Exact capability mapping (D-B3):**
+
+| Requirement | Rule |
+|---|---|
+| Identity | Authenticated caller with an active membership in W, through `authorizeTeamWorkspaceMutationInTransaction`. |
+| Capability | `research.read` AND `research.organize`. Today that is Owner, Admin and Member. Reviewer and Viewer cannot submit. |
+| Research access | The run passes `resolveWorkspaceReviewTarget` for W: same workspace, a valid creator, a valid project reference. |
+| Run state | **[R3]** The §3 positive-evidence conditions, plus no `governanceRecord`, no `reportReview`, and no open review panel (`readPanelGate`). |
+| Body | Exactly `{ purpose: { code, note } }`, validated. |
+| Effect | One transaction creates the record (`humanReview.status: "unreviewed"`) and writes an audit event, `workspace_report_review_submitted`. If Order C ships, the project default reviewer is applied in the same transaction. |
+| Concealment | Every denial maps to the existing concealed 404 or 403 shapes. |
+
+Read-only access never confers submission. Being the run's creator adds nothing beyond `research.organize`.
+
+## 5. Queue: bounded combined query (D-B5, ruled)
+
+### Assigned to me and Overdue
+
+No query change. Both read the shared `humanReviewAssignment/current` subdocument. Only `revalidateRun` changes, so that it accepts a reviewable `reportReview` as well as a `governanceRecord`. Each run carries at most one record, so it is listed at most once.
+
+### Needs review, Changes requested, Recently approved
+
+These become two `runs` queries over the same collection, with mutually exclusive predicates and an **identical total order**:
+
+- Q1: `workspaceId == W` AND `governanceRecord.humanReview.status in S`, ordered by `createdAt desc`, then `__name__ desc` (unchanged).
+- Q2: `workspaceId == W` AND `reportReview.humanReview.status in S`, with the same ordering.
+
+### [R3] Merge algorithm (rev 2's argument was incomplete)
+
+Today's status views scan raw candidates and drop rows that fail revalidation (malformed, foreign workspace, status changed). The cursor records the last **scanned** candidate, not the last emitted row (`reviewQueue.ts:22-26, 226-269`). The merged design keeps that model and adds a frontier rule.
+
+**State:**
+- One cursor position, `pos = (sortValue, docPath)`. This is the existing `ReviewQueueCursor`, which carries its sort kind.
+- Per stream: a buffer, the position of its last fetched row, and an `exhausted` flag.
+
+**Algorithm, per page, within `MAX_SCAN_ROUNDS`:**
+1. Each stream that is not exhausted and has an empty buffer fetches `batch` rows `startAfter(pos)`. If it gets fewer than `batch`, it is marked `exhausted`.
+2. **Frontier** = the minimum, in queue order, of `lastFetched` across streams that are *not* exhausted. If every stream is exhausted, the frontier is +∞.
+3. Repeat: take the next row in merged order whose position is ≤ frontier, set `pos` to it (the row is now **consumed**), revalidate it, and emit it if valid.
+   - Stop when `limit` rows have been emitted, or when no buffered row is ≤ frontier. In the second case go back to step 1, which refetches the stream at the frontier.
+4. `hasMore` = (some stream is not exhausted) OR (some buffered row was not consumed).
+5. The next cursor is `pos`, the last **consumed** position. It is never "last emitted".
+
+**Why it is correct.**
+- **No skips.** A row is consumed only if every unexhausted stream has already fetched past its position. So no unfetched row from another stream can sort before it.
+- **No duplicates.** The two predicates are mutually exclusive (§3), and `pos` only moves forward under one total order.
+- **No stuck pager.** The cursor advances over dropped rows, as today. A page of all-dropped rows still moves `pos`, and the page reports `hasMore` honestly.
+
+**Comparator.** It must reproduce Firestore's order exactly:
+- for the timestamp kind: `(seconds, nanos)`, then document path;
+- for the ISO-string kind: a **byte-wise** string comparison (not `Date.parse`), then document path;
+- in both cases, descending.
+
+**Required tests.** Property-style: random datasets with interleaved streams, dropped rows and page sizes from 1 upward. Each must emit every valid row exactly once, in order. Then mutation tests on the frontier, the comparator and `hasMore`.
+
+**Fallback.** If those tests cannot pass, implementation stops and returns to the owner (D-B5).
+
+### Cost and indexes
+
+- Cost: two bounded reads per page.
+- **[R3] Ordering by view** (`reviewQueue.ts:208-212`):
+  - Needs review orders by `createdAt`.
+  - Changes requested and Recently approved order by `…humanReview.reviewedAt` (ISO string).
+- **[R3] Indexes.** Q2 mirrors all **four** existing `runs` status indexes: (`workspaceId`, status, `createdAt desc`) and (`workspaceId`, status, `reviewedAt desc`), each with and without `projectId`. Field paths go under `reportReview.humanReview.*`.
+- **[R3] Code.** `buildSortValue`, which hard-codes the `governanceRecord` path (`reviewQueue.ts:314-324`), becomes per-stream.
+- Shared status field: none.
+- Historical records: untouched.
+
+If testing finds a case where the merge algorithm's guarantees (no skips, no duplicates, no stuck pager) cannot hold, implementation stops and returns to the owner, as ruled. **[R4]** The rev 3 re-verification found the algorithm sound: no skips, no duplicates, no stuck pager, an honest `hasMore` at `MAX_SCAN_ROUNDS`, and a byte-wise comparator that matches Firestore order.
+
+### Flag changes during paging
+
+**[R3]** Toggling `REPORT_REVIEW_ENABLED` mid-pagination would change what a cursor means. To prevent that, the merged view bumps the cursor version. A cursor of the other version is rejected as `invalid_cursor`, so the client restarts from page one, as it already does for invalid cursors.
+
+## 5a. [R5] Review cycles and resubmission (D-B6, ruled)
+
+**Rule.** Resubmission after a completed decision (approved, approved with conditions, changes requested, or rejected) starts a **new review cycle**. It never resets an existing decision to pending.
+
+**One transaction:** `POST /runs/{R}/report-review/resubmit` with `{ purpose }`, under the same capability as submission (§4).
+
+1. Re-read `reportReview`. It must be at a completed status, and its `cycle == expectedCycle` from the request; otherwise `409 conflict`.
+2. **Archive** the current cycle, unchanged, to `runs/{R}/reportReviewCycles/{cycle}`. That stores the full `reportReview`, plus a copy of `humanReviewAssignment/current` as it stood, and `archivedAt` and `archivedByUserId`. Archived cycle documents are create-only. No route updates or deletes them; enforced by code and by a structural test.
+3. Write a new `reportReview` with `cycle + 1`, a fresh `scope` copied again from the saved run (never upgraded), the new `purpose`, and `humanReview.status: "unreviewed"`.
+4. Reset the assignment for the new cycle. Write `humanReviewAssignment/current` as a **fresh** document (`revision` keeps increasing, `assignedReviewerUserId: null`, `cycle: n+1`, `source: "cycle_reset"`). The previous cycle's assignment is kept only in the archived cycle. If Order C applies, the project default is applied under its §3 rules, which use a per-cycle "exists" check, so a new cycle starts unassigned.
+5. Append the audit event `workspace_report_review_resubmitted`, with `{ runId, fromCycle, toCycle, purpose }`.
+
+**Reading.**
+- The queue, the review page and exports show the **current** cycle's status.
+- The review page lists earlier cycles, read-only, with their decision, reviewer, date and purpose.
+- Exports include a "Previous review cycles" table.
+- An earlier approval is never presented as current.
+
+**Unchanged.** Governed (Milestone-2) runs keep their existing `changes_requested → unreviewed` resubmission (`resubmitWorkspaceReview.ts`). D-B6 applies to report reviews only.
+
+## 6. Review, decision and display
+
+- **`reviewContext`:** returns `kind: "governance" | "report_review"`. For a report review it returns `scope`, `purpose` and `humanReview`.
+- **Decision route:**
+  - The same statuses, comment and conditions as today.
+  - **[R3]** Authorization is the same as today's decision path, `isOrdinaryReviewerAuthorized` with the canonical-assignment requirement (`workspaceReviewMutations.ts:554`). That includes no self-review.
+  - No receipt requirement.
+  - The §2 disclaimer is stored nowhere, because it is fixed text, but it is rendered everywhere.
+- **[R3] History and audit for report reviews.** The existing decision side-writes require a Milestone-2 `schemaId`, an `answerShape` and `governanceRecordUpdatedAt` (`workspaceReviewMutations.ts:593-624`, `adaptiveHumanReviewHistory.ts:121,147`). Report reviews need their own history and event shape: `kind: "report_review"`, `scope.schemaId` (may be null), and `reportReviewUpdatedAt`. It is written by new builders, and the existing builders stay unchanged. The audit reader accepts both shapes.
+- **Display:**
+  - The Team detail page shows "Submit for approval" (for callers with `research.organize`) in place of the "Approval review" notice that PR #281 adds (not yet in baseline `900aec72`).
+  - **[R5] D-B8: a clear reason when submission is unavailable.** It is shown only to an already-authorized reader of the run, with one fixed sentence per reason:
+    - "This research already has a review record and uses the standard approval workflow." (governed run)
+    - "This research is already submitted for approval." (`reportReview` exists and is not decided)
+    - "This research can't be submitted: it was saved without the information approval review needs." (the D-B8 exclusions)
+    - "This research isn't finished yet." (not complete)
+    - "Only members who can organize research can submit it for approval." (missing capability)
+
+    The reason never reveals anything about other runs or users. Nothing is backfilled, rewritten, reclassified or fabricated to make a run eligible.
+  - After submission it shows the report-review status, purpose and disclaimer.
+  - Queue rows carry a "Report review" label.
+- **Exports:** a new "Report review" section with status, reviewer, date, purpose, conditions and the disclaimer. Milestone-2 export sections are unchanged.
+
+## 7. Historical research (D-B4, ruled)
+
+- **No automatic backfill.** Older research is unchanged.
+- **Opt-in path** (needs separate authorization): the same per-run "Submit for approval" action works on older runs. It is audited, explicit, and touches only the one run.
+- Any bulk path would be a separately reviewed migration.
+
+## 8. Unchanged
+
+- `GovernanceRecordV1` and `parseGovernanceRecord`.
+- Automated governance and decision receipts.
+- Decision Support and Order 6.
+- Milestone-2 flows.
+- Reviewer eligibility, roles and capabilities: no new capability.
+- Concealment.
+- `assigneeUids` and `runs.assigneeUid`.
+
+## 9. Risks, mitigations and rollback
+
+| Risk | Mitigation |
+|---|---|
+| Approval read as fact-checking | Fixed disclaimer on every surface, with pinned tests. The purpose cannot alter it. |
+| A run ends up with both record kinds | Exclusivity checks on both writers, plus a structural test. The queue revalidation treats "both present" as an integrity failure and fails closed. |
+| Pagination defects in the merged view | Property-style test: random interleavings and page sizes give each row exactly once, in order. Mutation testing on the merge comparator and cursor. |
+| Authority widening | Uses existing capabilities only. Reviewer and Viewer cannot submit. Eligibility is unchanged. |
+| New indexes not ready at launch | Indexes are deployed and READY before the flag is enabled. Until then, the second query is off. |
+| Rollback | Server flag `REPORT_REVIEW_ENABLED`. When off, the submit route returns the concealed 404, Q2 is skipped, and `reviewContext` ignores `reportReview`. Records stay in place, inert. |
+
+## 10. Owner decisions ([R5]: all ruled 2026-11-02)
+
+| Decision | Ruling |
+|---|---|
+| D-B1 | Approval = reviewed and acceptable for an explicitly stated purpose. Never factual verification, claim verification, model confidence, or the existence of missing analysis. |
+| D-B1a | Fixed purpose categories: Internal review, Client delivery, Publication review, Other. Optional note of at most 280 characters. |
+| D-B2 | Explicit submission only. |
+| D-B3 / D-B3a | Active member with `research.read` AND `research.organize` (Owner, Admin, Member). Reviewer and Viewer can never submit. |
+| D-B4 | No automatic backfill. |
+| D-B5 | Separate record and a bounded combined query (§5 merge algorithm). |
+| D-B6 | Resubmission is a new review cycle (§5a). Earlier decisions are immutable. |
+| D-B7 | Option (a), the strict submission eligibility in §3. The governed-run writer is unchanged. **Conditional:** B1 must prove with concurrency and retry tests that no run can hold both record kinds (§11). If that proof fails, STOP and return to the owner for writer-level enforcement. |
+| D-B8 | The documented exclusions are accepted for the initial release, with a clear reason shown (§6). No silent conversion. |
+
+## 11. Milestones
+
+1. **B1:** record, parser, submit route, audit and exclusivity (dark), with tests. **[R5] The D-B7 proof is a B1 exit criterion.** Deterministic interleaving tests against the transaction and order seams must show that no run ends up holding both record kinds. They cover:
+   - completion racing submission;
+   - envelope persistence racing submission;
+   - governance initialization retry racing submission;
+   - double submission;
+   - submission retry after a lost response.
+
+   Each run is checked for the invariant "never both", plus mutation tests on every eligibility condition. If any interleaving can produce both records, B1 stops for the owner.
+2. **B2:** review context, decision route and queue merge (dark), with property tests and an independent review.
+3. **B3:** UI and exports. Indexes deployed. Canary on one workspace, then enable.
