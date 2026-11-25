@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PRIVACY_POLICY_LAST_UPDATED } from "@/lib/legal/privacyPolicyDate";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -12,7 +13,7 @@ export default function PrivacyPage() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
       <h1 className="text-3xl font-semibold text-cp-text mb-2">Privacy Policy</h1>
-      <p className="text-sm text-cp-muted mb-10">Last updated: June 14, 2026</p>
+      <p className="text-sm text-cp-muted mb-10">Last updated: {PRIVACY_POLICY_LAST_UPDATED}</p>
 
       <div className="space-y-10">
         <section>
@@ -35,9 +36,17 @@ export default function PrivacyPage() {
             <li><strong className="text-cp-text">Usage Data:</strong> Number of panel runs, selected models, question length (for analytics and quota management)</li>
             <li><strong className="text-cp-text">Technical Data:</strong> IP address, browser type, device information (for security and debugging)</li>
           </ul>
+          {/* PC-1 (owner PP-01, 2026-11-25): replaces the false "we do not store the questions you ask or the AI responses"
+              sentence. Each statement is traced in the PR body and evidence 2026-11-24-api1-prerequisites/06. It makes no
+              claim about logs, deletion, retention periods or provider training: those belong to the full rewrite (#328). */}
           <p className="text-cp-muted">
-            We do <strong className="text-cp-text">not</strong> store the actual questions you ask or the AI responses
-            you receive, except temporarily in server logs for debugging purposes (typically deleted within 7 days).
+            <strong className="text-cp-text">Content you submit and the results.</strong> We store the content you
+            submit and the results the AI models return, so that we can provide your research history and reports and
+            let you reopen them later. For Deep Research, this includes your question, any context you add, the answers
+            the AI models return (shortened for storage when they are very long), the combined report and, where they
+            apply, the review and governance records for the run. For Claim Verification, it includes the claim you
+            submit (up to 2,000 characters) and each AI model&apos;s structured result. This policy does not promise
+            that this content is deleted within any fixed period.
           </p>
         </section>
 
