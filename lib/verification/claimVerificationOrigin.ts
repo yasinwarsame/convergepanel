@@ -106,6 +106,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { adminDb } from "@/lib/firebase/admin";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
+import { DEEP_RESEARCH_CLAIM_ID_PATTERN, MAX_DEEP_RESEARCH_CLAIM_ID_LENGTH } from "./deepResearchClaimIdGrammar";
 import { normalizeEvidenceSourceReferences, type EvidenceSourceReference } from "./evidenceSourceExtraction";
 
 export interface ClaimVerificationOrigin {
@@ -195,18 +196,10 @@ function fingerprintsMatch(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
-/** Hard bound checked BEFORE parsing — the fingerprint segment is fixed-length, but the index segment is attacker-controlled text, so an unbounded string must never reach the regex engine or `Number()`. Real selectors are ~60 characters; 128 is generous headroom without being unbounded. */
-const MAX_CLAIM_ID_LENGTH = 128;
-
-/**
- * `v1:<section>:<index>:<fingerprint>`. The index alternation
- * `(0|[1-9]\d*)` structurally rejects leading zeros ("01", "0002"),
- * a leading minus sign, decimal points, scientific notation, and
- * whitespace — all fail the anchored match outright, never reaching
- * `Number()`. The fingerprint segment is exactly 43 base64url characters
- * (no more, no less) — anything else fails to match.
- */
-const CLAIM_ID_PATTERN = /^v1:(findings|lowConfidenceFindings):(0|[1-9]\d*):([A-Za-z0-9_-]{43})$/;
+// The grammar (length bound + pattern) lives in ./deepResearchClaimIdGrammar so client code (the pre-telemetry URL
+// scrub) recognises exactly the ids this module issues. Bumping the locator version there would also mean bumping the tag.
+const MAX_CLAIM_ID_LENGTH = MAX_DEEP_RESEARCH_CLAIM_ID_LENGTH;
+const CLAIM_ID_PATTERN = DEEP_RESEARCH_CLAIM_ID_PATTERN;
 
 interface ParsedDeepResearchClaimId {
   section: DeepResearchClaimSection;

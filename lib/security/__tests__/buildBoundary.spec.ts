@@ -196,6 +196,14 @@ describe("Layer B checker on synthetic build directories (fails closed)", () => 
   it("classifies exactly the resource-less shapes seen in the real Next 14 build", () => {
     expect(classifyResourceless({ type: "NormalModule", loaders: ["next:next-app-loader"] })).toBeNull();
     expect(classifyResourceless({ type: "CompatGetDefaultExportRuntimeModule", moduleType: "runtime" })).toBeNull();
+    // Next 14's ignored client rewrite resolver (app with no rewrites): exactly that id under this checkout's node_modules.
+    const ignored = `ignored|${join(REPO, "node_modules/next/dist/shared/lib/router")}|./utils/resolve-rewrites`;
+    expect(classifyResourceless({ type: "RawModule", id: ignored })).toBeNull();
+    // Any other RawModule still fails closed (control): another module, another root, a lookalike path.
+    expect(classifyResourceless({ type: "RawModule", id: `ignored|${join(REPO, "node_modules/next/dist/shared/lib/router")}|./utils/other` })).toMatch(/unrecognised RawModule/);
+    expect(classifyResourceless({ type: "RawModule", id: "ignored|/tmp/evil/node_modules/next/dist/shared/lib/router|./utils/resolve-rewrites" })).toMatch(/unrecognised RawModule/);
+    expect(classifyResourceless({ type: "RawModule", id: "module.exports = require('fs')" })).toMatch(/unrecognised RawModule/);
+    expect(classifyResourceless({ type: "RawModule" })).toMatch(/unrecognised RawModule/);
     expect(classifyResourceless({ type: "ContextModule", context: "node_modules/require-in-the-middle" })).toBeNull();
     expect(classifyResourceless({ type: "NormalModule", loaders: [] })).toMatch(/no loader/);
     expect(classifyResourceless({ type: "RawModule" })).toMatch(/unrecognised/);
@@ -204,8 +212,11 @@ describe("Layer B checker on synthetic build directories (fails closed)", () => 
 
 describe("the required Quality Gate runs the real build and the boundary gate on every PR (workflow pin)", () => {
   const wf = readFileSync(join(REPO, ".github/workflows/quality-gate.yml"), "utf8");
-  // Parse the steps of the required job by name, in order.
-  const job = wf.slice(wf.indexOf("name: Quality Gate"));
+  // Parse the steps of the required job by name, in order. The job ends at the
+  // next top-level job key (the Jest shard job follows it in the same file).
+  const jobStart = wf.indexOf("name: Quality Gate");
+  const nextJob = wf.slice(jobStart).search(/\n {2}[a-z][a-z0-9_-]*:\n/);
+  const job = nextJob === -1 ? wf.slice(jobStart) : wf.slice(jobStart, jobStart + nextJob);
   const steps = job
     .split(/\n(?= {6}- name: )/)
     .filter((chunk) => /^ {6}- name: /.test(chunk))
@@ -213,7 +224,7 @@ describe("the required Quality Gate runs the real build and the boundary gate on
   const idx = (n: string) => steps.findIndex((s) => s.name === n);
 
   it("the step parser sees every step of the job (positive control)", () => {
-    expect(steps.map((x) => x.name)).toEqual(["Checkout", "Verify the build is of the exact PR head", "Set up Node", "Install dependencies", "Type check", "Lint", "Build", "Build boundary gate", "Security-test falsifiability pre-flight", "Test"]);
+    expect(steps.map((x) => x.name)).toEqual(["Checkout", "Verify the build is of the exact PR head", "Set up Node", "Install dependencies", "Type check", "Lint", "Build", "Build boundary gate", "Security-test falsifiability pre-flight", "Download Jest shard results", "Test"]);
   });
 
   it("the job is the required 'Quality Gate' job and triggers on pull requests to main", () => {

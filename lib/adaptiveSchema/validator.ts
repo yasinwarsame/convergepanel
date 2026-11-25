@@ -17,6 +17,7 @@ import { logger } from "@/lib/logger";
 import { AdaptiveEnumCoercion, AdaptiveModelResult, FieldSpec, FieldType, ResultSchema } from "./types";
 import { stripJsonFences, truncateWords } from "./util";
 import { coerceClaimEnums } from "./enumCoercion";
+import { errorName, issueFieldsFromStrings } from "@/lib/privacy/contentFreeDiagnostics";
 
 // Caps intrinsic to the atomic unit interfaces themselves (types.ts), not
 // schema-specific — these apply regardless of which ResultSchema is active.
@@ -270,10 +271,12 @@ function coerceEnumDrift(
 function salvageFields(
   fields: FieldSpec[],
   raw: Record<string, unknown>
-): { data: Record<string, any>; invalidFields: string[]; issues: string[] } {
+): { data: Record<string, any>; invalidFields: string[]; issues: string[]; droppedItems: Record<string, number> } {
   const data: Record<string, any> = {};
   const invalidFields: string[] = [];
   const issues: string[] = [];
+  // Item 7A: per KEPT array field, how many items failed validation and were discarded (counts only, never content).
+  const droppedItems: Record<string, number> = {};
 
   for (const field of fields) {
     const value = raw[field.key];
@@ -310,12 +313,13 @@ function salvageFields(
     // only mark the field invalid when it had items and NONE of them survived.
     if (value.length === 0 || validItems.length > 0) {
       data[field.key] = validItems;
+      if (validItems.length < value.length) droppedItems[field.key] = value.length - validItems.length;
     } else {
       invalidFields.push(field.key);
     }
   }
 
-  return { data, invalidFields, issues };
+  return { data, invalidFields, issues, droppedItems };
 }
 
 /**
@@ -346,7 +350,7 @@ export function validateAdaptiveResponse(
     warn("[adaptiveSchema] Response was not valid JSON", {
       modelId,
       schemaId: schema.id,
-      error: err?.message,
+      errorName: errorName(err), // privacy: a SyntaxError message quotes the model's text
     });
     return {
       modelId,
@@ -368,7 +372,7 @@ export function validateAdaptiveResponse(
     warn("[adaptiveSchema] Coerced enum drift before validation", {
       modelId,
       schemaId: schema.id,
-      coercions: coercions.map((c) => ({ field: c.field, path: c.path, raw: c.raw, coerced: c.coerced })),
+      coercions: coercions.map((c) => ({ field: c.field, path: c.path, rawLength: String(c.raw ?? "").length, coerced: c.coerced })), // privacy: raw is model text
     });
   }
 
@@ -377,6 +381,7 @@ export function validateAdaptiveResponse(
 
   let data: Record<string, any>;
   let invalidFields: string[] = [];
+  let droppedItems: Record<string, number> = {};
 
   if (wholeResult.success) {
     data = { ...wholeResult.data };
@@ -387,12 +392,13 @@ export function validateAdaptiveResponse(
     const salvaged = salvageFields(schema.fields, patched);
     data = salvaged.data;
     invalidFields = salvaged.invalidFields;
+    droppedItems = salvaged.droppedItems;
 
     if (Object.keys(data).length === 0) {
       warn("[adaptiveSchema] Response failed schema validation", {
         modelId,
         schemaId: schema.id,
-        issues: salvaged.issues,
+        issueFields: issueFieldsFromStrings(salvaged.issues), // privacy: Zod messages quote received values
       });
       return {
         modelId,
@@ -409,11 +415,13 @@ export function validateAdaptiveResponse(
       modelId,
       schemaId: schema.id,
       invalidFields,
-      issues: salvaged.issues,
+      issueFields: issueFieldsFromStrings(salvaged.issues), // privacy: Zod messages quote received values
     });
   }
 
   const truncatedFields: string[] = [];
+  // Item 7A: per array field, how many whole items were cut by the schema's item cap (counts only).
+  const itemsOverLimit: Record<string, number> = {};
 
   const markTruncated = (fieldKey: string) => {
     if (!truncatedFields.includes(fieldKey)) truncatedFields.push(fieldKey);
@@ -440,6 +448,7 @@ export function validateAdaptiveResponse(
     if (Array.isArray(value)) {
       if (field.maxItems && value.length > field.maxItems) {
         data[field.key] = value.slice(0, field.maxItems);
+        itemsOverLimit[field.key] = value.length - field.maxItems;
         markTruncated(field.key);
         warn("[adaptiveSchema] Truncated array field over item cap", {
           modelId,
@@ -573,6 +582,8 @@ export function validateAdaptiveResponse(
     data,
     ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
+    ...(Object.keys(droppedItems).length > 0 ? { droppedItems } : {}),
+    ...(Object.keys(itemsOverLimit).length > 0 ? { itemsOverLimit } : {}),
     ...(coercions.length > 0 ? { coercions } : {}),
   };
 }

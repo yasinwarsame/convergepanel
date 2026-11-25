@@ -9,9 +9,11 @@
  */
 jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, Timestamp: class Timestamp {} }));
 
+import { countItem7aRecords, withoutItem7aRecord, type Item7aRemoval } from "../item7aHistoricalCompat";
 import historicalRecords from "./__fixtures__/historicalRecords.json";
 import { asStored, exportCases, exportRecord, FORMATS, dsStates, dsOutput } from "./dsExportFixtures";
 import { ADDED_AFTER_CAPTURE } from "./dsExportHistory";
+import { toHistoricalReceiptLines, type RevertedLine } from "./item6aReceiptFormat";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { buildAdaptiveResearchJsonExport, renderAdaptiveResearchJsonV1 } from "@/lib/adaptiveSchema/jsonExport";
@@ -106,7 +108,30 @@ describe("marker assignment (buildExportSnapshot)", () => {
         // facts (readFrozenRunProvenance, what the JSON export and the display lines read) must still be equal.
         expect(rest.runProvenance).toMatchObject({ provenanceVersion: 2 });
         for (const m of rest.runProvenance!.models) expect(["recorded", "absent"]).toContain(m.outcomeSource);
-        expect({ ...rest, runProvenance: readFrozenRunProvenance(rest.runProvenance) }).toEqual(historical.reportSnapshot);
+        // Item 6A controlled exception (owner-authorized, 2026-11-22): a freshly aggregated Decision Support result now
+        // carries the provenance-generation marker criteriaProvenance "request_text_v1" (absent from the historical
+        // records). Only that key, only with that exact value, only on a DS result object, is removed before comparing.
+        const withoutItem6aMarker = (v: unknown): unknown => {
+          if (Array.isArray(v)) return v.map(withoutItem6aMarker);
+          if (v && typeof v === "object") {
+            const o = v as Record<string, unknown>;
+            const isMarkedDsResult = Array.isArray(o.criteria) && o.criteriaProvenance === "request_text_v1";
+            return Object.fromEntries(Object.entries(o).filter(([k]) => !(isMarkedDsResult && k === "criteriaProvenance")).map(([k, x]) => [k, withoutItem6aMarker(x)]));
+          }
+          return v;
+        };
+        // Item 6A structural correction (owner Option A, 2026-11-23): criterion labels in a fresh Receipt are quoted,
+        // escaped data; only that quoting is reverted, by the verified exact inverse, and only on DS records.
+        const reverted: RevertedLine[] = [];
+        // Item 7A (owner-authorized 2026-11-23): a fresh run with a structured-output shortfall also records the per-slot
+        // record in its meta (absent historically); only that record is removed, and only where the counts show a shortfall.
+        const item7a: Item7aRemoval[] = [];
+        const fresh = withoutItem7aRecord(toHistoricalReceiptLines(withoutItem6aMarker({ ...rest, runProvenance: readFrozenRunProvenance(rest.runProvenance) }), reverted), item7a);
+        // Scope: every record present is a valid one and is removed exactly once; nothing else is touched.
+        expect([c.name, item7a.filter((r) => r.kind === "meta").length]).toEqual([c.name, countItem7aRecords(rest)]);
+        expect([c.name, reverted.length > 0 && c.schemaId !== "decision_support"]).toEqual([c.name, false]);
+        for (const { from } of reverted) expect(from.startsWith("Criterion (")).toBe(false);
+        expect(fresh).toEqual(historical.reportSnapshot);
         if (c.schemaId === "decision_support") expect(presentation).toStrictEqual({ dsLabelWordingVersion: 1 });
         else expect(presentation).toBeUndefined();
       }

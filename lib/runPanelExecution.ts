@@ -690,7 +690,7 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
       logger.debug(`[run-panel] rawResponse for ${result.modelId}`, {
         modelId: result.modelId,
         usage: rawResponse?.usage || rawResponse?.response?.usageMetadata,
-        contentPreview: canonicalText.substring(0, 200),
+        // privacy (2026-11-18): no contentPreview — even debug output reaches runtime logs
         fullTextLength: canonicalText.length,
       });
       // Never persist or return rawResponse

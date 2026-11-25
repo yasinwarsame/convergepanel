@@ -46,6 +46,8 @@ export function mapStoredVerificationToClientPayload(
       modelId: m.modelId,
       correctParts: m.correctParts,
       incorrectParts: m.incorrectParts,
+      // A row's side of the claim (doc 14 D-5); a non-"ok" row has no usable verdict.
+      verdict: m.status === "ok" ? m.verdict : m.status,
     }))
   );
 

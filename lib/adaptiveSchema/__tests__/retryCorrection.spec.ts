@@ -34,7 +34,7 @@ const validate = (schema: typeof MATRIX, text: string | null) => validateAdaptiv
 const withLatency = (r: AdaptiveModelResult, latencyMs = 111): AdaptiveModelResult => ({ ...r, latencyMs });
 
 describe("retry outcome enum (AR8)", () => {
-  it("is exactly the six behaviourally distinct outcomes", () => {
+  it("is exactly the seven behaviourally distinct outcomes", () => {
     expect([...ADAPTIVE_RETRY_OUTCOMES]).toEqual([
       "adopted_full",
       "adopted_partial",
@@ -42,6 +42,8 @@ describe("retry outcome enum (AR8)", () => {
       "failed_call",
       "skipped_budget",
       "ineligible_substituted",
+      // Item 7B (D5): confirmed output-budget exhaustion with no compliant larger cap — no call was issued.
+      "skipped_output_budget",
     ]);
   });
 

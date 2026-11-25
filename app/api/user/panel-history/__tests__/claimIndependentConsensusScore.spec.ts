@@ -86,4 +86,17 @@ describe("GET /api/user/panel-history — claim consensus score vs independent e
     expect(claimHistoryConsensusSuffix(it0)).toBe(suffix);
     expect(JSON.stringify(d.data)).toBe(before);
   });
+
+  // R6 owner decision B3: every claim item carries the explicit basis marker, so the client can tell a current item from
+  // one cached before it (which has no marker) without clearing or rewriting the browser cache.
+  it.each([
+    ["one-of-three", [row("chatgpt", "ok", OPENAI), row("claude", "failed"), row("grok", "failed")], ["chatgpt", "claude", "grok"], "insufficient_independent_models"],
+    ["two-deepseek", [row("chatgpt", "ok", DS), row("claude", "ok", DS)], ["chatgpt", "claude"], "insufficient_independent_models"],
+    ["two-independent", [row("chatgpt", "ok", OPENAI), row("claude", "ok", { provider: "anthropic" })], ["chatgpt", "claude"], "independent_models"],
+    ["missing-provenance", undefined, undefined, "independence_unverified"],
+    ["two-ok-provider-less", [row("chatgpt", "ok"), row("claude", "ok")], ["chatgpt", "claude"], "independence_unverified"],
+  ])("R6 marker: %s", async (id, mr, sel, basis) => {
+    verRows = [ver(id, mr as unknown[] | undefined, sel as string[] | undefined)];
+    expect((await items())[id].consensusBasis).toBe(basis);
+  });
 });

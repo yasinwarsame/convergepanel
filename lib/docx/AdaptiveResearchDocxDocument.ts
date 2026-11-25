@@ -64,6 +64,8 @@ import {
   governanceStatusDisplay,
   GovernanceDisplayTone,
 } from "@/lib/adaptiveSchema/exportContentDerivation";
+import { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from "@/lib/adaptiveSchema/criterionProvenance";
+import { deriveRecordedStructuredOutputDisclosure, STRUCTURED_OUTPUT_SECTION_HEADING, structuredOutputDisclosureLines } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
 
 const COLOR = {
   text: "18181B",
@@ -251,7 +253,8 @@ function milestone2Section(record: AdaptiveResearchExportV1): (Paragraph | Table
   const r = m2.decisionReceipt;
   const conclusion = isDsLabelWordingMarked(record) ? dsPresentedExportConclusion(m2.result as DecisionSupportResult, r.conclusion) : r.conclusion;
   const out: (Paragraph | Table)[] = [heading("Conclusion"), body(conclusion)];
-  if (r.basis.length > 0) out.push(heading("Basis"), ...bulletList(r.basis));
+  // Item 6A (F2, owner-authorized frozen-renderer exception): read-only notice for a stored pre-6A Receipt only.
+  if (r.basis.length > 0) out.push(heading("Basis"), ...(receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? [muted(LEGACY_FROZEN_RECEIPT_NOTICE)] : []), ...bulletList(r.basis));
   if (r.assumptions.length > 0) out.push(heading("Assumptions"), ...bulletList(r.assumptions));
   if (r.uncertainties.length > 0) out.push(heading("Uncertainties"), ...bulletList(r.uncertainties));
   if (r.limitations.length > 0) out.push(heading("Limitations"), ...bulletList(r.limitations));
@@ -449,11 +452,24 @@ function provenanceSection(record: AdaptiveResearchExportV1): (Paragraph | Table
   ];
 }
 
+/**
+ * Item 7A: the structured-output completeness section — the same shared disclosure and wording as the live report.
+ * Empty (nothing rendered) for a complete run, a legacy-family export, or a record without the counts.
+ */
+function structuredOutputSection(record: AdaptiveResearchExportV1): Paragraph[] {
+  const snapshot = record.reportSnapshot;
+  const d = record.schemaFamily === "milestone2" ? deriveRecordedStructuredOutputDisclosure(snapshot.milestone2?.meta) : null;
+  if (!d) return [];
+  const [head, ...rest] = structuredOutputDisclosureLines(d, (id) => exportModelIdentityLabel(snapshot.runProvenance, id));
+  return [heading(STRUCTURED_OUTPUT_SECTION_HEADING), body(head), ...rest.map(muted)];
+}
+
 /** Builds the full `Document` object — the caller (`renderAdaptiveResearchDocx.ts`) is responsible for packing it to bytes. Exported separately from the packer so structural tests can inspect the Document tree without invoking the ZIP packer. */
 export function buildAdaptiveResearchDocxDocument(record: AdaptiveResearchExportV1): Document {
   const children: (Paragraph | Table)[] = [
     ...coverSection(record),
     ...statusSummarySection(record),
+    ...structuredOutputSection(record),
     ...(record.schemaFamily === "milestone2" ? milestone2Section(record) : legacySection(record)),
     ...provenanceSection(record),
   ];

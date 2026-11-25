@@ -30,6 +30,8 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
     selectedAt: Date.now()
   });
 
-  const url = `${CONVERGEPANEL_VERIFY_URL}?source=extension&text=${encodeURIComponent(selectedText)}`;
+  // Privacy (PR #329 R3, owner D4): the selection travels in the URL FRAGMENT, which browsers never send to the
+  // server (so it is never in request logs). /verify moves it into tab-scoped storage and clears the fragment.
+  const url = `${CONVERGEPANEL_VERIFY_URL}?source=extension#text=${encodeURIComponent(selectedText)}`;
   chrome.tabs.create({ url });
 });

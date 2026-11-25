@@ -42,6 +42,9 @@ const EXECUTING_MODEL_MODULES = [
   "components/adaptive/RunExecutionIdentityContext",
   // Order 33 (ruling B): the canonical provider registry the gate and the independent-voice key read.
   "lib/panel/providerRegistry",
+  // Doc 14 PR-1 R4 (owner ruling 2026-11-18): the shared claim statement basis on stored records and its queue wording.
+  "lib/verification/claimStatementBasisSources",
+  "lib/verification/claimQueuePresentation",
 ] as const;
 
 /** O16: decision module → executing-model module → the exact symbols it may import ("type X" for a type-only import). */
@@ -69,6 +72,9 @@ const ALLOWLIST: Record<string, Partial<Record<(typeof EXECUTING_MODEL_MODULES)[
     "lib/panel/independentVoices": ["consensusScoreWithheldReason", "type ConsensusScoreWithheldReason", "type StoredConsensusIndependence"],
     "lib/panel/storedVerificationIndependence": ["storedVerificationConsensusIndependence"],
     "lib/governance/queueVerificationAgreement": ["buildQueueVerificationAgreement"],
+    // R4 owner authorization (2026-11-18, MAJOR-1): the claim rows' PRESENTATION lines on the shared statement basis.
+    // Governance evaluation (evaluateGovernance / governanceInputFromVerificationDoc) never reads it.
+    "lib/verification/claimQueuePresentation": ["claimQueuePresentation"],
     "lib/panel/storedDisagreementIndependence": [
       "classifyStoredDisagreement",
       "storedRunIndependenceContext",

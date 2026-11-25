@@ -49,9 +49,11 @@ const ts = (offsetMinutes: number) => Timestamp.fromMillis(T0 + offsetMinutes * 
 function claim(id: string, minute: number, extra: Record<string, unknown> = {}): Row {
   return {
     id,
+    // R4: each row records its verdict too (as every stored claim row does); a row set whose verdicts cannot be counted
+    // fails closed to the slot-response score qualifier (`consensusBasis`), which is not what this containment test is about.
     // Two independent executing models answered, each with its recorded provider (C-b CB-01: the shared gate), so the
     // stored score is listed (claim independence rule).
-    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), modelResults: [{ modelId: "chatgpt", status: "ok", provider: "openai" }, { modelId: "claude", status: "ok", provider: "anthropic" }], selectedModels: ["chatgpt", "claude"], ...extra },
+    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), modelResults: [{ modelId: "chatgpt", status: "ok", verdict: "accurate", provider: "openai" }, { modelId: "claude", status: "ok", verdict: "accurate", provider: "anthropic" }], selectedModels: ["chatgpt", "claude"], ...extra },
   };
 }
 function video(id: string, minute: number, extra: Record<string, unknown> = {}): Row {
@@ -76,12 +78,13 @@ beforeEach(() => {
 });
 
 describe("Claim history containment", () => {
+  // R6 (owner decision B3): the DTO carries the explicit basis marker on every claim item.
   it("a Personal Claim appears with its exact Personal DTO", async () => {
     claimRows = [claim("vcl-personal", 1)];
     const { status, body } = await history();
     expect(status).toBe(200);
     expect(body.items).toEqual([
-      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, modelIndependence: "independent", governanceStatus: "approved" },
+      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, modelIndependence: "independent", consensusBasis: "independent_models", governanceStatus: "approved" },
     ]);
   });
 

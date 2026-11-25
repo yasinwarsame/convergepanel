@@ -8,20 +8,22 @@
  */
 
 import type { EnrichedLegacyTeamRunListItemV1 } from "@/lib/governance/teamReviewQueueEnrichment";
-import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
+import { claimScoreText } from "@/lib/verification/claimConsensusPresentation";
 
 /**
  * The consensus text of a legacy team-queue row. The route (`app/api/teams/runs/route.ts`,
  * `applyLegacyConsensusIndependence`) decides from the canonical artifact's persisted per-model rows — `runs/{runId}`
  * for research, `verifications/{verificationId}` for claim verification — whether the stored score may be shown: a
  * withheld score arrives as `consensusScore: null` + `consensusWithheld` and is shown as its reason, never as a number;
- * only a score backed by ≥ 2 independent executing models is shown plainly.
+ * only a score backed by ≥ 2 independent executing models is shown — plainly, or (claim rows, R5) with the slot-response
+ * qualifier when its slots are not each a distinct identified executing model.
  */
-export function legacyConsensusText(item: Pick<EnrichedLegacyTeamRunListItemV1, "consensusScore" | "consensusWithheld">): string {
-  if (item.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[item.consensusWithheld];
-  const score = item.consensusScore;
-  if (score == null || !Number.isFinite(score)) return "No consensus score";
-  return `Consensus ${Math.round(score)}/100`;
+export function legacyConsensusText(
+  item: Pick<EnrichedLegacyTeamRunListItemV1, "consensusScore" | "consensusWithheld"> & { consensusBasis?: unknown }
+): string {
+  // R5: the shared claim score renderer — a claim row whose score was computed over panel slot responses
+  // (`consensusBasis`, added by the route from the same shared basis as the governance queue) carries the R4 qualifier.
+  return claimScoreText(item, (n) => `Consensus ${Math.round(n)}/100`, "No consensus score");
 }
 
 function formatCreatedAt(iso: string): string {
@@ -30,7 +32,7 @@ function formatCreatedAt(iso: string): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-export default function LegacyReviewListItem({ item }: { item: EnrichedLegacyTeamRunListItemV1 }) {
+export default function LegacyReviewListItem({ item }: { item: EnrichedLegacyTeamRunListItemV1 & { consensusBasis?: "slot_responses" } }) {
   const decisionLabel = item.humanDecision
     ? item.humanDecision.action.charAt(0).toUpperCase() + item.humanDecision.action.slice(1)
     : "No decision yet";

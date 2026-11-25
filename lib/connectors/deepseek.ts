@@ -198,7 +198,7 @@ async function singleDeepSeekCall(
     const result = classifyDeepSeekError(error, msg, latencyMs);
 
     if (isDev()) {
-      console.log(`[DeepSeek] Error for ${forModelId}: code=${result.code} elapsed=${latencyMs}ms retryable=${result.retryable} msg=${msg.slice(0, 120)}`);
+      console.log(`[DeepSeek] Error for ${forModelId}: code=${result.code} elapsed=${latencyMs}ms retryable=${result.retryable} msgLength=${msg.length}`); // privacy: provider messages can echo content
     }
 
     return result;

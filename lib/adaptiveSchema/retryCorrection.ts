@@ -34,6 +34,11 @@ export const ADAPTIVE_RETRY_OUTCOMES = [
   "skipped_budget",
   /** The slot was served by a substitute provider; no adaptive retry is ever issued for it. */
   "ineligible_substituted",
+  /**
+   * Item 7B (owner D5): the provider reported that the first attempt stopped at its output budget, and no compliant
+   * larger cap (or no safe time to use it) existed, so no same-cap retry was issued. The first attempt stands.
+   */
+  "skipped_output_budget",
 ] as const;
 
 export type AdaptiveRetryOutcome = (typeof ADAPTIVE_RETRY_OUTCOMES)[number];
@@ -121,6 +126,13 @@ export function mergeAdaptiveRetry(
       ...(retried.truncatedFields || []).filter((key) => adoptedSet.has(key)),
     ])
   );
+  // Item 7A: each kept field's dropped-item count follows the attempt its value came from.
+  const droppedItems: Record<string, number> = {};
+  for (const [key, n] of Object.entries(first.droppedItems || {})) if (keptFromFirst.has(key) && !adoptedSet.has(key)) droppedItems[key] = n;
+  for (const [key, n] of Object.entries(retried.droppedItems || {})) if (adoptedSet.has(key)) droppedItems[key] = n;
+  const itemsOverLimit: Record<string, number> = {};
+  for (const [key, n] of Object.entries(first.itemsOverLimit || {})) if (keptFromFirst.has(key) && !adoptedSet.has(key)) itemsOverLimit[key] = n;
+  for (const [key, n] of Object.entries(retried.itemsOverLimit || {})) if (adoptedSet.has(key)) itemsOverLimit[key] = n;
   const coercions = [
     ...(first.coercions || []).filter((c) => keptFromFirst.has(rootFieldKey(c.path))),
     ...(retried.coercions || []).filter((c) => adoptedSet.has(rootFieldKey(c.path))),
@@ -138,6 +150,8 @@ export function mergeAdaptiveRetry(
       ...latency,
       ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
       ...(stillInvalid.length > 0 ? { invalidFields: stillInvalid } : {}),
+      ...(Object.keys(droppedItems).length > 0 ? { droppedItems } : {}),
+      ...(Object.keys(itemsOverLimit).length > 0 ? { itemsOverLimit } : {}),
       ...(coercions.length > 0 ? { coercions } : {}),
     },
   };
@@ -277,5 +291,5 @@ export function retryStateAllowsProviderSearchEvidence(args: {
   const parsed = parseAdaptiveRetryOutcome(args.retryOutcome);
   if (parsed.kind === "unknown") return false;
   if (parsed.kind === "absent") return args.retried !== true;
-  return parsed.outcome === "failed_call" || parsed.outcome === "no_change" || parsed.outcome === "skipped_budget";
+  return parsed.outcome === "failed_call" || parsed.outcome === "no_change" || parsed.outcome === "skipped_budget" || parsed.outcome === "skipped_output_budget";
 }

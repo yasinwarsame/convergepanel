@@ -15,7 +15,9 @@ jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, 
 import JSZip from "jszip";
 import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportFixtures";
 import { historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
-import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, docxStatusRegionV1, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
+import { historicalReceiptText } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
+import { LEGACY_INFERRED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
+import { ITEM7A_STRUCTURED_OUTPUT, D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, docxStatusRegionV1, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
 import { DocxTextError, docxParagraphs } from "@/lib/adaptiveSchema/__tests__/dsExport/docxText";
 import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
 import { EXEMPTIONS, FIELD_LABELS, scanSurface, validateExemptions } from "@/components/adaptive/__tests__/seSurfaces/dsWordingScanner";
@@ -78,7 +80,8 @@ describe("version-1 Decision Support DOCX", () => {
     expect(region[region.indexOf(LABEL_SOURCES.toUpperCase()) + 1]).toBe(o.sources);
     for (const old of ["CONSENSUS", "SOURCE GROUNDING", OLD_CAPTION]) expect(l).not.toContain(old);
     expect(l.filter((t) => t === D9).length).toBe(o.d9 ? 1 : 0);
-    if (o.d9) expect(l[end - 1]).toBe(D9);
+    // Item 7A: the structured-output section (in the oracle region) follows D-9 for the two shortfall fixtures.
+    if (o.d9) expect(l[end - 1 - (ITEM7A_STRUCTURED_OUTPUT[stateOf(name)]?.length ?? 0)]).toBe(D9);
     expect(l.join("\n")).toContain(governanceStatusDisplay(record).label);
     const receipt = record.reportSnapshot.milestone2?.decisionReceipt;
     if (receipt) {
@@ -93,9 +96,17 @@ describe("version-1 Decision Support DOCX", () => {
     const after = l.slice(end);
     const after0 = old.slice(e0);
     expect(after.length).toBe(after0.length);
+    // Item 6A structural correction (owner Option A, 2026-11-23): only the criterion-label quoting is reverted (verified
+    // exact inverse) before the line-for-line comparison; the reverted lines are exactly the historical Receipt lines.
+    let reverted = 0;
     after.forEach((t, i) => {
-      if (!(i === 1 && after0[0] === "Conclusion")) expect(t).toBe(after0[i]);
+      if (i === 1 && after0[0] === "Conclusion") return;
+      const h = historicalReceiptText(t);
+      if (h !== t) reverted++;
+      // Cases added after the capture are built by today's builder on both sides; the inverse is identity on frozen text.
+      expect(h).toBe(historicalReceiptText(after0[i]));
     });
+    expect([name, reverted]).toEqual([name, after0.map(historicalReceiptText).filter((t) => /^•\s+(Criterion: |.+ × .+: )/.test(t) || t === `•  ${LEGACY_INFERRED_CRITERIA_LIMITATION}`).length]);
     for (const m of PROVENANCE_MARKERS) expect(l.join("\n")).not.toContain(m);
   });
 

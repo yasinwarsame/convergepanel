@@ -53,6 +53,8 @@ import {
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
 import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
+import { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from "@/lib/adaptiveSchema/criterionProvenance";
+import { deriveRecordedStructuredOutputDisclosure, STRUCTURED_OUTPUT_SECTION_HEADING, structuredOutputDisclosureLines } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
 
 /**
  * A bulleted list. Each row is mark + text side by side. The text paginates
@@ -267,6 +269,31 @@ function PaginatingCard({ heading, children, keepAhead = CARD_HEADING_PRESENCE_A
 }
 
 /**
+ * Item 7A: the structured-output completeness section — the same shared disclosure and wording as the live report.
+ * Renders nothing for a complete run, a legacy-family export, or a record without the counts.
+ */
+function hasStructuredOutputDisclosure(record: AdaptiveResearchExportV1): boolean {
+  return record.schemaFamily === "milestone2" && deriveRecordedStructuredOutputDisclosure(record.reportSnapshot.milestone2?.meta) !== null;
+}
+
+function StructuredOutputSection({ record }: { record: AdaptiveResearchExportV1 }) {
+  const snapshot = record.reportSnapshot;
+  const d = record.schemaFamily === "milestone2" ? deriveRecordedStructuredOutputDisclosure(snapshot.milestone2?.meta) : null;
+  if (!d) return null;
+  const [head, ...rest] = structuredOutputDisclosureLines(d, (id) => exportModelIdentityLabel(snapshot.runProvenance, id));
+  return (
+    <SectionCard label={STRUCTURED_OUTPUT_SECTION_HEADING} bounded>
+      <Text style={pdfStyles.fieldValue}>{head}</Text>
+      {rest.map((line, i) => (
+        <Text key={i} style={pdfStyles.mutedText}>
+          {line}
+        </Text>
+      ))}
+    </SectionCard>
+  );
+}
+
+/**
  * A titled card. Content-bearing cards paginate (`PaginatingCard`). Only
  * cards whose content is structurally bounded and always far shorter than
  * one page (`bounded`) stay on one page as a single non-breaking block —
@@ -467,6 +494,8 @@ function Milestone2Content({ record }: { record: AdaptiveResearchExportV1 }) {
       </SectionCard>
       {r.basis.length > 0 && (
         <SectionCard label="Basis">
+          {/* Item 6A (F2, owner-authorized frozen-renderer exception): a stored pre-6A Receipt is rendered as recorded; only this read-only notice is added, and only when a basis line carries the retired "(user-provided)" suffix. */}
+          {receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? <Text style={[pdfStyles.mutedText, { marginBottom: 6 }]}>{LEGACY_FROZEN_RECEIPT_NOTICE}</Text> : null}
           <Bullets items={r.basis} closing={CARD_CLOSING_PADDING} />
         </SectionCard>
       )}
@@ -967,7 +996,15 @@ export function AdaptiveResearchDocument({ record }: { record: AdaptiveResearchE
     >
       <Page size="A4" style={pdfStyles.page} wrap>
         <CoverHeader record={record} />
-        <StatusSummary record={record} />
+        {/* Item 7A: without a disclosure the child list is exactly what it was (no extra element). */}
+        {hasStructuredOutputDisclosure(record) ? (
+          <>
+            <StatusSummary record={record} />
+            <StructuredOutputSection record={record} />
+          </>
+        ) : (
+          <StatusSummary record={record} />
+        )}
         {record.schemaFamily === "milestone2" ? <Milestone2Content record={record} /> : <LegacyContent record={record} />}
         <Provenance record={record} />
         <PageFooter />

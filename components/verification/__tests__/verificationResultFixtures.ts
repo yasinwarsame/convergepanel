@@ -34,7 +34,9 @@ export function claimFixture(over: Partial<ClaimVerificationClientPayload> = {})
       evidenceQuality: "strong",
       perModel: [
         { modelId: "chatgpt", pipelineStatus: "ok", verdictLabel: "accurate", confidence: "high", summaryLength: 21, counts: { correct: 1, incorrect: 0, unverifiable: 0 } },
-        { modelId: "claude", pipelineStatus: "parse_error", verdictLabel: null, confidence: null, summaryLength: 0, counts: { correct: 0, incorrect: 0, unverifiable: 0 } },
+        // Doc 14 PR-1 R3: the bundle row now matches the payload row (partially accurate). It previously said
+        // parse_error while the row was ok — an inconsistent record, which the per-model counts refuse to state.
+        { modelId: "claude", pipelineStatus: "ok", verdictLabel: "partially_accurate", confidence: "medium", summaryLength: 33, counts: { correct: 1, incorrect: 1, unverifiable: 1 } },
       ],
       generatedAt: "2026-09-10T12:00:00.000Z",
     } as ClaimVerificationClientPayload["auditBundle"],

@@ -34,6 +34,12 @@ describe("security-test pre-flight is wired into the Quality Gate", () => {
 
   it("the pre-flight runs before the test step, so a vacuous shape is reported even if tests fail", () => {
     expect(WORKFLOW.indexOf("security:preflight")).toBeLessThan(WORKFLOW.indexOf("npx jest"));
+    // Since the Jest suite moved into parallel shard jobs, "even if tests fail"
+    // rests on the required job still RUNNING when a shard fails: it waits for
+    // the shards under `always()`, not the default `success()`.
+    const required = WORKFLOW.slice(WORKFLOW.indexOf("name: Quality Gate"));
+    expect(required.slice(0, required.indexOf("steps:"))).toMatch(/\n {4}if: \$\{\{ always\(\) \}\}\n/);
+    expect(required.indexOf("security:preflight")).toBeLessThan(required.indexOf("check-jest-shards.js"));
   });
 
   it("ANCHOR: this test is reading the real workflow, not an empty string", () => {

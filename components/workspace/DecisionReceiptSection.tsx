@@ -27,6 +27,7 @@
 import { useState } from "react";
 import { hasUsableDecisionReceipt, type ReviewContextDecisionReceiptInfo } from "@/lib/client/workspaceReviewClient";
 import type { SourcePublisherClass } from "@/lib/sourceAuthority/types";
+import LegacyReceiptProvenanceNotice from "@/components/adaptive/LegacyReceiptProvenanceNotice";
 
 function CollapsibleReceiptList({ title, items }: { title: string; items: string[] }) {
   const [expanded, setExpanded] = useState(true);
@@ -227,6 +228,9 @@ export default function DecisionReceiptSection({ receipt, reviewOverview }: { re
           <span>{receipt.humanReviewNeeded ? "Human review needed" : "Human review not flagged as needed"}</span>
         </div>
       </div>
+
+      {/* Item 6A: a frozen pre-6A Receipt is shown exactly as recorded; only this read-only notice is added. */}
+      <LegacyReceiptProvenanceNotice basis={receipt.basis} schemaId={receipt.schemaId} />
 
       <div className="mt-4 space-y-3">
         <CollapsibleReceiptList title="Basis" items={receipt.basis} />

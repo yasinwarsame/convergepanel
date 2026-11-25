@@ -124,6 +124,8 @@ export interface ReviewContextDecisionReceiptInfo {
   sources: NormalizedSourceLink[];
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
+  /** Item 6A (N2): the frozen record's system-written schemaId (optional for compatibility; absent → no legacy notice). */
+  schemaId?: string;
 }
 
 /**

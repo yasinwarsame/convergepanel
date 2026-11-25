@@ -35,6 +35,7 @@ import { useTeamResearchSnapshot } from "@/hooks/useTeamResearchSnapshot";
 import { AddToTeamProjectDialog } from "@/components/workspace/AddToTeamProjectDialog";
 import type { TeamResearchSnapshotDto } from "@/lib/workspaces/teamResearchSnapshotResponse";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
+import { appHandoffHref } from "@/lib/client/verifyPrefill";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import { resolveShellReportLayout, type ReportLayout } from "@/lib/research/readableReport/layoutMode";
 import {
@@ -42,7 +43,6 @@ import {
   type PersistedResearchPresentation,
 } from "@/lib/research/persistedRunPresentation";
 import {
-  personalResearchFollowUpHref,
   personalResearchVerifyClaimHref,
 } from "@/lib/user/personalResearchHref";
 
@@ -308,11 +308,13 @@ export default function PersonalResearchDetailShell({ runId, reportLayout }: { r
    */
   const handleRunFollowUp = useCallback(
     (followUpQuestion: string) => {
-      const href = personalResearchFollowUpHref(followUpQuestion);
-      if (!href) return;
-      router.push(href);
+      // Privacy (PR #329 R3, owner D5): the question travels in the one-time tab-scoped hand-off and the
+      // navigation is `/?tab=research` — no question text in the URL (this page's memory holds it if sessionStorage is blocked).
+      const trimmed = typeof followUpQuestion === "string" ? followUpQuestion.trim() : "";
+      if (!trimmed) return;
+      router.push(appHandoffHref("research", trimmed, user?.uid ?? null));
     },
-    [router]
+    [router, user?.uid]
   );
 
   return (

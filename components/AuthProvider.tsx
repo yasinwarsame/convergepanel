@@ -56,6 +56,8 @@ import { nextSessionSyncState, canPerformProtectedMutation, type SessionSyncStat
 import { createGenerationGuard } from "@/lib/client/authGeneration";
 import { establishServerSession, clearServerSession } from "@/lib/client/sessionSync";
 import { logAuthSessionClientEvent } from "@/lib/client/authSessionTelemetry";
+import { clearLocalPrivateDataOnSignOut, clearOtherAccountsLocalData } from "@/lib/client/localPrivateData";
+import posthog from "posthog-js";
 
 interface AuthContextType {
   user: User | null;
@@ -76,6 +78,14 @@ interface AuthContextType {
    * `signed_out` — this just closes the gap before that fires.
    */
   beginLogout: () => void;
+  /**
+   * R5 (PR #329 R4 review MINOR-1): true while `authReady` comes ONLY from the
+   * 3 s cold-load timeout — the shell is unblocked as signed out, but Firebase
+   * has not reported an identity yet (a persisted account may still resolve).
+   * Identity-scoped UI (IdentityScopedRoute) treats this as "identity unknown",
+   * never as an anonymous identity. Becomes false at the first Firebase callback.
+   */
+  identityProvisional: boolean;
 }
 
 const noop = () => {};
@@ -89,6 +99,7 @@ const AuthContext = createContext<AuthContextType>({
   syncState: "signed_out",
   canMutate: false,
   beginLogout: noop,
+  identityProvisional: false,
 });
 
 /**
@@ -109,6 +120,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminResolved, setAdminResolved] = useState(false);
+  const [identityProvisional, setIdentityProvisional] = useState(false);
   const [syncState, dispatchSync] = useReducer(nextSessionSyncState, "signed_out");
 
   useEffect(() => {
@@ -119,10 +131,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let authReadySet = false;
     const generationGuard = createGenerationGuard();
     const prevUidRef = { current: null as string | null };
+    // Round 2 (review B1): the last identity Firebase reported in this tab,
+    // INCLUDING one whose server-session sync then failed (prevUidRef is reset
+    // before the fail-closed signOut). "Was someone signed in?" for the
+    // sign-out cleanup must not depend on whether their sync succeeded.
+    const lastIdentityRef = { current: null as string | null };
 
     const timeoutId = setTimeout(() => {
       if (!resolved && isMounted) {
         console.warn("[AuthProvider] Auth check timeout (3s) - unblocking shell, assuming no user");
+        // R5: an unblocked shell, not an identity — Firebase has not answered yet. Set FIRST: without batching (legacy
+        // roots, tests) every setter renders on its own, and no render may see authReady without this flag.
+        setIdentityProvisional(true);
         setUser(null);
         setLoading(false);
         setIsAdmin(false);
@@ -156,9 +176,34 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // ── Signed out (explicit logout, revoked session, or the SDK could not refresh) ──
       if (!nextUser) {
+        // Privacy remediation (2026-11-17 audit): this branch is reached by
+        // EVERY sign-out path (TopNav, profile, revoked/expired session,
+        // fail-closed sync failure), so it is the one place that removes
+        // browser-side copies of user content — the per-uid history cache
+        // (claims + model output) and, for a real sign-out, the /verify
+        // pending input — and, when
+        // an identity was actually signed in, unlinks the PostHog distinct
+        // id so later anonymous events are not attributed to that person.
+        // Synchronous and first, before any await, so nothing can re-read
+        // the cache in between.
+        const hadIdentity = prevUidRef.current !== null || lastIdentityRef.current !== null;
+        lastIdentityRef.current = null;
+        // Round 2 (review B1): the /verify pending input is cleared only when
+        // a signed-in identity signs out — an anonymous cold load also lands
+        // here and must keep it (lib/client/verifyPrefill.ts).
+        clearLocalPrivateDataOnSignOut({ hadIdentity });
+        if (hadIdentity) {
+          try {
+            posthog.reset();
+          } catch {
+            /* analytics never blocks sign-out */
+          }
+        }
         prevUidRef.current = null;
         dispatchSync({ type: "client_signed_out" });
         setUser(null);
+        setIdentityProvisional(false); // R5: Firebase answered — after setUser, so no render pairs the old user with it
+
         setLoading(false);
         setIsAdmin(false);
         setAdminResolved(true);
@@ -176,9 +221,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // ── Signed in: distinguish a new identity from a same-uid token refresh ──
       const isNewIdentity = prevUidRef.current === null || prevUidRef.current !== nextUser.uid;
       setUser(nextUser);
+      setIdentityProvisional(false); // R5: Firebase answered — after setUser (see the null branch)
       setLoading(false);
 
       if (isNewIdentity) {
+        // Privacy remediation (2026-11-17): a direct account switch (no
+        // logout in between) must not leave the previous account's cached
+        // history on this browser.
+        clearOtherAccountsLocalData(nextUser.uid);
+        lastIdentityRef.current = nextUser.uid;
         dispatchSync({ type: "client_signed_in", uid: nextUser.uid });
         dispatchSync({ type: "session_sync_started" });
       } else {
@@ -244,7 +295,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, authReady, isAdmin, adminResolved, syncState, canMutate: canPerformProtectedMutation(syncState), beginLogout }}
+      value={{ user, loading, authReady, isAdmin, adminResolved, syncState, canMutate: canPerformProtectedMutation(syncState), beginLogout, identityProvisional }}
     >
       {children}
     </AuthContext.Provider>

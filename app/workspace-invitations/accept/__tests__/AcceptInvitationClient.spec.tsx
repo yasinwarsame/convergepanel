@@ -15,6 +15,8 @@ import TestRenderer, { act } from "react-test-renderer";
 import {
   SESSION_STORAGE_KEY,
   INVITATION_ACCEPTANCE_ROUTE_PATH,
+  captureInvitationCredentialFromLocation,
+  takeCapturedInvitationCredential,
 } from "@/lib/client/invitationAcceptance";
 
 const SENTINEL = "SUPER_SECRET_INVITATION_TOKEN_987654";
@@ -38,6 +40,10 @@ jest.mock("firebase/auth", () => ({
 }));
 
 jest.mock("@/lib/firebase/client", () => ({ auth: { __fakeAuth: true } }));
+// The page runs in a telemetry-free document in every real flow (acceptance-origin or envelope-present); the
+// correction-round test below flips this to model a telemetry-enabled (back/forward-cache-restored) document.
+const mockTelemetryFree = jest.fn(() => true);
+jest.mock("@/lib/telemetry/telemetryFreeDocument", () => ({ isTelemetryFreeDocument: () => mockTelemetryFree() }));
 
 const mockedClearServerSession = jest.fn();
 jest.mock("@/lib/client/sessionSync", () => ({
@@ -165,6 +171,10 @@ describe("POST-LOGIN RESTORE", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(storage.backing.has(SESSION_STORAGE_KEY)).toBe(false);
   });
+
+  // The two telemetry-ENABLED-document gate tests (review R3 MAJOR-1, R4 NIT-2) moved to
+  // AcceptInvitationClientOwnership.spec.tsx: they hand envelope ownership to a successor document (one-way, per
+  // document), so each runs there in a fresh module registry (a fresh "document").
 
   it("enters invalid_or_expired when no hash and no restorable storage exist", async () => {
     setWindow({ hash: "" });
@@ -639,5 +649,78 @@ describe("Phase 12A.1 — post-acceptance redirect uses the response's own works
       "utf8"
     );
     expect(source).not.toMatch(/onClick=\{\(\) => router\.replace\("\/"\)\}/);
+  });
+});
+
+describe("GHSA-655j-5f43-92pw — credential handed off in memory by the pre-telemetry scrub", () => {
+  beforeEach(() => {
+    takeCapturedInvitationCredential(); // no capture leaks between tests
+  });
+
+  /** What scrubUrlBeforeTelemetry() leaves behind on a full page load: the credential in memory, the fragment gone. */
+  function preScrubbed(hash: string) {
+    captureInvitationCredentialFromLocation({ pathname: INVITATION_ACCEPTANCE_ROUTE_PATH, hash });
+    return setWindow({ hash: "" });
+  }
+
+  it("signed in: accepts with the in-memory credential although the address bar no longer has a fragment", async () => {
+    const { win, storage } = preScrubbed(`#invitationId=${INVITATION_ID}&token=${SENTINEL}`);
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
+    await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe(`/api/workspace-invitations/${encodeURIComponent(INVITATION_ID)}/accept`);
+    expect(JSON.parse(init.body)).toEqual({ token: SENTINEL });
+    // Nothing to scrub (already clean), and the credential is never written to storage on this path.
+    expect(win.history.replaceState).not.toHaveBeenCalled();
+    expect([...storage.backing.values()].join("")).not.toContain(SENTINEL);
+  });
+
+  it("the in-memory credential is authoritative over an older stored credential (as a fragment was)", async () => {
+    const { storage } = preScrubbed(`#invitationId=${INVITATION_ID}&token=${SENTINEL}`);
+    storage.backing.set(SESSION_STORAGE_KEY, JSON.stringify({ version: 1, invitationId: "stale-inv", token: "stale-token", storedAt: Date.now() }));
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
+    await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    const url = (global.fetch as jest.Mock).mock.calls[0][0] as string;
+    expect(url).toContain(encodeURIComponent(INVITATION_ID));
+    expect(url).not.toContain("stale-inv");
+  });
+
+  it("an invalid captured credential fails closed: clears storage, invalid_or_expired, no fetch, no stored fallback", async () => {
+    const { storage } = preScrubbed("#invitationId=inv-1&invitationId=inv-2&token=abc");
+    storage.backing.set(SESSION_STORAGE_KEY, JSON.stringify({ version: 1, invitationId: "stale-inv", token: "stale-token", storedAt: Date.now() }));
+    const renderer = await mount(authState({ authReady: true, syncState: "signed_out" }));
+    expect(renderer.root.findByType("h1").props.children).toBe("Invitation unavailable");
+    expect(storage.backing.has(SESSION_STORAGE_KEY)).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("the hand-off is single-use: a second mount (soft navigation back, remount) does not see the credential again", async () => {
+    preScrubbed(`#invitationId=${INVITATION_ID}&token=${SENTINEL}`);
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
+    const first = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    act(() => first.unmount());
+    setWindow({ hash: "" });
+    const second = await mount(authState({ authReady: true, syncState: "signed_out" }));
+    expect(second.root.findByType("h1").props.children).toBe("Invitation unavailable");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("signed out: the existing continuity path is unchanged (static login URL, credential only in the pre-existing sessionStorage envelope)", async () => {
+    const { storage } = preScrubbed(`#invitationId=${INVITATION_ID}&token=${SENTINEL}`);
+    await mount(authState({ authReady: true, syncState: "signed_out" }));
+    expect(mockedRouterReplace).toHaveBeenCalledWith(`/login?redirect=${encodeURIComponent(INVITATION_ACCEPTANCE_ROUTE_PATH)}`);
+    expect(mockedRouterReplace.mock.calls.flat().join("")).not.toContain(SENTINEL);
+    expect([...storage.backing.keys()]).toEqual([SESSION_STORAGE_KEY]);
+  });
+
+  it("only the acceptance path is captured; another path, or a bare '#', leaves nothing to take", () => {
+    captureInvitationCredentialFromLocation({ pathname: "/workspace", hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    expect(takeCapturedInvitationCredential()).toBeNull();
+    captureInvitationCredentialFromLocation({ pathname: INVITATION_ACCEPTANCE_ROUTE_PATH, hash: "#" });
+    expect(takeCapturedInvitationCredential()).toBeNull();
+    captureInvitationCredentialFromLocation({ pathname: `${INVITATION_ACCEPTANCE_ROUTE_PATH}/`, hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    expect(takeCapturedInvitationCredential()).toEqual({ kind: "valid", invitationId: INVITATION_ID, token: SENTINEL });
   });
 });

@@ -234,11 +234,15 @@ describe("GET /api/governance/queue + GovernanceDashboard — claim wording by e
     ];
     const r = (await rows())["contested"];
     expect(r.modelIndependence).toBe("insufficient");
-    expect(r.qualifiedDisagreements).toEqual([{ text: "Conflicting assessments: (chatgpt) vs (grok)", basis: "single_independent_model" }]);
+    // Doc 14 PR-1 (D-5): a parse_error row has no usable verdict, so it is on no side and never forms a "conflict" with
+    // another model's parts (before PR-1: "Conflicting assessments: (chatgpt) vs (grok)", single_independent_model).
+    expect(r.qualifiedDisagreements).toBeUndefined();
     expect(r.singleModelAssessment).toBe("One independent model's assessment (ChatGPT): partially accurate — not agreement between models");
     const html = render(r);
     expect(html).not.toMatch(MULTI_MODEL);
-    expect(html).toContain(`(${QUALIFIED_DISAGREEMENT_TEXT.single_independent_model})`);
+    // No qualified disagreement remains, so its qualifier is not rendered (before PR-1 it qualified the spurious pair).
+    expect(html).not.toContain(`(${QUALIFIED_DISAGREEMENT_TEXT.single_independent_model})`);
+    expect(html).toContain(r.singleModelAssessment);
   });
 
   it("missing provenance: tally stated as responses, independence unverified; nothing between models", async () => {
@@ -268,7 +272,10 @@ describe("GET /api/governance/queue + GovernanceDashboard — claim wording by e
     expect(r.agreementSummary).toBe("2/3 models say inaccurate");
     expect(r.dissentSummary).toBe("Dissent: ChatGPT: Accurate");
     expect(r.disagreementPoints).toEqual(["ChatGPT rated as accurate (others disagree)", "Claude, Grok rated as inaccurate (others disagree)"]);
-    expect(r.disagreements).toEqual(["Conflicting assessments: (claude) vs (grok)"]);
+    // Doc 14 PR-1 (D-5): claude and grok BOTH rated it inaccurate; differently worded reasons are not a conflict between
+    // them (before PR-1 this pinned the defect: ["Conflicting assessments: (claude) vs (grok)"]). The real dissent stays
+    // in agreementSummary / dissentSummary / disagreementPoints above.
+    expect("disagreements" in r).toBe(false);
     const html = render(r);
     expect(html).toContain("Where models disagree");
     expect(html).toContain("ChatGPT rated as accurate (others disagree)");

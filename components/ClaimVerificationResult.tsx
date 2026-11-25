@@ -24,7 +24,7 @@ import { GovernanceBadge } from "@/components/GovernanceBadge";
 import { VerificationActions } from "@/components/VerificationActions";
 import { downloadTextFile, generateVerificationMemo } from "@/lib/verification/generateMemo";
 import ClaimVerificationResultView, {
-  claimViewIndependence,
+  claimMemoInput,
   buildClaimVerdictClipboardText,
   ClaimVerificationAuditTrailDetails,
 } from "@/components/verification/ClaimVerificationResultView";
@@ -109,47 +109,17 @@ export default function ClaimVerificationResult({
   }, [data.verificationId, user, authReady]);
 
   const bundle = data.auditBundle;
-  const evidenceQ = data.evidenceQuality ?? bundle.evidenceQuality;
 
   const copyVerdict = useCallback((): Promise<void> => {
     return navigator.clipboard.writeText(buildClaimVerdictClipboardText(data));
   }, [data]);
 
   const handleExportMemo = useCallback(() => {
-    // C-b (CB-10): the independence the view presents (server value confirmed by the shared gate over the rows) and,
-    // for an independent claim, the gate's counts — never the number of rows.
-    const view = claimViewIndependence(data);
-    const claimExecution =
-      view.independence === "independent" && view.identity.verified && view.identity.independentModels !== null
-        ? { independentModels: view.identity.independentModels, answeredSlots: view.identity.answeredSlots }
-        : undefined;
-    const memo = generateVerificationMemo({
-      type: "claim",
-      claim: data.claim,
-      verdict: data.verdict,
-      consensusScore: data.consensusScore,
-      confidenceLabel: data.confidenceLabel,
-      evidenceQuality: typeof evidenceQ === "string" ? evidenceQ : "mixed",
-      modelEvidence: data.modelEvidence.map((m) => ({
-        modelId: m.modelId,
-        status: m.status,
-        verdict: m.verdict,
-        confidence: m.confidence,
-        summary: m.summary,
-        correctParts: m.correctParts,
-        incorrectParts: m.incorrectParts,
-        unverifiableParts: m.unverifiableParts,
-      })),
-      agreementPoints: data.whereModelsAgree,
-      disagreementPoints: data.whereModelsDisagree.map((d) => d.point),
-      verificationId: data.verificationId ?? "",
-      // Fail closed: a payload without recorded independence is "unverified" (no consensus score in the memo).
-      claimModelIndependence: view.independence,
-      ...(claimExecution ? { claimExecution } : {}),
-    });
+    // The memo input is built by the shared view module (C-b CB-10 independence + counts; R4 statement basis).
+    const memo = generateVerificationMemo(claimMemoInput(data));
     const base = data.verificationId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());
     downloadTextFile(memo, `claim-memo-${base}.txt`);
-  }, [data, evidenceQ]);
+  }, [data]);
 
   const showGov =
     data.governanceReviewRequired ||

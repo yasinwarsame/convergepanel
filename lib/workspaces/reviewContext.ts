@@ -170,6 +170,8 @@ export interface ReviewContextDecisionReceiptInfo {
   sources: ReviewContextSourceLink[];
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
+  /** Item 6A (N2): the frozen governance record's own system-written schemaId, so the legacy-provenance notice is gated on trusted structure, never on Receipt text. */
+  schemaId: string;
 }
 
 /**
@@ -479,6 +481,7 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
         sources,
         sourceBacked: record.decisionReceipt.sourceBacked,
         humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
+        schemaId: record.schemaId,
       },
       review: {
         status: record.humanReview.status,
