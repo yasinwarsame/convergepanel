@@ -381,6 +381,22 @@ describe("C1 correction — the account changes while the page is mounted", () =
     expect(JSON.stringify(r.toJSON())).toContain("Loading your invitation");
   });
 
+  it("Retry while the account is not mutation-ready (re-syncing) obtains no token and sends nothing", async () => {
+    jar.value = "sess:uid-a";
+    mockedAccept.mockResolvedValueOnce({ status: "auth_lookup_failed" }); // 503 → Retry offered
+    const a = shownUser("uid-a");
+    const r = await mount(authenticatedAs(a));
+    expect(heading(r)).toBe("Temporarily unavailable");
+    const tokenCalls = a.getIdToken.mock.calls.length;
+    const retry = findButton(r, "Retry")!;
+    await rerender(r, { ...authenticatedAs(a), syncState: "syncing_session", canMutate: false });
+    await act(async () => { retry.props.onClick(); });
+    await settle();
+    expect(a.getIdToken.mock.calls.length).toBe(tokenCalls);
+    expect(sent).toEqual(["Bearer id:uid-a"]);
+    expect(JSON.stringify(r.toJSON())).toContain("Loading your invitation");
+  });
+
   it("Retry after switching A → B while mounted sends B's bearer only", async () => {
     jar.value = "sess:uid-a";
     mockedAccept.mockResolvedValueOnce({ status: "auth_lookup_failed" }); // 503 → Retry offered
