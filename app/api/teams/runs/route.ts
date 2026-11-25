@@ -14,6 +14,7 @@ import {
 import { logger } from "@/lib/logger";
 import { storedRunConsensusIndependence, type StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
+import { storedClaimConsensusBasis, type ClaimConsensusBasis } from "@/lib/verification/claimStatementBasisSources";
 import {
   classifyTeamRunRow,
   parseTeamRunListFilters,
@@ -155,13 +156,16 @@ async function enrichPageItems(
     legacyIndependenceByRunId.set(runId, storedRunConsensusIndependence(result.snap.data() as Record<string, unknown> | undefined));
   });
   const legacyIndependenceByVerificationId = new Map<string, StoredConsensusIndependence>();
+  // R5 (review record 16 F, MAJOR-1): the presented claim score's basis, from the SAME read and the same shared
+  // statement basis as the governance queue (lib/verification/claimStatementBasisSources.ts). Presentation only.
+  const legacyClaimBasisByVerificationId = new Map<string, ClaimConsensusBasis>();
   legacyVerificationIds.forEach((verificationId, idx) => {
     const result = legacyVerificationSnaps[idx];
     if (result.failed || !result.snap?.exists) return;
-    legacyIndependenceByVerificationId.set(
-      verificationId,
-      storedVerificationConsensusIndependence(result.snap.data() as Record<string, unknown> | undefined)
-    );
+    const data = result.snap.data() as Record<string, unknown> | undefined;
+    legacyIndependenceByVerificationId.set(verificationId, storedVerificationConsensusIndependence(data));
+    const basis = storedClaimConsensusBasis(data);
+    if (basis) legacyClaimBasisByVerificationId.set(verificationId, basis);
   });
 
   const governanceByRunId = new Map<string, GovernanceRecordV1 | null>();
@@ -242,16 +246,19 @@ async function enrichPageItems(
   for (const item of pageItems) {
     if (item.kind === "legacy") {
       const enrichedLegacy = await enrichLegacyTeamRunListItem(item, item.humanDecision?.decidedBy, resolveDisplayName);
-      enriched.push(
-        applyLegacyConsensusIndependence(
-          enrichedLegacy,
-          item.runId
-            ? legacyIndependenceByRunId.get(item.runId) ?? null
-            : item.verificationId
-              ? legacyIndependenceByVerificationId.get(item.verificationId) ?? null
-              : null
-        )
+      const presented = applyLegacyConsensusIndependence(
+        enrichedLegacy,
+        item.runId
+          ? legacyIndependenceByRunId.get(item.runId) ?? null
+          : item.verificationId
+            ? legacyIndependenceByVerificationId.get(item.verificationId) ?? null
+            : null
       );
+      // Additive, claim rows only, and only when the score is presented (never on a withheld score).
+      const basis = !item.runId && item.verificationId && !presented.consensusWithheld ? legacyClaimBasisByVerificationId.get(item.verificationId) : undefined;
+      // `consensusBasis` is a presentation key beyond the lib/governance DTO type (which stays byte-identical).
+      const withBasis: EnrichedTeamRunListItemV1 & { consensusBasis?: ClaimConsensusBasis } = basis ? { ...presented, consensusBasis: basis } : presented;
+      enriched.push(withBasis);
     } else {
       const enrichedItem = await enrichAdaptiveTeamRunListItem(
         item,

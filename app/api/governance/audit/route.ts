@@ -16,6 +16,8 @@ import { governanceTrailAccessible } from "@/lib/governance/governanceTrailAcces
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
+import { storedClaimHistoryScoreFields } from "@/lib/verification/claimStatementBasisSources";
+import type { ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -244,6 +246,10 @@ const AUDIT_LOG_SELECT_FIELDS = [
 const AUDIT_OWNER_PROFILE_CHUNK = 10;
 
 type AuditResponseEvent = Omit<AuditEvent, "byEmail" | "runOwnerUid" | "runOwnerEmail"> & {
+  /** Claim events only (R5): presentation-only — the recorded score is withheld with this reason. */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+  /** Claim events only (R5): the recorded score was computed over panel slot responses. */
+  consensusBasis?: "slot_responses";
   byEmail?: string;
   runOwnerEmail?: string;
   runOwnerIsViewer?: true;
@@ -514,6 +520,64 @@ function markTrailAvailability(
   });
 }
 
+/**
+ * R5 (review record 16 F, MINOR-1) — the claim score presentation of an Audit Log row, on the SAME shared claim score
+ * basis as every other claim surface (lib/verification/claimStatementBasisSources.ts, rendered by
+ * lib/verification/claimConsensusPresentation.ts `claimScoreText`): computed from the linked `verifications/{id}`
+ * persisted rows. Presentation only — the audit event, its recorded `consensusScore` and every governance decision are
+ * unchanged. Research and video events are not claim records and get nothing. A parent that is missing, not a claim
+ * verification, or unreadable proves no basis → `independence_unverified` (fail closed).
+ */
+type ClaimScorePresentation = { consensusWithheld?: ConsensusScoreWithheldReason; consensusBasis?: "slot_responses" };
+const CLAIM_SCORE_FIELD_MASK = ["type", "modelResults", "selectedModels"];
+
+function isClaimScoreEvent(e: AuditEvent): boolean {
+  return (e.collection ?? "").trim() === "verifications" && !!(e.runId ?? "").trim() && typeof e.consensusScore === "number";
+}
+
+function claimScorePresentationOf(data: Record<string, unknown> | null | undefined): ClaimScorePresentation {
+  if (!data || (data.type !== undefined && data.type !== null && data.type !== "claim_verification")) {
+    return { consensusWithheld: "independence_unverified" };
+  }
+  const f = storedClaimHistoryScoreFields(data);
+  return { ...(f.consensusWithheld ? { consensusWithheld: f.consensusWithheld } : {}), ...(f.consensusBasis ? { consensusBasis: f.consensusBasis } : {}) };
+}
+
+/** One batched, field-masked read of the claim parents of the rows being returned (bounded by the page). Never throws. */
+async function readClaimScorePresentations(events: AuditEvent[]): Promise<Map<string, ClaimScorePresentation>> {
+  const out = new Map<string, ClaimScorePresentation>();
+  const db = adminDb;
+  const ids = [...new Set(events.filter(isClaimScoreEvent).map((e) => (e.runId as string).trim()))];
+  if (!db || ids.length === 0) return out;
+  for (let i = 0; i < ids.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
+    const chunk = ids.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
+    try {
+      const snaps = await db.getAll(...chunk.map((id) => db.collection("verifications").doc(id)), { fieldMask: CLAIM_SCORE_FIELD_MASK });
+      chunk.forEach((id, j) => {
+        const snap = snaps[j];
+        out.set(id, claimScorePresentationOf(snap && snap.exists === true ? (snap.data() as Record<string, unknown>) : null));
+      });
+    } catch (err) {
+      logger.warn("[governance/audit] claim_score_basis_read_failed", { errorName: err instanceof Error ? err.name : typeof err });
+    }
+  }
+  return out;
+}
+
+/** Adds the claim score presentation keys to each claim row (`source[i]` is the event `presented[i]` was built from). */
+function withClaimScorePresentation(
+  presented: AuditResponseEvent[],
+  source: AuditEvent[],
+  byRunId: ReadonlyMap<string, ClaimScorePresentation>
+): AuditResponseEvent[] {
+  return presented.map((row, i) => {
+    const e = source[i];
+    if (!e || !isClaimScoreEvent(e)) return row;
+    const p = byRunId.get((e.runId as string).trim()) ?? { consensusWithheld: "independence_unverified" as const };
+    return { ...row, ...p };
+  });
+}
+
 /** Fetch recent docs; prefer orderBy("at"), fall back to plain limit if index/field issues. */
 async function fetchRecentAuditDocs(maxDocs: number) {
   if (!adminDb) return [];
@@ -597,6 +661,10 @@ export async function GET(request: NextRequest) {
         );
       }
       const parentData = parentSnap.data() as Record<string, unknown>;
+      // R5: the drilldown already holds the full parent — its claim score presentation needs no extra read.
+      const drilldownClaimScore = new Map<string, ClaimScorePresentation>(
+        collection === "verifications" ? [[runId.trim(), claimScorePresentationOf(parentData)]] : []
+      );
 
       // TEAM-VERIFICATION-PARITY-R1 — a Workspace-bound Claim/Video has no
       // legacy governance audit drilldown for anyone. Concealed exactly like a
@@ -668,7 +736,11 @@ export async function GET(request: NextRequest) {
         const trimmed = sorted.slice(0, limit);
         if (trimmed.length > 0) {
           const tEm0 = Date.now();
-          const presented = await presentAuditEventsForViewer(trimmed, resolved.uid, vis.visibleUserIds);
+          const presented = withClaimScorePresentation(
+            await presentAuditEventsForViewer(trimmed, resolved.uid, vis.visibleUserIds),
+            trimmed,
+            drilldownClaimScore
+          );
           console.log(`[governance/audit] Email lookups: ${Date.now() - tEm0}ms`);
           console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
           return NextResponse.json({ ok: true, events: presented, runId, collection });
@@ -698,7 +770,11 @@ export async function GET(request: NextRequest) {
         events = filterEventsToViewerActions(events, resolved.uid);
         const out1 = events.slice(0, limit);
         const tEm1 = Date.now();
-        const presented1 = await presentAuditEventsForViewer(out1, resolved.uid, vis.visibleUserIds);
+        const presented1 = withClaimScorePresentation(
+            await presentAuditEventsForViewer(out1, resolved.uid, vis.visibleUserIds),
+            out1,
+            drilldownClaimScore
+          );
         console.log(`[governance/audit] Email lookups: ${Date.now() - tEm1}ms`);
         console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
         return NextResponse.json({ ok: true, events: presented1, runId, collection });
@@ -717,7 +793,11 @@ export async function GET(request: NextRequest) {
         events = filterEventsToViewerActions(events, resolved.uid);
         const out2 = events.slice(0, limit);
         const tEm2 = Date.now();
-        const presented2 = await presentAuditEventsForViewer(out2, resolved.uid, vis.visibleUserIds);
+        const presented2 = withClaimScorePresentation(
+            await presentAuditEventsForViewer(out2, resolved.uid, vis.visibleUserIds),
+            out2,
+            drilldownClaimScore
+          );
         console.log(`[governance/audit] Email lookups: ${Date.now() - tEm2}ms`);
         console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
         return NextResponse.json({
@@ -786,12 +866,16 @@ export async function GET(request: NextRequest) {
     );
 
     const tEm3 = Date.now();
-    const presented3 = markTrailAvailability(
-      await presentAuditEventsForViewer(events, resolved.uid, vis.visibleUserIds, contained.runParents),
+    const presented3 = withClaimScorePresentation(
+      markTrailAvailability(
+        await presentAuditEventsForViewer(events, resolved.uid, vis.visibleUserIds, contained.runParents),
+        events,
+        contained.parentOwners,
+        resolved.uid,
+        vis.visibleUserIds
+      ),
       events,
-      contained.parentOwners,
-      resolved.uid,
-      vis.visibleUserIds
+      await readClaimScorePresentations(events)
     );
     console.log(`[governance/audit] Email lookups: ${Date.now() - tEm3}ms`);
     console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);

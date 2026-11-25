@@ -11,6 +11,7 @@ import { loadGovernancePolicy } from "@/lib/governance/governancePolicyStore";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
 import { runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
+import { logger } from "@/lib/logger";
 import { evaluateGovernance } from "./evaluateGovernance";
 import type { GovernanceInput, GovernancePolicy } from "./evaluateGovernance";
 
@@ -55,21 +56,20 @@ export async function evaluateAndStoreGovernance(params: {
     }
 
     const policy = await loadPolicy();
-    console.log(
-      "[governance/evaluateAndStore] Full input:",
-      JSON.stringify(
-        {
-          runId: params.runId,
-          collection: params.collection,
-          consensusScore: params.input.consensusScore,
-          evidenceQuality: params.input.evidenceQuality,
-          runType: params.input.runType,
-          question: params.input.question?.substring(0, 50),
-        },
-        null,
-        2
-      )
-    );
+    // Privacy remediation (2026-11-17 audit, L1): previously an unconditional
+    // `console.log` that wrote the first 50 characters of the user's claim /
+    // question to the runtime log on every paid run. Now metadata only — the
+    // question's LENGTH, never its text — via the shared logger, at info so the
+    // operational signal (which run, which scores) is unchanged. (Line count kept:
+    // workspaceReviewPanelMutations.spec.ts pins the `.add()` site below by line.)
+    logger.info("[governance/evaluateAndStore] Evaluating governance", {
+      runId: params.runId,
+      collection: params.collection,
+      consensusScore: params.input.consensusScore,
+      evidenceQuality: params.input.evidenceQuality,
+      runType: params.input.runType,
+      questionLength: typeof params.input.question === "string" ? params.input.question.length : 0,
+    });
     const result = evaluateGovernance(params.input, policy);
 
     const statusDoc = sanitizeForFirestore({

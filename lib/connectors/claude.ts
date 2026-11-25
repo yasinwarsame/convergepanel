@@ -9,6 +9,11 @@ import { isApiKeyConfigured, providerNotConfiguredResult } from "./providerNotCo
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
+import { claudeTermination } from "./termination";
+import { connectorMaxTokens } from "@/lib/outputBudgetRepairPolicy";
+
+/** The exact Anthropic model this connector sends (also pinned in lib/outputBudgetRepairPolicy.ts). */
+export const CLAUDE_PROVIDER_MODEL = "claude-haiku-4-5-20251001";
 
 /**
  * Create a timeout promise that rejects after the model's configured timeout
@@ -59,8 +64,8 @@ export async function callClaude(
     const message = await Promise.race([
       anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
-        // Use centralized token limits to ensure consistent, deep responses without truncation
-        max_tokens: claudeLimits.maxTokens,
+        // Centralized first-attempt cap; an Item 7B repair call may raise it only to the pinned repair cap.
+        max_tokens: connectorMaxTokens("claude", CLAUDE_PROVIDER_MODEL, claudeLimits.maxTokens, opts?.outputBudgetRepairMaxTokens),
         system: systemPrompt,
         messages: [{ role: "user", content: sanitizedQuestion }],
       }),
@@ -87,6 +92,7 @@ export async function callClaude(
     // Check for API truncation (stop_reason === "max_tokens" indicates response was cut due to token limit)
     // Anthropic uses "stop_reason" instead of "finish_reason" (OpenAI/Grok format)
     const stopReason = (message as any).stop_reason;
+    const terminationReason = claudeTermination(stopReason);
     if (stopReason === "max_tokens") {
       console.warn(
         "[Claude connector] Response truncated due to token limit (stop_reason=max_tokens). " +
@@ -140,11 +146,13 @@ export async function callClaude(
       latencyMs,
       tokenUsage: normalizedTokenUsage, // Always include tokenUsage (never undefined)
       rawResponse: message, // Store raw response for token extraction and debugging
+      // Item 7B: the provider-reported reason, independent of status (an empty max_tokens answer stays "error").
+      ...(terminationReason ? { terminationReason } : {}),
     };
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
     console.error("Claude API error:", {
-      message: error?.message,
+      messageLength: typeof error?.message === "string" ? error.message.length : 0, // privacy: provider messages can echo content
       status: error?.status,
       name: error?.name,
     });

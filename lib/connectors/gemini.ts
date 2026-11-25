@@ -24,6 +24,7 @@ import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } fro
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { logger } from "@/lib/logger";
 import { buildGeminiEmptyResponseDiagnostic, buildGeminiFailureDiagnostic } from "./geminiFailureDiagnostic";
+import { geminiTermination } from "./termination";
 
 /** The one Production failure log line (sanitized: see geminiFailureDiagnostic.ts). Never pass error.message here. */
 function logGeminiFailure(diagnostic: object): void {
@@ -297,7 +298,7 @@ export async function callGemini(
             console.error(`[Gemini connector] 400 Bad Request - Invalid contents:`, {
               runId,
               provider: "gemini",
-              errorMessage: fetchError?.message,
+              errorMessageLength: String(fetchError?.message ?? "").length /* privacy: can echo request content */,
               requestShape: {
                 contentsType: typeof requestContents,
                 isContentsArray: Array.isArray(requestContents),
@@ -386,6 +387,8 @@ export async function callGemini(
       // Check if response was truncated due to max output tokens
       // Gemini uses "MAX_OUTPUT_TOKENS" as finish reason when hitting the limit
       const wasTruncated = finishReason === "MAX_TOKENS" || finishReason === "MAX_OUTPUT_TOKENS";
+      // Item 7B: the documented reason only (MAX_TOKENS), independent of status and of the wasTruncated flag above.
+      const terminationReason = geminiTermination(finishReason);
       
       // If empty, return provider error (do not silently return empty string)
       if (!text || text.length === 0) {
@@ -412,6 +415,7 @@ export async function callGemini(
             tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null }, // CRITICAL: Always include tokenUsage
             hasUsageMetadata: false, // No usage metadata on refusal
             wasTruncated: false, // Not truncated if empty due to safety
+            ...(terminationReason ? { terminationReason } : {}),
           };
         }
         
@@ -426,6 +430,8 @@ export async function callGemini(
           tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null }, // CRITICAL: Always include tokenUsage, even on error
           hasUsageMetadata: false, // No usage metadata on error
           wasTruncated: false, // Not truncated if empty
+          // Item 7B: an empty MAX_TOKENS answer is a completed call that hit its budget (status stays "error").
+          ...(terminationReason ? { terminationReason } : {}),
         };
       }
 
@@ -546,6 +552,7 @@ export async function callGemini(
         rawResponse: result, // Store raw response for token extraction and debugging
         hasUsageMetadata, // Persist flag for debugging/audit
         wasTruncated, // Flag indicating if response hit max output tokens
+        ...(terminationReason ? { terminationReason } : {}),
       };
     } catch (error: any) {
       // Handle SDK errors
@@ -573,7 +580,7 @@ export async function callGemini(
         console.error("[Gemini connector] API error:", {
           runId,
           provider: "gemini",
-          message: error?.message,
+          messageLength: String(error?.message ?? "").length, // privacy: provider messages can echo content
           status: error?.status,
           name: error?.name,
           attempt: attempt + 1,
@@ -618,7 +625,7 @@ export async function callGemini(
             runId,
             provider: "gemini",
             errorStatus: error?.status,
-            errorMessage: error?.message,
+            errorMessageLength: String(error?.message ?? "").length, // privacy: provider messages can echo content
             keyPresent: true, // Key was present but invalid
           });
         }

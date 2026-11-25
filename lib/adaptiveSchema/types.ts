@@ -904,7 +904,12 @@ export interface AggregatedDecisionOption {
 export interface AggregatedDecisionCriterion {
   id: string;
   label: string;
-  /** "user" if ANY contributing model flagged this criterion as coming from the user's own question/constraints; "model" otherwise. A simplified two-way read of the recommended type's three-way user/inferred/model provenance — a wire-layer self-report can't reliably distinguish "inferred from context" from "purely model-generated". */
+  /**
+   * Item 6A: on results carrying `criteriaProvenance: "request_text_v1"`, "user" means this criterion's displayed
+   * label occurs as a whole-token phrase in the user's original request (criterionProvenance.ts); anything else is
+   * "model". Model self-reports never set it. On older results (no marker) a "user" value came from a model
+   * self-report and is unverified. Always read through readCriterionProvenance(), never directly.
+   */
   source: "user" | "model";
   coverageCount: number;
   totalModels: number;
@@ -982,6 +987,8 @@ export interface DecisionSupportResult {
   /** Phase 10D.1 — response-level union of every contributing model's own `sources` field, exact-string deduplicated, first-seen order. Plain labels AND URLs both survive here; URL-only filtering for display happens at the decision-receipt/UI boundary, never here. */
   sources: string[];
   totalModels: number;
+  /** Item 6A provenance-generation marker. Present on every result aggregated under the request-text rule; absent on older persisted results, whose criterion provenance is unverified. */
+  criteriaProvenance?: "request_text_v1";
 }
 
 export interface Scenario {
@@ -1115,6 +1122,17 @@ export interface AdaptiveModelResult {
   truncatedFields?: string[];
   /** Field keys the schema declares that are absent from `data` because no valid value survived coercion + salvage (+ retry). */
   invalidFields?: string[];
+  /**
+   * Item 7A: per array field KEPT in `data`, how many of the model's items were discarded by field-level salvage
+   * because they failed validation. Counts only; the discarded content is never kept. Present only when at least one
+   * item was discarded; absent on every result produced before this field existed.
+   */
+  droppedItems?: Record<string, number>;
+  /**
+   * Item 7A: per array field, how many whole items were cut because the field exceeded the schema's item cap. Counts
+   * only. Text trimmed to a word cap is not counted here; `truncatedFields` lists every field shortened by either cap.
+   */
+  itemsOverLimit?: Record<string, number>;
   /** Enum coercions applied before validation, across every claim[]-shaped field. Empty/absent when the raw response already used exact enum vocabulary. */
   coercions?: AdaptiveEnumCoercion[];
   /** True when this result reflects the one-shot retry call (original response failed validation, model was re-prompted with the errors). */
@@ -1644,6 +1662,53 @@ export interface CommonResponseMeta {
   /** Concrete, deduplicated, schema-specific statements about this RESULT's own completeness/provenance (e.g. "2 of 5 models did not produce usable output") — deliberately distinct from `uncertainties`/`blindSpots` above, which carry the SCHEMA'S OWN content (e.g. decision_support's self-reported uncertainties), not meta-level completeness signals. */
   limitations?: string[];
   executionStatus?: "completed" | "partial" | "failed";
+  /**
+   * Item 7A: per selected slot, how complete its structured output was. Written only when at least one slot was not
+   * complete (unavailable, partially salvaged, or shortened by a word or item cap); absent for complete runs and for
+   * every run recorded before Item 7A, where per-model detail is therefore NOT known. Whether a shortening is material
+   * is decided at read time (structuredOutputDisclosure.ts). Schema field keys and counts only, never model content.
+   */
+  structuredOutput?: StructuredOutputRecordV1;
+}
+
+/** Item 7A: how one selected slot's structured output was used. */
+export type StructuredOutputSlotResult = "complete" | "partial" | "unavailable";
+
+/**
+ * Item 7B (owner D1): why a slot was not complete, when that is known. A small closed set:
+ *   - "output_budget_exhausted": the standing answer's own provider reported that it stopped at its output-token budget,
+ *     and nothing usable came back (only on an "unavailable" slot; the call itself may be "completed" or "failed");
+ *   - "validation_failure": the adopted answer finished normally, but did not pass schema validation;
+ *   - "provider_failure": the provider call did not complete;
+ *   - "unknown": none of the above could be established (never guessed from malformed JSON).
+ * Describes the ADOPTED answer, never a discarded attempt. Absent on complete slots, on a slot shortened only by a
+ * schema cap (by design, not a failure), and on every record written before Item 7B.
+ */
+export const STRUCTURED_OUTPUT_CAUSES = ["output_budget_exhausted", "validation_failure", "provider_failure", "unknown"] as const;
+export type StructuredOutputCause = (typeof STRUCTURED_OUTPUT_CAUSES)[number];
+
+export interface StructuredOutputSlotV1 {
+  modelId: ModelId;
+  /** Whether the provider call completed ("ok" or "substituted") — kept separate from whether its output was usable. */
+  call: "completed" | "failed";
+  /** "unavailable": nothing usable survived validation. "partial": some fields or items were not recovered, or were shortened by a cap. */
+  result: StructuredOutputSlotResult;
+  /** Schema field keys with no usable value. */
+  invalidFields?: string[];
+  /** Per kept array field, the number of items discarded by salvage. */
+  droppedItems?: Record<string, number>;
+  /** Per array field, the number of whole items cut by the schema's item cap. */
+  itemsOverLimit?: Record<string, number>;
+  /** Field keys shortened by a word cap or an item cap (the result's `truncatedFields`). */
+  shortenedFields?: string[];
+  /** Item 7B: why this slot was not complete, when known (see StructuredOutputCause). */
+  cause?: StructuredOutputCause;
+}
+
+export interface StructuredOutputRecordV1 {
+  version: 1;
+  /** One entry per selected slot, in slot order. */
+  slots: StructuredOutputSlotV1[];
 }
 
 /** Distinguishes WHY a limitation is being shown — LimitationNotice uses this to select copy/tone, never a single generic "can't help" message. */

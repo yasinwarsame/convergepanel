@@ -52,13 +52,23 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // (DOCX) at 48f3739. Pinned edit-by-edit by DS_FROZEN_EXPORT_DIFF below.
   // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
   // (exportMilestone2SummaryLevel / slotAgreementWord). Was cdf8bba191f6f24770273c7420d7643db2fd0604.
-  "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
+  // ITEM6A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 80e8678d497d7f41a3d7bee48026832f0ec14736 → fa50830d9a6a73124d7a68daf75c7e94eec01ef0. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  // ITEM7A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: fa50830d9a6a73124d7a68daf75c7e94eec01ef0 → 2555c963f490311c1b6da730e9881939400d51f8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  // ITEM7A-REPIN lib/pdf/AdaptiveResearchDocument.tsx: 2555c963f490311c1b6da730e9881939400d51f8 → 79e542448152b19061a7f880a8ec3b370e98b840. Item 7A final correction round (owner-authorized 2026-11-24): the
+  // structured-output section moved above the SectionCard JSDoc it had displaced; no rendering change.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "79e542448152b19061a7f880a8ec3b370e98b840",
   // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
   // (exportMilestone2SummaryLevel / slotAgreementWord). Was 5c2e1b25ce67efc4661db0ab9004c18d1de6298e.
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
+  // ITEM6A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: d62e84cffefc0a1c7abfb0e42df75ab0f35cf208 → 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b. Item 6A F2 (owner-authorized frozen-renderer exception 2026-11-23): read-only legacy-provenance disclosure only (PDF/DOCX notice when a stored Receipt basis carries the retired (user-provided) suffix; JSON additive derived disclosure field); no other change.
+  // ITEM7A-REPIN lib/docx/AdaptiveResearchDocxDocument.ts: 3f4ee0e1feec33e6b748bb60c7b5f1e42536da0b → 729f5169be532239997dc568ac10a985a73c2ad8. Item 7A (owner-authorized correction round 2026-11-24): ONLY the
+  // structured-output completeness section, rendered from the shared disclosure for a run carrying the per-slot record.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "729f5169be532239997dc568ac10a985a73c2ad8",
   "lib/adaptiveSchema/dsLabelWording.ts": "db50c0e7b9cec1ad8416a566b2d08c4ed16fefa1",
-  "lib/adaptiveSchema/decisionSupportAlignment.ts": "b19e49caacc05c52c17a4676a7321dca654d132c",
-  "lib/adaptiveSchema/decisionReceiptBuilder.ts": "e32c42b64d7d1d05f41dee95c548dacc76668640",
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionSupportAlignment.ts: b19e49caacc05c52c17a4676a7321dca654d132c → 21b1090ccdfcd8a6c15b4fa1ca1b8aa8618ed055. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Fail-closed fallback (owner 2026-11-23): new criteria never attributed to the user (source = NEW_RESULT_CRITERION_SOURCE); no other change.
+  "lib/adaptiveSchema/decisionSupportAlignment.ts": "21b1090ccdfcd8a6c15b4fa1ca1b8aa8618ed055",
+  // ITEM6A-REPIN lib/adaptiveSchema/decisionReceiptBuilder.ts: e32c42b64d7d1d05f41dee95c548dacc76668640 → b8537b94e34fca8ad3d7b580b90a1e6dc121fb7f. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion labels written verbatim as escaped, quoted data; assessment lines line-safety escaped; no other change. Fail-closed fallback (owner 2026-11-23): option labels quoted/escaped in assessment lines (R4 M1); no other change.
+  "lib/adaptiveSchema/decisionReceiptBuilder.ts": "b8537b94e34fca8ad3d7b580b90a1e6dc121fb7f",
   "lib/adaptiveSchema/governanceRecordParser.ts": "2a195deca74df74c0f4701743bf1f78033ffc5e2",
   // P0 research-results restoration (owner-approved 2026-11-01): `generic` added to the legacy persisted allowlist
   // and its comment only; no provenance code. Was 9f9ca552d033bcdabe5fcb52862356e5f638e8b5 at 9eca1e3.
@@ -83,7 +93,11 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // 09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367.
   "lib/user/runDocumentToPublicResults.ts": "09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
-  "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",
+  // ITEM6A-REPIN components/adaptive/DecisionSupportView.tsx: e3beb32c1161f42d84222b1633a6bd8b1bb98939 → 8501d85dfd92a798e1bcddd3ce4205e95169b82b. Item 6A (owner-authorized 2026-11-22): authoritative user-criterion provenance from the original request only, one shared accessor (criterionProvenance.ts), Receipt suffixes, legacy unverified disclosure; no other change. Option A structural correction (owner 2026-11-23): criterion label rendered verbatim in a <bdi> (no rewriting); no other change.
+  // ITEM7A-REPIN components/adaptive/DecisionSupportView.tsx: 8501d85dfd92a798e1bcddd3ce4205e95169b82b → f2ac77fc11c9743ac0ea8a35daf4a22581f73b0a. Item 7A
+  // (owner-authorized 2026-11-23): ONLY the Panel detail summary states "N models selected · M usable structured results" and
+  // names unavailable models when a disclosure is passed; without one the rendered tree is unchanged; no provenance code.
+  "components/adaptive/DecisionSupportView.tsx": "f2ac77fc11c9743ac0ea8a35daf4a22581f73b0a",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
   // c16 (review of 48f3739, MAJOR-2): ONLY the consensus field of a run whose slots are not independent executing models
@@ -112,7 +126,25 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // legacy-panel synthesis-eligibility sites (L03 sites 3–4) are restored to the 35933c8 slot rule
   // (`okResults.length < 2` pre-flight; `filter(isUsableResult).length >= 2` history auto-synthesis) and the now-unused
   // meetsIndependentSynthesisMinimum import is removed; no provenance code. Was 70023e0b7a51822698b062dc8c0120bf8bf9aa81.
-  "app/page.tsx": "8d97e6296c16b9b0a41c30a8311a88e61de9c9a5",
+  // Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18, review B2): ONLY nine client
+  // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
+  // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no provenance code.
+  // Was 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5.
+  // Re-pinned (owner-authorized PR #329 R3, 2026-11-18, D5 frozen-file reader exception): ONLY one import line and
+  // the two hand-off reader lines (`params.get("claim") || consumeAppHandoff("verify", user.uid)` and the `q` twin);
+  // the legacy param is still read first. app/__tests__/pageFrozenExceptionsR3.spec.ts reverses exactly the R2 and
+  // R3 edits and requires the original 8d97e629 blob. f880b0562d904897d6bb6a6110a4f1371cd5e372 → 05d515b6170522b2f30d0497a212b8c780be527b.
+  // Doc 14 PR-1, R4 owner rulings (2026-11-18; claim score qualifier on the Personal history suffix): ONLY the history
+  // row mapper carrying the server's additive `consensusBasis` and its `HistoryItem` field (2 added lines; the suffix
+  // itself is claimHistoryConsensusSuffix); no provenance code. Was 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5.
+  // Doc 14 PR-1, R6 owner decision B3 (2026-11-19; Personal history cache marker): ONLY the same two lines re-worded —
+  // the mapper carries any server `consensusBasis` value (not only "slot_responses") and the field's type is the
+  // server item's; still 2 added lines vs cabbdbb; no provenance code. Was a3e49156e031b51cf4020b8a94f2061f14f30ead.
+  // Reconciled (PR #330 merged with main c308d888, 2026-11-19, owner GO "PR #330 RECONCILIATION"): the file is main's
+  // 05d515b6 (PR #329 R2 logging + R3 reader) plus ONLY #330's same two history-basis lines; recomputed from the
+  // reconciled tree, not copied from either side. app/__tests__/pageFrozenExceptionsR3.spec.ts reverses all three
+  // authorized classes back to the original 8d97e629 blob. b3d6ad98 (PR #330) / 05d515b6 (main) → 9cd3da44.
+  "app/page.tsx": "9cd3da44ade8624755c6410bee4004ca6f28219b",
   // Re-pinned (owner-authorized SEC-2 / S4 provider-key boundary, 2026-11-09): `isAdminClaim()` and the
   // `appConfig/modelKeys` admin-claim grant removed, replaced by a deny-only `match /appConfig/{doc=**}`; no other
   // rule and no provenance code. 2fb80a11bfa6c55fe94e0438a980a3b0794aeafd → 747ccef5fc43f83bb08a986fadb49d5ca5d68e06.
@@ -178,6 +210,20 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/pdf/AdaptiveResearchDocument.tsx": {
     was: "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
     edits: [
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["e\";\nimport { deriveRecordedStructuredOutputDisclosure, STRUCTURED_OUTPUT_SECTION_HEADING, structuredOutputDisclosureLines } from \"@/lib/adaptiveSchema/structuredOutputDisclosur", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["/**\n * Item 7A: the structured-output completeness section \u2014 the same shared disclosure and wording as the live report.\n * Renders nothing for a complete run, a legacy-family export, or a record without the counts.\n */\nfunction hasStructuredOutputDisclosure(record: AdaptiveResearchExportV1): boolean {\n  return record.schemaFamily === \"milestone2\" && deriveRecordedStructuredOutputDisclosure(record.reportSnapshot.milestone2?.meta) !== null;\n}\n\nfunction StructuredOutputSection({ record }: { record: AdaptiveResearchExportV1 }) {\n  const snapshot = record.reportSnapshot;\n  const d = record.schemaFamily === \"milestone2\" ? deriveRecordedStructuredOutputDisclosure(snapshot.milestone2?.meta) : null;\n  if (!d) return null;\n  const [head, ...rest] = structuredOutputDisclosureLines(d, (id) => exportModelIdentityLabel(snapshot.runProvenance, id));\n  return (\n    <SectionCard label={STRUCTURED_OUTPUT_SECTION_HEADING} bounded>\n      <Text style={pdfStyles.fieldValue}>{head}</Text>\n      {rest.map((line, i) => (\n        <Text key={i} style={pdfStyles.mutedText}>\n          {line}\n        </Text>\n      ))}\n    </SectionCard>\n  );\n}\n\n", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["{/* Item 7A: without a disclosure the child list is exactly what it was (no extra element). */}\n        {hasStructuredOutputDisclosure(record) ? (\n          <>\n            ", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["\n            <StructuredOutputSection record={record} />\n          </>\n        ) : (\n          <StatusSummary record={record} />\n        )}", ""],
+      // Item 6A F2 (owner-authorized frozen-renderer exception, 2026-11-23): ONLY a read-only legacy-provenance notice in the
+      // Milestone-2 Basis card, rendered only for a stored decision_support Receipt without the provenance marker that
+      // carries a retired "(user-provided)" criterion line (receiptHasLegacyUserProvidedCriteria; R2 N2 trusted gating). Every other export renders byte-identically (no fixture carries that suffix).
+      // Protected by item6aExportDisclosure.spec.tsx (rendered PDF text with / without the notice).
+      ["\nimport { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from \"@/lib/adaptiveSchema/criterionProvenance\";", ""],
+      ["\n          {/* Item 6A (F2, owner-authorized frozen-renderer exception): a stored pre-6A Receipt is rendered as recorded; only this read-only notice is added, and only when a basis line carries the retired \"(user-provided)\" suffix. */}\n          {receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? <Text style={[pdfStyles.mutedText, { marginBottom: 6 }]}>{LEGACY_FROZEN_RECEIPT_NOTICE}</Text> : null}", ""],
       ['import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";', 'import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";'],
       ["\n  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.\n  const slotLevel = exportMilestone2SummaryLevel(record);", ""],
       ["{slotLevel ? slotLevel.field : gateLevel ? MARKED_GATE_LEVEL_FIELD", "{gateLevel ? MARKED_GATE_LEVEL_FIELD"],
@@ -196,6 +242,16 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/docx/AdaptiveResearchDocxDocument.ts": {
     was: "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
     edits: [
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["e\";\nimport { deriveRecordedStructuredOutputDisclosure, STRUCTURED_OUTPUT_SECTION_HEADING, structuredOutputDisclosureLines } from \"@/lib/adaptiveSchema/structuredOutputDisclosur", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["\n * Item 7A: the structured-output completeness section — the same shared disclosure and wording as the live report.\n * Empty (nothing rendered) for a complete run, a legacy-family export, or a record without the counts.\n */\nfunction structuredOutputSection(record: AdaptiveResearchExportV1): Paragraph[] {\n  const snapshot = record.reportSnapshot;\n  const d = record.schemaFamily === \"milestone2\" ? deriveRecordedStructuredOutputDisclosure(snapshot.milestone2?.meta) : null;\n  if (!d) return [];\n  const [head, ...rest] = structuredOutputDisclosureLines(d, (id) => exportModelIdentityLabel(snapshot.runProvenance, id));\n  return [heading(STRUCTURED_OUTPUT_SECTION_HEADING), body(head), ...rest.map(muted)];\n}\n\n/**", ""],
+      // ITEM7A (owner-authorized 2026-11-24): the structured-output section only.
+      ["Section(record),\n    ...structuredOutput", ""],
+      // Item 6A F2 (owner-authorized frozen-renderer exception, 2026-11-23): ONLY a read-only legacy-provenance notice under
+      // the Basis heading, under the same condition as the PDF. Protected by item6aExportDisclosure.spec.tsx.
+      ["\nimport { LEGACY_FROZEN_RECEIPT_NOTICE, receiptHasLegacyUserProvidedCriteria } from \"@/lib/adaptiveSchema/criterionProvenance\";", ""],
+      ["  // Item 6A (F2, owner-authorized frozen-renderer exception): read-only notice for a stored pre-6A Receipt only.\n  if (r.basis.length > 0) out.push(heading(\"Basis\"), ...(receiptHasLegacyUserProvidedCriteria(r.basis, { schemaId: m2.schemaId, resultProvenanceMarker: (m2.result as { criteriaProvenance?: unknown } | undefined)?.criteriaProvenance }) ? [muted(LEGACY_FROZEN_RECEIPT_NOTICE)] : []), ...bulletList(r.basis));", "  if (r.basis.length > 0) out.push(heading(\"Basis\"), ...bulletList(r.basis));"],
       ['import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";', 'import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";'],
       [
         '  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.\n  const slotLevel = exportMilestone2SummaryLevel(record);\n  if (slotLevel) {\n    return [\n      heading("Report status summary"),\n      ...fieldGrid([\n        ["Models", modelsText || "—"],\n        [slotLevel.field, slotLevel.word],\n        ["Source grounding", SOURCE_GROUNDING_LABELS[snapshot.sourceGroundingLevel]],\n      ]),\n      muted(slotLevel.note),\n    ];\n  }\n',

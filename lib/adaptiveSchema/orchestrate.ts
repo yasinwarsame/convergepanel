@@ -31,6 +31,8 @@ import { buildModelPrompt } from "./promptBuilder";
 import { validateAdaptiveResponse } from "./validator";
 import { withTimeout } from "./util";
 import { computeAdaptiveRetryWindow, monotonicNowMs, ResearchRequestBudget } from "./retryBudget";
+import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
+import { outputBudgetRepairCap, outputBudgetRepairFitsWindow } from "@/lib/outputBudgetRepairPolicy";
 import { AdaptiveRetryUsageSink, mergeAdaptiveRetry, normalizeAdaptiveRetryUsage } from "./retryCorrection";
 import { alignClaims, ClaimFieldOrigin, ModelClaims } from "./alignment";
 import { alignMetrics, alignScenarios, alignSteps, alignScalarField, ScalarComparisonMode } from "./fieldAlignment";
@@ -207,6 +209,19 @@ function describeValidationFailure(result: AdaptiveModelResult): string {
 }
 
 /**
+ * Item 7B: the compact-output instruction for an output-budget repair. It asks for fewer items and shorter wording only;
+ * it never asks the model to drop a required field, invent evidence, or remove stated uncertainty.
+ */
+export const OUTPUT_BUDGET_REPAIR_INSTRUCTION =
+  "Your previous response was cut off because it reached the output-token limit, so it could not be used. " +
+  "Return the complete JSON object again, more concisely:\n" +
+  "- include every required field;\n" +
+  "- where a field allows several items, keep only the most important ones;\n" +
+  "- keep each text within its stated word limit, using shorter wording;\n" +
+  "- do not invent evidence, sources or certainty, and do not drop stated uncertainties, risks or caveats to save space.\n" +
+  "Return ONLY the JSON object — no commentary, no markdown fences.";
+
+/**
  * One-shot retry: a model whose first response left required fields invalid
  * (even after coercion + salvage) gets re-prompted once with the original
  * system prompt plus the validation errors and an instruction to return only
@@ -214,13 +229,21 @@ function describeValidationFailure(result: AdaptiveModelResult): string {
  * skip, guard timeout, connector error, still-invalid fields, or an
  * unexpected exception) resolves to the first attempt plus a retryOutcome,
  * so one slot can never reject the Promise.all over its siblings.
+ *
+ * Item 7B: when the slot's own provider reported that the first attempt stopped at its output budget, the same single
+ * retry becomes an output-budget repair instead: the compact-output instruction plus the pinned larger cap
+ * (lib/outputBudgetRepairPolicy.ts), issued only when that cap exists for the exact model and the repair is projected to
+ * fit the model's hard timeout and the remaining guard. Otherwise no call is made ("skipped_output_budget", D5) — never a
+ * same-cap resend. A repair response that itself stops at its budget is never used (D3). Exhaustion is never inferred
+ * from malformed JSON: without the provider's own reason, the established validation retry runs unchanged.
  */
 async function retryModelOnce(
   schema: ResultSchema,
   question: string,
   firstAttempt: AdaptiveModelResult,
   retryContext: AdaptiveRetryContext,
-  slotIndex: number
+  slotIndex: number,
+  primary?: ModelResult
 ): Promise<AdaptiveModelResult> {
   const modelId = firstAttempt.modelId;
   let callIssued = false;
@@ -244,11 +267,38 @@ async function retryModelOnce(
       return { ...firstAttempt, retryOutcome: "skipped_budget" };
     }
 
-    const retryPrompt = `${basePrompt}\n\nYour previous response failed validation with these errors:\n${describeValidationFailure(
-      firstAttempt
-    )}\n\nCorrect these fields and return ONLY the fixed JSON object — no commentary, no markdown fences.`;
-
-    const opts: ConnectorCallOptions = { systemPromptOverride: retryPrompt };
+    const outputBudgetRepair = primary?.terminationReason === "output_budget";
+    let opts: ConnectorCallOptions;
+    let repairCap: number | null = null;
+    if (outputBudgetRepair) {
+      const firstAttemptCap = MODEL_LIMITS[modelId]?.maxTokens;
+      repairCap = outputBudgetRepairCap(modelId, primary?.requestedModel, firstAttemptCap);
+      const fits =
+        repairCap !== null &&
+        outputBudgetRepairFitsWindow({
+          firstLatencyMs: primary?.latencyMs,
+          firstCompletionTokens: primary?.tokenUsage?.completionTokens,
+          repairCap,
+          hardTimeoutMs: getModelTimeout(modelId).hardTimeoutMs,
+          guardMs: window.guardMs,
+        });
+      if (repairCap === null || !fits) {
+        logger.warn("[adaptiveSchema] Output-budget repair not issued: no compliant larger cap or no safe window", {
+          modelId,
+          schemaId: schema.id,
+          firstAttemptCap: firstAttemptCap ?? null,
+          repairCap,
+          guardMs: Math.round(window.guardMs),
+        });
+        return { ...firstAttempt, retryOutcome: "skipped_output_budget" };
+      }
+      opts = { systemPromptOverride: `${basePrompt}\n\n${OUTPUT_BUDGET_REPAIR_INSTRUCTION}`, outputBudgetRepairMaxTokens: repairCap };
+    } else {
+      const retryPrompt = `${basePrompt}\n\nYour previous response failed validation with these errors:\n${describeValidationFailure(
+        firstAttempt
+      )}\n\nCorrect these fields and return ONLY the fixed JSON object — no commentary, no markdown fences.`;
+      opts = { systemPromptOverride: retryPrompt };
+    }
 
     let retryModelResult: ModelResult;
     const startedAt = now();
@@ -286,11 +336,26 @@ async function retryModelOnce(
       return { ...firstAttempt, retryOutcome: "failed_call" };
     }
 
+    if (outputBudgetRepair && retryModelResult.terminationReason !== "natural") {
+      // D3: only a repair the provider reports as finished normally is used; a repair that stopped at its budget (or
+      // gave no reason) is never parsed into a result, however much of it would validate.
+      logger.warn("[adaptiveSchema] Output-budget repair response not used: the provider did not report a normal finish", {
+        modelId,
+        schemaId: schema.id,
+        repairCap,
+        repairTermination: retryModelResult.terminationReason ?? null,
+        retryLatencyMs: Math.round(now() - startedAt),
+        usageReported: usage !== null,
+      });
+      return { ...firstAttempt, retryOutcome: "no_change" };
+    }
+
     const revalidated = validateAdaptiveResponse(modelId, schema, retryModelResult.rawText);
     const { result, outcome } = mergeAdaptiveRetry(firstAttempt, revalidated);
-    logger.warn("[adaptiveSchema] Retried model after validation failure", {
+    logger.warn(outputBudgetRepair ? "[adaptiveSchema] Output-budget repair completed" : "[adaptiveSchema] Retried model after validation failure", {
       modelId,
       schemaId: schema.id,
+      ...(outputBudgetRepair ? { repairCap } : {}),
       firstAttemptInvalidFields: firstAttempt.invalidFields,
       retryOk: revalidated.ok,
       retryInvalidFields: revalidated.invalidFields,
@@ -556,7 +621,7 @@ export async function finalizeAdaptiveRun(
         // Only a real "ok" primary answer is ever corrected; failed/error/
         // timeout/refused/rate_limited slots never gain an adaptive retry.
         if (results[idx].status !== "ok") return r;
-        return retryModelOnce(schema, question || "", r, retryContext, idx);
+        return retryModelOnce(schema, question || "", r, retryContext, idx, results[idx]);
       })
     );
   }
@@ -706,7 +771,9 @@ export async function finalizeAdaptiveRun(
     const perModelFields = adaptiveResults
       .filter((r) => r.ok && r.data)
       .map((r) => ({ modelId: r.modelId, fields: extractDecisionSupportFields(r.data!) }));
-    const decisionSupport = buildDecisionSupportResult(perModelFields, adaptiveResults.length, classification?.riskLevel);
+    // Item 6A: `question` is the user's original request (finalizeAdaptiveRun's caller passes trimmedQuestion) and is
+    // the only authority for "user" criterion provenance; the corrective retry above re-asks models but never changes it.
+    const decisionSupport = buildDecisionSupportResult(perModelFields, adaptiveResults.length, classification?.riskLevel, question);
     const envelope = attachAdaptiveEnvelope("decision_support", schema, classification, results, adaptiveResults, decisionSupport);
     return { schemaId: schema.id, adaptiveResults, decisionSupport, ...envelope };
   }

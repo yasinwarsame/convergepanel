@@ -33,7 +33,9 @@ import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { GROK_MODEL, XAI_API_KEY } from "@/lib/env";
+import { logger } from "@/lib/logger";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
+import { openAiCompatibleTermination, type ProviderTerminationReason } from "./termination";
 
 // Use the same unified system prompt as ChatGPT and Claude
 // This shared instruction ensures a standardized sectioned format across all models:
@@ -120,6 +122,11 @@ export async function callGrok(
     };
   }
 
+    // Item 7B: the provider-reported finish reason of the parsed response. It reaches an error result ONLY through the
+    // one empty-response error thrown below for that same response (identity-checked), never through any other
+    // exception (transport, timeout, parsing, or anything thrown later).
+    let terminationReason: ProviderTerminationReason | undefined;
+    let emptyResponseError: Error | undefined;
     try {
       /**
        * Make API call using fetch (X.AI uses OpenAI-compatible format)
@@ -205,13 +212,20 @@ export async function callGrok(
         } else if (errorData.message) {
           errorDetails = `${errorDetails}: ${errorData.message}`;
         }
-        console.error("[Grok connector] API error response:", errorData);
+        // Privacy remediation (2026-11-17 audit, L3): never log the raw provider
+        // error body (it can echo request content). Status + error code/type
+        // only; the provider's message still reaches the ModelResult below.
+        logger.error("[Grok connector] API error response", {
+          status: response.status,
+          code: typeof errorData?.error?.code === "string" || typeof errorData?.error?.code === "number" ? errorData.error.code : undefined,
+          type: typeof errorData?.error?.type === "string" ? errorData.error.type : undefined,
+        });
       } catch (e) {
         // If we can't parse as JSON, try text
         try {
           const clonedResponse = response.clone();
           const errorText = await clonedResponse.text();
-          console.error("[Grok connector] API error response (text):", errorText);
+          logger.error("[Grok connector] API error response (non-JSON)", { status: response.status, length: errorText.length });
           if (errorText) {
             errorDetails = `${errorDetails}: ${errorText.substring(0, 200)}`;
           }
@@ -233,13 +247,14 @@ export async function callGrok(
         data = await response.json();
       } catch (jsonError: any) {
         // If JSON parsing fails, log the error and return a structured error result
-        console.error("[Grok connector] Failed to parse JSON response:", jsonError);
+        // A JSON SyntaxError message quotes the start of the body (model output).
+        logger.error("[Grok connector] Failed to parse JSON response", { errorName: jsonError?.name });
         throw new Error(`Grok API returned invalid JSON. Please try again.`);
       }
       
       // Defensive check: ensure data structure is valid
       if (!data || typeof data !== "object") {
-        console.error("[Grok connector] Invalid response structure:", data);
+        logger.error("[Grok connector] Invalid response structure", { dataType: data === null ? "null" : typeof data });
         throw new Error(`Grok API returned invalid response format.`);
       }
       
@@ -262,6 +277,7 @@ export async function callGrok(
       // This log is to help diagnose future truncation and can be removed later if not needed
       // Don't break anything if finish_reason is missing; just log when present
       const finishReason = choice?.finish_reason;
+      terminationReason = openAiCompatibleTermination(finishReason);
       if (finishReason === "length") {
         console.warn(
           "[Grok connector] Response truncated due to token limit (finish_reason=length). " +
@@ -271,7 +287,8 @@ export async function callGrok(
       
       // Check if response is empty - throw error if so
       if (!rawText || rawText.length === 0) {
-        throw new Error("Grok API returned an empty response.");
+        emptyResponseError = new Error("Grok API returned an empty response.");
+        throw emptyResponseError;
       }
       
       // Quick sanity logging for Grok - log final answer length to monitor response health
@@ -333,11 +350,18 @@ export async function callGrok(
         latencyMs,
         tokenUsage: normalizedTokenUsage, // Always include tokenUsage (never undefined)
         rawResponse: data, // Store raw response for token extraction and debugging
+        ...(terminationReason ? { terminationReason } : {}),
       };
     } catch (error: any) {
       // Log error for debugging
       // This helps diagnose issues when Grok fails
-      console.error("[Grok connector] Error:", error);
+      // Privacy remediation (2026-11-17 audit, L3): the error message can embed
+      // up to 200 chars of a provider error body (see above). Log its class and
+      // HTTP status only; the message itself is still returned in the result.
+      logger.error("[Grok connector] Error", {
+        errorName: error?.name,
+        httpStatus: typeof error?.message === "string" ? (error.message.match(/HTTP (\d{3})/)?.[1] ?? undefined) : undefined,
+      });
       
       // Never throw from here; return a structured error so the UI can render it safely.
       // runPanel will catch this and convert it to a ModelResult with errorMessage,
@@ -372,6 +396,7 @@ export async function callGrok(
         errorMessage: message, // Clear error message for UI display
         latencyMs,
         tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        ...(terminationReason && emptyResponseError !== undefined && error === emptyResponseError ? { terminationReason } : {}),
       };
     }
 }

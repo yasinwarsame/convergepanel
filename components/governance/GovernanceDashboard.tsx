@@ -4,6 +4,7 @@
  * Org governance dashboard: review queue, policy editor, audit log.
  */
 
+import { claimScoreText } from "@/lib/verification/claimConsensusPresentation";
 import {
   useCallback,
   useEffect,
@@ -23,7 +24,7 @@ import { isValidReviewThresholdValue } from "@/lib/governance/familyReviewThresh
 import ScoreTypeThresholdsSection from "@/components/governance/ScoreTypeThresholdsSection";
 import { buildPolicyPatch } from "@/components/governance/policyPatch";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
-import { CONSENSUS_WITHHELD_TEXT, type ConsensusScoreWithheldReason, type StoredConsensusIndependence } from "@/lib/panel/independentVoices";
+import type { ConsensusScoreWithheldReason, StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import { QUALIFIED_DISAGREEMENT_TEXT, type QualifiedDisagreementBasis } from "@/lib/panel/storedDisagreementIndependence";
 import {
   formatFullDatetime,
@@ -54,11 +55,14 @@ type QueueRow = {
   evidenceQuality: string | null;
   /** Research: stored score withheld — fewer than two independent executing models, or independence not recorded. */
   consensusWithheld?: ConsensusScoreWithheldReason;
+  /** Claim rows (R4): the presented score is over panel slot responses, not independent corroboration. */
+  consensusBasis?: "slot_responses";
   governanceStatus: "approved" | "needs_review" | "blocked";
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
   verificationVerdict?: string;
-  modelVerdicts?: { modelId: string; verdict: string; confidence: string; summary?: string }[];
+  /** `label` (claim rows, R4): the slot's validated executing identity when it is not the bare slot family. */
+  modelVerdicts?: { modelId: string; label?: string; verdict: string; confidence: string; summary?: string }[];
   agreementSummary?: string;
   dissentSummary?: string;
   disagreements?: string[];
@@ -259,6 +263,10 @@ type AuditEvent = {
   trailAvailable?: boolean;
   question?: string;
   consensusScore?: number | null;
+  /** Claim events (R5, app/api/governance/audit): presentation-only — the recorded score is withheld with this reason. */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+  /** Claim events (R5): the recorded score was computed over panel slot responses, not independent corroboration. */
+  consensusBasis?: "slot_responses";
 };
 
 /** Shown instead of the trail control when the trail can't be opened. Names no owner and no reason beyond scope. */
@@ -470,10 +478,17 @@ export function AuditLogEventCard(props: {
             <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${rt.cls}`}>{rt.label}</span>
           ) : null}
           {score != null ? (
+            // R6 owner decision B2: a claim score that is not a multi-model consensus keeps its recorded number with a
+            // qualifier (not independent corroboration / unverified), in a neutral colour; its visible text is its
+            // accessible name (no separate aria-label / title).
             <span
-              className={`text-sm font-bold tabular-nums ${auditConsensusDisplayClass(score)}`}
+              className={
+                ev.consensusWithheld
+                  ? "text-xs font-medium text-cp-muted"
+                  : `text-sm font-bold tabular-nums ${auditConsensusDisplayClass(score)}`
+              }
             >
-              {score}/100
+              {claimScoreText(ev, (n) => `${Math.round(n)}/100`, "", { notIndependent: "qualify" })}
             </span>
           ) : null}
           <time
@@ -653,10 +668,10 @@ function statusChipClasses(status: string): { wrap: string; label: string } {
  * The queue's consensus text for a row: a research row whose stored score is withheld (fewer than two independent
  * executing models, or independence not recorded — see `consensusWithheld`) shows the reason, never a number.
  */
-export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "consensusWithheld">, withDenominator: boolean): string {
-  if (row.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[row.consensusWithheld];
-  if (row.consensusScore == null) return "—";
-  return withDenominator ? `${Math.round(row.consensusScore)}/100` : String(Math.round(row.consensusScore));
+export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "consensusWithheld"> & { consensusBasis?: unknown }, withDenominator: boolean): string {
+  // R4 owner ruling: a claim score over slots that are not each a distinct identified model is not corroboration — the
+  // shared renderer (R5) adds the qualifier, exactly as on every other claim score surface.
+  return claimScoreText(row, (n) => (withDenominator ? `${Math.round(n)}/100` : String(Math.round(n))), "—");
 }
 
 /**
@@ -2325,7 +2340,7 @@ export function FragmentRow(props: {
                       {row.modelVerdicts.map((m, i) => (
                         <tr key={`${m.modelId}-${i}`} className="border-b border-cp-border last:border-0">
                           <td className="px-3 py-2 font-medium text-cp-text align-top">
-                            {runModelFamilyName(m.modelId)}
+                            {m.label ?? runModelFamilyName(m.modelId)}
                           </td>
                           <td className="px-3 py-2 align-top">
                             <span
@@ -2354,7 +2369,7 @@ export function FragmentRow(props: {
                       (m, i) =>
                         m.summary && (
                           <li key={`sum-${m.modelId}-${i}`}>
-                            <span className="font-semibold text-cp-text">{runModelFamilyName(m.modelId)}: </span>
+                            <span className="font-semibold text-cp-text">{m.label ?? runModelFamilyName(m.modelId)}: </span>
                             {m.summary}
                           </li>
                         )

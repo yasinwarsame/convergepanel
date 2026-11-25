@@ -233,6 +233,9 @@ describe("summary DTO", () => {
       confidenceLabel: "High",
       evidenceQuality: "strong",
       governanceStatus: "needs_review",
+      // Doc 14 PR-1 (additive): usable per-model verdict counts from the stored auditBundle.perModel — this fixture's
+      // bundle has no perModel rows, so every count is 0 (counts are never taken from modelResults or aggregateSummary).
+      modelVerdicts: { accurate: 0, partially_accurate: 0, inaccurate: 0, unverifiable: 0, usable: 0 },
       createdAt: new Date(T).toISOString(),
       workspaceId: TEAM_W,
       projectId: "p1",

@@ -20,6 +20,7 @@ import { AdaptiveCoverageGap, QueryType } from "./types";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import { stripJsonFences, withTimeout } from "./util";
 import { MAX_COVERAGE_GAPS } from "./config";
 
@@ -100,7 +101,7 @@ ${claimsList}`;
     return parsed.data.gaps.slice(0, MAX_COVERAGE_GAPS);
   } catch (err: any) {
     logger.warn("[adaptiveSchema] Coverage audit call threw/timed out, returning no gaps", {
-      error: err?.message,
+      ...contentFreeError(err), // privacy (PR #329 R3): a SyntaxError message quotes the model's text
     });
     return [];
   }

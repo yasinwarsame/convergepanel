@@ -70,6 +70,19 @@ const f1Overlay = (name: string): Record<string, string> =>
 
 const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
 
+/**
+ * Doc 14 PR-1 R4 (owner ruling 2026-11-18: every explanatory claim sentence needs the distinct executed models behind it).
+ * These three legacy claim memo inputs record no model independence and no executing identity, so the claim memo now
+ * fails closed: no "N AI models evaluated this claim independently", no models summary sentence, no "WHERE MODELS
+ * AGREE / DISAGREE" — slot wording instead. Exactly these keys are superseded, by exact hash of the new memo; the
+ * 2c17feee oracle file is untouched and each `sealed` hash must equal its entry (asserted), so nothing else moved.
+ */
+const R4_CLAIM_MEMO_SUPERSESSION: Record<string, { sealed: string; superseding: string }> = {
+  "claim.confirmed": { sealed: "6a5c4190a7461429fa088af4dff09207df678667d4b0122ed9918d13ca6724d8", superseding: "55179cb313e41dbaa803bf79179a6738a9eae6aa8d9ab02a0893ad932132e915" },
+  "claim.disputed": { sealed: "1d126adb2e728903e35436319daf1654347f1dca76c06b7b66ee876848440e34", superseding: "27e71edd16bbdc725ba353a0d2ef120524077f29a55e77bf85cea541ddef64bc" },
+  "claim.carryingAdaptiveMarker": { sealed: "c24952915c11073ced9fdaa911c56e5cbb9069de72772dcb4bfc93e5def304fc", superseding: "ab115afbbcaa7048bdb66b83379b0c36d17121626099b86232f0f00a63201221" },
+};
+
 describe("Contract P historical parity (2c17feee oracles)", () => {
   it("runs in a timezone a 2c17feee oracle was captured in (run with TZ=UTC)", () => {
     expect([EFFECTIVE_TIMEZONE, renderHashes !== undefined]).toEqual([EFFECTIVE_TIMEZONE, true]);
@@ -150,7 +163,18 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
     }
   });
 
-  it.each(Object.keys(SHARED_MEMO_INPUTS))("shared memo generator: %s is byte-identical", (key) => {
+  it.each(Object.keys(SHARED_MEMO_INPUTS).filter((k) => !(k in R4_CLAIM_MEMO_SUPERSESSION)))("shared memo generator: %s is byte-identical", (key) => {
     expect(normalizeMemo(generateVerificationMemo(JSON.parse(JSON.stringify(SHARED_MEMO_INPUTS[key]))))).toBe(sharedMemos[key]);
+  });
+
+  it.each(Object.keys(R4_CLAIM_MEMO_SUPERSESSION))("doc 14 PR-1 R4: shared memo generator %s is superseded by exact hash, over its untouched sealed entry", (key) => {
+    const { sealed, superseding } = R4_CLAIM_MEMO_SUPERSESSION[key];
+    const memo = normalizeMemo(generateVerificationMemo(JSON.parse(JSON.stringify(SHARED_MEMO_INPUTS[key]))));
+    if (process.env.R4_SUPERSESSION_DUMP) require("fs").appendFileSync(process.env.R4_SUPERSESSION_DUMP, JSON.stringify({ key, sealed: sha(sharedMemos[key]), superseding: sha(memo), memo }) + "\n");
+    expect([key, sha(sharedMemos[key])]).toEqual([key, sealed]);
+    expect([key, sha(memo)]).toEqual([key, superseding]);
+    expect(superseding).not.toBe(sealed);
+    // Fail closed: the legacy input records no independence or identity, so nothing is stated as agreement between models.
+    expect(memo).not.toMatch(/AI models evaluated this claim independently|largely supported|Models diverged|WHERE MODELS (AGREE|DISAGREE)|independently evaluated by/);
   });
 });

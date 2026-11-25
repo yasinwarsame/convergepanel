@@ -32,7 +32,7 @@ import { claimFixture, videoFixture } from "@/components/verification/__tests__/
 
 type Kind = "claim" | "video";
 const CASES: Array<{ kind: Kind; collection: string; component: unknown; fixture: (o?: Record<string, unknown>) => Record<string, unknown>; verifyAnother: string; banner: string; subject: string }> = [
-  { kind: "claim", collection: "verifications", component: ClaimVerificationResult, fixture: (o) => claimFixture(o as never) as never, verifyAnother: "Verify another claim", banner: "This claim is supported by 1/2 models", subject: "The Eiffel Tower was completed in 1889." },
+  { kind: "claim", collection: "verifications", component: ClaimVerificationResult, fixture: (o) => claimFixture(o as never) as never, verifyAnother: "Verify another claim", banner: /* doc 14 PR-1 R3: 1 accurate of 2 identified models is no majority — was "…1/2 models" + "Majority agreement" */ "This claim is supported by 1 of 2 answers", subject: "The Eiffel Tower was completed in 1889." },
   { kind: "video", collection: "videoVerifications", component: VideoVerificationResult, fixture: (o) => videoFixture(o as never) as never, verifyAnother: "Verify another video", banner: "Authentic camera footage", subject: "harbour-clip.mp4" },
 ];
 

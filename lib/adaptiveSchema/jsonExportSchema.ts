@@ -57,6 +57,49 @@ const jsonExportResultSchema = z.discriminatedUnion("schemaFamily", [
     schemaId: z.string(),
     result: z.unknown(),
     decisionReceipt: z.unknown().optional(),
+    // Item 6A (F2/F6): optional, additive, derived at render time (see jsonExport.ts); absent on every unaffected export.
+    derivedCriteriaProvenanceDisclosure: z
+      .object({
+        derivedAtExport: z.literal(true),
+        derivedRule: z.literal("request_text_v1"),
+        note: z.string(),
+        resultProvenanceMarker: z.union([z.literal("request_text_v1"), z.null()]),
+        storedReceiptHasLegacyUserProvidedLabels: z.boolean(),
+        criteria: z.array(
+          z.object({ id: z.string(), label: z.string(), recordedSource: z.enum(["user", "model"]), derivedProvenance: z.enum(["user", "model", "unverified_legacy"]) })
+        ),
+      })
+      .optional(),
+    // Item 7A: optional, additive, derived at render time from the frozen meta; absent for complete runs.
+    derivedStructuredOutputDisclosure: z
+      .object({
+        derivedAtExport: z.literal(true),
+        selected: z.number().int().nonnegative(),
+        completedCalls: z.union([z.number().int().nonnegative(), z.null()]),
+        usable: z.number().int().nonnegative(),
+        affected: z.union([
+          z.array(
+            z.object({
+              modelId: z.string(),
+              state: z.enum(["unavailable", "partial"]),
+              providerCall: z.enum(["completed", "failed"]),
+              fieldsNotRecovered: z.number().int().nonnegative(),
+              itemsDiscarded: z.number().int().nonnegative(),
+              itemsOverLimit: z.number().int().nonnegative(),
+              textShortenedFields: z.number().int().nonnegative(),
+              affectedFields: z.number().int().nonnegative(),
+              decisionCriticalAffected: z.boolean(),
+              material: z.boolean(),
+              // Item 7B: optional, only when the run recorded why the slot was not complete.
+              cause: z.enum(["output_budget_exhausted", "validation_failure", "provider_failure", "unknown"]).optional(),
+            })
+          ),
+          z.null(),
+        ]),
+        prominent: z.boolean(),
+        lines: z.array(z.string()),
+      })
+      .optional(),
   }),
   z.object({
     schemaFamily: z.literal("legacy"),

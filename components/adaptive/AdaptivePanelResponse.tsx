@@ -41,6 +41,8 @@ import DeepResearchView from "./DeepResearchView";
 import EvidenceReviewView from "./EvidenceReviewView";
 import BiasBlindspotAuditView from "./BiasBlindspotAuditView";
 import DecisionSupportView from "./DecisionSupportView";
+import { deriveStructuredOutputDisclosure } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
+import StructuredOutputNotice from "./StructuredOutputNotice";
 import DsProvenanceSection from "./DsProvenanceSection";
 import type { DsProvenanceDisplay } from "@/lib/research/dsProvenanceClientView";
 import ModelResponsesSection from "./ModelResponsesSection";
@@ -268,6 +270,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
   // via the shared `withBar()` wrapper rather than duplicated per branch.
   // Deliberately after the routing guard above: a classification that never
   // reaches an active schema has no report to summarize.
+  const structuredOutputDisclosure = deriveStructuredOutputDisclosure(props.meta);
   const summaryBar = (
     <TopSummaryBar
       schemaId={schema.id}
@@ -293,7 +296,17 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       biasBlindspotAudit={biasBlindspotAudit}
     />
   );
-  const withBar = (body: React.ReactNode) => (
+  // Item 7A: the structured-output disclosure sits directly under the summary bar on every Milestone-2 report (live and
+  // reopened). It renders nothing when every selected model produced complete structured output.
+  // A complete run renders exactly the element tree it rendered before Item 7A (no extra child, no extra prop).
+  const withBar = (body: React.ReactNode) =>
+    structuredOutputDisclosure ? (
+      <div className="space-y-4">
+        {summaryBar}
+        <StructuredOutputNotice disclosure={structuredOutputDisclosure} />
+        {body}
+      </div>
+    ) : (
     <div className="space-y-4">
       {summaryBar}
       {body}
@@ -561,7 +574,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
     if (decisionSupport) {
       return withBar(
         <div className="space-y-4">
-          <DecisionSupportView decisionSupport={decisionSupport} />
+          <DecisionSupportView decisionSupport={decisionSupport} {...(structuredOutputDisclosure ? { structuredOutput: structuredOutputDisclosure } : {})} />
           <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} decisionSupport={decisionSupport} modelsUsed={results.map((r) => r.modelId)} />
           {props.dsProvenance ? <DsProvenanceSection display={props.dsProvenance} /> : null}

@@ -7,6 +7,9 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { useAdminPortalAccess } from "@/hooks/useAdminPortalAccess";
+import type { ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
+import { claimScoreText } from "@/lib/verification/claimConsensusPresentation";
+import { storedClaimHistoryScoreFields } from "@/lib/verification/claimStatementBasisSources";
 
 type RunCollection = "runs" | "verifications" | "videoVerifications";
 type RunTypeFilter = "all" | "research" | "claim" | "video";
@@ -19,11 +22,34 @@ type AdminRunRow = {
   userEmail: string;
   userId: string;
   consensusScore: number | null;
+  /** Claim rows (R5): presentation keys from app/api/admin/runs (the stored score above is unchanged). */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+  consensusBasis?: "slot_responses";
   verdict: string | null;
   governanceStatus: string | null;
   governanceReviewedBy: string | null;
   createdAt: string;
 };
+
+/**
+ * R5: the list's Consensus cell — claim rows on the shared claim score basis. R6 owner decision B2: a valid stored number
+ * is RETAINED; a score that is not a multi-model consensus carries its qualifier (fewer than two independent models /
+ * unverified / slot responses), never shown bare and never withheld here.
+ */
+export function adminRunConsensusText(r: Pick<AdminRunRow, "consensusScore" | "consensusWithheld" | "consensusBasis">): string {
+  return claimScoreText(r, (n) => String(n), "—", { notIndependent: "qualify" });
+}
+
+/**
+ * R5: the detail line's Consensus value. A claim's raw document is presented on the same shared basis as its list row
+ * (computed from its persisted rows); research and video documents are shown as stored.
+ */
+export function adminRunDetailConsensusText(r: Pick<AdminRunRow, "runType">, detail: Record<string, unknown>): string {
+  const score = typeof detail.consensusScore === "number" ? detail.consensusScore : null;
+  if (r.runType !== "claim") return score != null ? String(score) : "—";
+  const f = storedClaimHistoryScoreFields(detail);
+  return claimScoreText({ consensusScore: score, consensusWithheld: f.consensusWithheld, consensusBasis: f.consensusBasis }, (n) => String(n), "—", { notIndependent: "qualify" });
+}
 
 function formatRelativeTime(iso: string): string {
   const d = new Date(iso);
@@ -383,8 +409,8 @@ export default function AdminRunsTab() {
                         <td className="px-3 py-2 max-w-xs">
                           <span title={r.question}>{truncate(r.question, 80)}</span>
                         </td>
-                        <td className={`px-3 py-2 ${consensusClass(r.consensusScore)}`}>
-                          {r.consensusScore != null ? r.consensusScore : "—"}
+                        <td className={`px-3 py-2 ${consensusClass(r.consensusWithheld ? null : r.consensusScore)}`}>
+                          {adminRunConsensusText(r)}
                         </td>
                         <td className="px-3 py-2">
                           <span
@@ -475,7 +501,7 @@ export default function AdminRunsTab() {
                                 </p>
                                 <p>
                                   <span className="font-semibold text-gray-700">Consensus:</span>{" "}
-                                  {detail.consensusScore != null ? String(detail.consensusScore) : "—"}
+                                  {adminRunDetailConsensusText(r, detail)}
                                   {detail.evidenceQuality != null && (
                                     <>
                                       {" "}

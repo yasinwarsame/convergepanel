@@ -9,6 +9,11 @@ import { isApiKeyConfigured, providerNotConfiguredResult } from "./providerNotCo
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
+import { openAiCompatibleTermination } from "./termination";
+import { connectorMaxTokens } from "@/lib/outputBudgetRepairPolicy";
+
+/** The exact OpenAI model this connector sends (also pinned in lib/outputBudgetRepairPolicy.ts). */
+export const CHATGPT_PROVIDER_MODEL = "gpt-4o-mini";
 
 /**
  * Create a timeout promise that rejects after the model's configured timeout
@@ -67,8 +72,8 @@ export async function callChatGPT(
           { role: "user", content: sanitizedQuestion },
         ],
         temperature: 0.7,
-        // Use centralized token limits to ensure consistent, deep responses without truncation
-        max_tokens: chatgptLimits.maxTokens,
+        // Centralized first-attempt cap; an Item 7B repair call may raise it only to the pinned repair cap.
+        max_tokens: connectorMaxTokens("chatgpt", CHATGPT_PROVIDER_MODEL, chatgptLimits.maxTokens, opts?.outputBudgetRepairMaxTokens),
       }),
       createTimeout(chatgptTimeout.hardTimeoutMs),
     ]);
@@ -85,6 +90,7 @@ export async function callChatGPT(
 
     const rawText =
       completion.choices?.[0]?.message?.content?.trim() || null;
+    const terminationReason = openAiCompatibleTermination(completion.choices?.[0]?.finish_reason);
     const latencyMs = Date.now() - startTime;
 
     // Extract token usage from OpenAI response
@@ -128,11 +134,13 @@ export async function callChatGPT(
       latencyMs,
       tokenUsage: normalizedTokenUsage, // Always include tokenUsage (never undefined)
       rawResponse: completion, // Store raw response for token extraction and debugging
+      // Item 7B: the provider-reported reason, independent of status.
+      ...(terminationReason ? { terminationReason } : {}),
     };
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
     console.error("ChatGPT API error:", {
-      message: error?.message,
+      code: typeof error?.code === "string" ? error.code : undefined, // privacy: was error.message (can echo request content)
       status: error?.status,
       name: error?.name,
     });

@@ -196,7 +196,7 @@ export async function runPanel(
       return settled.value;
     }
 
-    console.error(`[runPanel] Promise rejected for model ${modelId}:`, settled.reason);
+    console.error("[runPanel] Promise rejected for model %s:", modelId, { errorName: (settled.reason as any)?.name ?? typeof settled.reason }); // privacy: no message
     return {
       modelId,
       status: "failed" as const,
@@ -357,7 +357,7 @@ async function runSlotWithFallback(
   const combinedReason = `${primaryCode}|${dsResult.code}`;
 
   if (isDev()) {
-    console.log(`[runPanel] DeepSeek fallback also failed for ${modelId}: ${dsResult.message} (combined: ${combinedReason})`);
+    console.log(`[runPanel] DeepSeek fallback also failed for ${modelId} (combined: ${combinedReason})`); // privacy: no provider message
   }
 
   return failedPlaceholder(modelId, primaryResult, combinedReason);
@@ -374,7 +374,7 @@ async function safePrimaryCall(
   try {
     return await connector(question, context, apiKey, opts);
   } catch (err: any) {
-    console.error(`[runPanel] Unexpected throw from ${modelId}:`, err);
+    console.error("[runPanel] Unexpected throw from %s:", modelId, { errorName: err?.name ?? typeof err }); // privacy: no message
     return {
       modelId,
       status: "error" as ConnectorStatus,
@@ -405,6 +405,8 @@ function failedPlaceholder(modelId: ModelId, primaryResult: ModelResult, reason?
     rawText: "Model unavailable.",
     errorMessage: primaryResult.errorMessage || `${modelId} failed`,
     ...(primaryResult.errorCode ? { errorCode: primaryResult.errorCode } : {}),
+    // Item 7B: the primary's provider-reported termination reason (e.g. an empty answer that hit its output budget).
+    ...(primaryResult.terminationReason ? { terminationReason: primaryResult.terminationReason } : {}),
     latencyMs: primaryResult.latencyMs || 0,
     tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
     requestedModel,

@@ -74,8 +74,8 @@ describe("B1: cached claim with missing inline provenance but valid authoritativ
       consensus: { kind: "withheld", reason: "independence_unverified", text: CONSENSUS_WITHHELD_TEXT.independence_unverified },
       qualifier: CLAIM_COVERAGE_UNVERIFIED_TEXT,
     });
-    // ... while the server history row for the same record says " · 92 consensus".
-    expect(claimHistoryConsensusSuffix({ consensusScore: 92, modelIndependence: "independent" })).toBe(" · 92 consensus");
+    // ... while the server history row for the same record says " · 92 consensus" (R6: a server row carries its basis marker).
+    expect(claimHistoryConsensusSuffix({ consensusScore: 92, modelIndependence: "independent", consensusBasis: "independent_models" })).toBe(" · 92 consensus");
   });
 
   it("history merge: the server row's 'independent' reconciles the cached payload — score kept, no qualifier", () => {
@@ -83,7 +83,8 @@ describe("B1: cached claim with missing inline provenance but valid authoritativ
     expect(merged?.modelIndependence).toBe("independent");
     expect(presented(merged)).toEqual({ consensus: { kind: "score", score: 92 }, qualifier: null });
     // Line and detail now agree.
-    expect(claimHistoryConsensusSuffix({ consensusScore: 92, modelIndependence: merged?.modelIndependence })).toBe(" · 92 consensus");
+    // R6: the merged history item is the server row spread over the cached one, so it carries the server's basis marker.
+    expect(claimHistoryConsensusSuffix({ consensusScore: 92, modelIndependence: merged?.modelIndependence, consensusBasis: "independent_models" })).toBe(" · 92 consensus");
     // Stored fields are untouched.
     expect({ ...merged, modelIndependence: undefined }).toEqual({ ...legacyCached(), modelIndependence: undefined });
   });

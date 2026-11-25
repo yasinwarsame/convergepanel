@@ -56,6 +56,34 @@ import { GET } from "@/app/api/governance/queue/route";
 const GOLDEN = join(__dirname, "fixtures", "phase0QueueDto.golden.json");
 const ADDITIVE = ["consensusWithheld", "modelIndependence", "qualifiedDisagreements", "singleModelAssessment"] as const;
 
+/**
+ * Doc 14 PR-1, R4 owner rulings (2026-11-18; owner authorization for presentation-only edits to this route, MAJOR-1):
+ * a CLAIM row with an answering slot that is not its own model — substituted, or recording a provider other than the
+ * slot family's own — has its agreement / disagreement lines rebuilt on the shared statement basis, its model rows
+ * labelled by executing identity (additive `modelVerdicts[].label`) and its score basis marked (additive
+ * `consensusBasis`). For exactly those rows (identified HERE from the fixture documents, never from the code under
+ * test) the R4 keys are excluded from the 35933c8 / b894828 equality — their wording is checked by the closed-world
+ * inventory (lib/verification/__tests__/claimStatementInventoryGov*.spec.tsx) — and every OTHER key must still equal the
+ * golden. Every other row (research, video, all-own claim rows) must equal the golden exactly, as before.
+ */
+const R4_LINE_KEYS = ["agreementPoints", "agreementSummary", "disagreementPoints", "dissentSummary", "disagreements", "qualifiedDisagreements", "singleModelAssessment"];
+const R4_OWN: Record<string, string> = { chatgpt: "openai", claude: "anthropic", gemini: "google", grok: "xai", perplexity: "perplexity" };
+function r4ClaimRow(id: string): boolean {
+  if (!id.startsWith("verifications:")) return false;
+  const doc = docsBy.verifications.find((d) => `verifications:${d.id}` === id);
+  const mr = doc?.data.modelResults;
+  return Array.isArray(mr) && mr.some((r) => r && typeof r === "object" && (r as any).status === "ok" && ((r as any).substituted === true || (r as any).provider !== R4_OWN[String((r as any).modelId)]));
+}
+function withoutR4(id: string, dto: Record<string, unknown>): Record<string, unknown> {
+  if (!r4ClaimRow(id)) return dto;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(dto)) {
+    if (R4_LINE_KEYS.includes(k) || k === "consensusBasis") continue;
+    out[k] = k === "modelVerdicts" && Array.isArray(v) ? v.map((m) => Object.fromEntries(Object.entries(m as object).filter(([mk]) => mk !== "label"))) : v;
+  }
+  return out;
+}
+
 let stamp = 0;
 const at = () => new Date(Date.parse("2026-11-01T12:00:00Z") - ++stamp * 60_000);
 const pm = (modelId: string, status: string, extra: Record<string, unknown> = {}) => ({ modelId, status, rawTextTruncated: `${modelId} text`, ...extra });
@@ -255,15 +283,15 @@ describe("L15: GET /api/governance/queue — Phase 0 DTO equals 35933c8 on every
   it("DTO minus the additive keys == the 35933c8 DTO (every row, every key)", () => {
     if (process.env.PHASE0_GOLDEN_OUT) return;
     for (const [id, dto] of Object.entries(rows)) {
-      const base = Object.fromEntries(Object.entries(dto).filter(([k]) => !(ADDITIVE as readonly string[]).includes(k)));
-      expect([id, base]).toEqual([id, golden!.base[id]]);
+      const base = withoutR4(id, Object.fromEntries(Object.entries(dto).filter(([k]) => !(ADDITIVE as readonly string[]).includes(k))));
+      expect([id, base]).toEqual([id, withoutR4(id, golden!.base[id])]);
     }
   });
 
   it("no key outside the 35933c8 key set except the four additive keys", () => {
     if (process.env.PHASE0_GOLDEN_OUT) return;
     for (const [id, dto] of Object.entries(rows)) {
-      for (const k of Object.keys(dto)) if (!(k in golden!.base[id])) expect([id, (ADDITIVE as readonly string[]).includes(k) ? "additive" : k]).toEqual([id, "additive"]);
+      for (const k of Object.keys(withoutR4(id, dto))) if (!(k in golden!.base[id])) expect([id, (ADDITIVE as readonly string[]).includes(k) ? "additive" : k]).toEqual([id, "additive"]);
     }
   });
 
@@ -273,10 +301,22 @@ describe("L15: GET /api/governance/queue — Phase 0 DTO equals 35933c8 on every
     for (const [id, dto] of Object.entries(rows)) {
       for (const k of ADDITIVE) {
         if (dto[k] !== undefined) present++;
+        if (r4ClaimRow(id) && R4_LINE_KEYS.includes(k)) continue;
         expect([id, k, dto[k]]).toEqual([id, k, golden!.presentation[id][k]]);
       }
     }
     expect(present).toBeGreaterThan(60);
+  });
+
+  it("R4: the exemption is narrow — it covers only claim rows with a substituted / other-provider answering slot, and those rows differ only in R4 keys", () => {
+    if (process.env.PHASE0_GOLDEN_OUT) return;
+    const exempt = Object.keys(rows).filter(r4ClaimRow);
+    expect(exempt.length).toBeGreaterThan(0);
+    expect(exempt.length).toBeLessThan(Object.keys(rows).filter((id) => id.startsWith("verifications:")).length);
+    for (const [id, dto] of Object.entries(rows)) {
+      if (r4ClaimRow(id)) continue;
+      expect([id, "consensusBasis" in dto, JSON.stringify(dto.modelVerdicts ?? []).includes('"label"')]).toEqual([id, false, false]);
+    }
   });
 
   it("O14 = A: the unanimous claim row carries the 35933c8 '(others disagree)' line", () => {

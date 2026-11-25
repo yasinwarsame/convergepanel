@@ -18,7 +18,10 @@
  */
 
 import { AggregatedDecisionAssessment, AggregatedDecisionCriterion, AggregatedDecisionOption, DecisionRecommendationAction, DecisionSupportResult } from "@/lib/adaptiveSchema/types";
+import { hasUnverifiedLegacyCriteria, LEGACY_RESULT_NOTICE, readCriterionProvenance } from "@/lib/adaptiveSchema/criterionProvenance";
 import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED, type StructuredOutputDisclosure } from "@/lib/adaptiveSchema/structuredOutputDisclosure";
+import type { ModelId } from "@/lib/types";
 import {
   DS_GROUPING_BASIS,
   DS_NO_SOURCES_LISTED,
@@ -100,7 +103,14 @@ function AssessmentCell({
   );
 }
 
-export default function DecisionSupportView({ decisionSupport }: { decisionSupport: DecisionSupportResult }) {
+export default function DecisionSupportView({
+  decisionSupport,
+  structuredOutput = null,
+}: {
+  decisionSupport: DecisionSupportResult;
+  /** Item 7A: the run's structured-output disclosure (null when complete or unknown, keeping the established panel detail). */
+  structuredOutput?: StructuredOutputDisclosure | null;
+}) {
   const {
     decisionQuestion,
     options,
@@ -195,6 +205,11 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
           <div className="mt-3">
             <SectionLabel>Decision criteria</SectionLabel>
             <p className="mb-1.5 text-xs text-slate-500">{DS_STRENGTH_CAPTION}</p>
+            {hasUnverifiedLegacyCriteria(decisionSupport) && (
+              <p className="mb-1.5 text-xs text-slate-500" data-testid="ds-legacy-provenance-note">
+                {LEGACY_RESULT_NOTICE}
+              </p>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <thead>
@@ -211,9 +226,13 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
                   {criteria.map((criterion) => (
                     <tr key={criterion.id}>
                       <th className="border-b border-slate-100 p-2 align-top text-sm font-medium text-slate-700 whitespace-nowrap">
-                        {criterion.label}
-                        {criterion.source === "user" && (
+                        {/* Item 6A (Option A): the model label verbatim, bidi-isolated; the trusted provenance tag is a separate element. */}
+                        <bdi data-testid="ds-criterion-label">{criterion.label}</bdi>
+                        {readCriterionProvenance(decisionSupport, criterion) === "user" && (
                           <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-sky-600">your criterion</span>
+                        )}
+                        {readCriterionProvenance(decisionSupport, criterion) === "unverified_legacy" && (
+                          <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">provenance unverified</span>
                         )}
                       </th>
                       {options.map((option) => (
@@ -298,7 +317,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
         {/* 12. Collapsible model-level detail — never primary. */}
         <details className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Panel detail ({totalModels} model{totalModels === 1 ? "" : "s"})
+            {structuredOutput ? <>Panel detail ({structuredOutput.headline})</> : <>Panel detail ({totalModels} model{totalModels === 1 ? "" : "s"})</>}
           </summary>
           <p className="mt-1.5 text-xs text-slate-500">
             {DS_GROUPING_BASIS} When the current grouping finds a split, the panel falls back to a conservative action rather than a
@@ -309,6 +328,19 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
               <SlotChip key={modelId} modelId={modelId} size="xs" />
             ))}
           </div>
+          {/* Item 7A: a selected model with no usable structured output is named, never silently omitted. */}
+          {structuredOutput?.affected?.some((m) => m.state === "unavailable") ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1" data-testid="ds-unavailable-models">
+              <span className="text-xs text-slate-500">Unavailable:</span>
+              {structuredOutput.affected
+                .filter((m) => m.state === "unavailable")
+                .map((m, i) => (
+                  <SlotChip key={`${m.modelId}-${i}`} modelId={m.modelId as ModelId} size="xs" />
+                ))}
+            </div>
+          ) : structuredOutput && structuredOutput.affected === null && structuredOutput.usable < structuredOutput.selected ? (
+            <p className="mt-2 text-xs text-slate-500">{STRUCTURED_OUTPUT_DETAIL_NOT_RECORDED}</p>
+          ) : null}
         </details>
       </Card>
     </div>

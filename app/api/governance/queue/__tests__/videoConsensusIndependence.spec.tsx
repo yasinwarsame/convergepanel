@@ -208,8 +208,13 @@ describe("NIT n1: never '1/1 models say …'", () => {
     ];
     const r = (await rows())["n1"];
     expect(r.modelIndependence).toBeUndefined();
-    // Phase 0 (L15, O14 = A): the 35933c8 slot tally (3 answered slots); never "1/1".
-    expect(r.agreementSummary).toBe("2/3 models say accurate");
+    // R4 owner ruling (MAJOR-1): the 35933c8 slot tally "2/3 models say accurate" counted 3 SLOTS of 2 executing
+    // models; with DeepSeek inconsistent across its slots nothing is stated about models — the slot responses are
+    // listed as a qualified signal. Never "1/1".
+    expect(r.agreementSummary).toBeUndefined();
+    expect(r.qualifiedDisagreements).toEqual(expect.arrayContaining([
+      { text: "Panel slot responses: 2 accurate, 1 inaccurate. These counts are of panel slot responses, not of agreeing models (2 answered by a substitute model; 2 distinct executing providers).", basis: "same_executing_model" },
+    ]));
     expect(JSON.stringify(r)).not.toMatch(/\b1\/1 models/);
   });
 
@@ -222,18 +227,41 @@ describe("NIT n1: never '1/1 models say …'", () => {
 
 describe("NIT n2: same-executing-model digest pair in a run with ≥ 2 independent models", () => {
   it("DeepSeek×2 + Grok: the chatgpt-vs-claude conflict is qualified (same executing model), never a genuine disagreement", async () => {
+    // Doc 14 PR-1 (D-5): the pair is on OPPOSITE sides (accurate vs inaccurate) so the digest still reports it and this
+    // test keeps exercising the same-executing-model qualification. Before PR-1 both rows were "accurate"; two models
+    // on the same side are no longer a conflict (asserted in the next test).
     verRows = [
       ver("n2", [
         vrow("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }),
-        vrow("claude", "ok", "accurate", { ...DS, incorrectParts: [LONG_B] }),
+        vrow("claude", "ok", "inaccurate", { ...DS, incorrectParts: [LONG_B] }),
         // C-b (CB-01): the own-provider row records its provider, so the shared gate verifies the record.
         vrow("grok", "ok", "accurate", { provider: "xai" }),
       ]),
     ];
     const r = (await rows())["n2"];
     expect(r.modelIndependence).toBeUndefined();
-    expect(r.qualifiedDisagreements).toEqual([{ text: "Conflicting assessments: (chatgpt) vs (claude)", basis: "same_executing_model" }]);
-    // Phase 0 (L15, O14 = A): the 35933c8 digest lines stay in the DTO; the qualification is additive.
-    expect(r.disagreements).toEqual(["Conflicting assessments: (chatgpt) vs (claude)"]);
+    // With the pair on opposite sides the existing verdict-dissent qualification of one executing model also applies
+    // (as in verificationAgreementWording.spec.tsx "two responses from the same DeepSeek fallback").
+    expect(r.qualifiedDisagreements).toEqual([
+      { text: "DeepSeek (substituting ChatGPT, Claude) rated as accurate; inaccurate — repeated outputs from one executing model", basis: "same_executing_model" },
+      { text: "Conflicting assessments: (chatgpt) vs (claude)", basis: "same_executing_model" },
+      { text: "Panel slot responses: 2 accurate, 1 inaccurate. These counts are of panel slot responses, not of agreeing models (2 answered by a substitute model; 2 distinct executing providers).", basis: "same_executing_model" },
+    ]);
+    // R4 owner ruling (MAJOR-1): the same-executing-model pair is no longer ALSO kept in the "Where models disagree"
+    // digest lines (the 35933c8 DTO kept it there); it is listed only as qualified.
+    expect(r.disagreements).toBeUndefined();
+  });
+
+  it("doc 14 PR-1 (D-5): the same DeepSeek pair on the SAME side (both accurate) is no conflict at all", async () => {
+    verRows = [
+      ver("n2s", [
+        vrow("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }),
+        vrow("claude", "ok", "accurate", { ...DS, incorrectParts: [LONG_B] }),
+        vrow("grok", "ok", "accurate", { provider: "xai" }),
+      ]),
+    ];
+    const r = (await rows())["n2s"];
+    expect(r.qualifiedDisagreements).toBeUndefined();
+    expect("disagreements" in r).toBe(false);
   });
 });

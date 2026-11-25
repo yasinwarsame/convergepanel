@@ -1197,7 +1197,7 @@ export default function ResultsDisplay({
   }
 
   // TEMPORARY DEBUG LOG: Log results received by ResultsDisplay component
-  console.log("[ResultsDisplay] Received results:", results);
+  // Privacy (2026-11-18): was the full results array (every model's rawText) — ids/statuses below only.
   console.log("[ResultsDisplay] Results count:", results.length);
   console.log("[ResultsDisplay] Results model IDs:", results.map((r) => r.modelId));
   console.log("[ResultsDisplay] Results statuses:", results.map((r) => ({ modelId: r.modelId, status: r.status })));

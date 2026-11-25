@@ -20,13 +20,15 @@ jest.mock("@react-pdf/renderer", () => ({
 
 import { EVIDENCE_RECORDS, historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
 import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportFixtures";
-import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
+import { D9, ITEM7A_STRUCTURED_OUTPUT, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
 import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
 import { EXEMPTIONS, scanSurface, validateExemptions } from "@/components/adaptive/__tests__/seSurfaces/dsWordingScanner";
 import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { governanceStatusDisplay } from "@/lib/adaptiveSchema/exportContentDerivation";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { extractPdfTextNodes } from "./testUtils";
+import { historicalReceiptText } from "@/lib/adaptiveSchema/__tests__/dsExport/item6aReceiptFormat";
+import { LEGACY_INFERRED_CRITERIA_LIMITATION } from "@/lib/adaptiveSchema/criterionProvenance";
 
 const nodes = (r: AdaptiveResearchExportV1) => extractPdfTextNodes(AdaptiveResearchDocument({ record: r }));
 const norm = (t: string) => t.replace(/\s+/g, " ").trim();
@@ -36,7 +38,8 @@ const marked = (name: string) => asStored(exportRecord(dsCases.find((c) => c.nam
 /** [index of "Report status summary", index of the first node after the status region]. */
 function statusRegion(n: string[]): [number, number] {
   const start = n.indexOf("Report status summary");
-  const end = n.findIndex((t, i) => i > start && (t === "Conclusion" || t === "Primary synthesis"));
+  // Item 7A: the structured-output section, when present, directly follows the status region and is checked separately.
+  const end = n.findIndex((t, i) => i > start && (t === "Conclusion" || t === "Primary synthesis" || t === "Structured output completeness"));
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return [start, end];
@@ -65,18 +68,23 @@ describe("version-1 Decision Support PDF", () => {
     const d9 = n.map(norm).filter((t) => t === norm(D9)).length;
     expect(d9).toBe(o.d9 ? 1 : 0);
     if (o.d9) expect(norm(n[end - 1])).toBe(norm(D9));
+    // Item 7A: exactly the literal oracle section after the status region, and only for the two shortfall fixtures.
+    const section = ITEM7A_STRUCTURED_OUTPUT[stateOf(name)];
+    expect(n[end] === "Structured output completeness").toBe(!!section);
+    if (section) expect(n.slice(end, end + section.length)).toEqual(section);
+    const after = end + (section?.length ?? 0);
     // The shared review badge is unchanged.
     expect(n).toContain(governanceStatusDisplay(record).label);
     // O-3: the :488 conclusion.
     const receipt = record.reportSnapshot.milestone2?.decisionReceipt;
     if (receipt) {
-      const shown = n[end + 1];
+      const shown = n[after + 1];
       if (o.conclusion488 === "presented") expect(shown).toBe(`Conditional go — ${SHOWN_488}`);
       else if (o.conclusion488 === "stored") expect(shown).toBe(`Conditional go — ${STORED_488}`);
       else expect(shown).toBe(receipt.conclusion);
       if (o.conclusion488 !== "presented") expect(n.join(" ")).not.toContain(SHOWN_488);
     } else {
-      expect(n[end]).toBe("Primary synthesis");
+      expect(n[after]).toBe("Primary synthesis");
     }
   });
 
@@ -86,13 +94,27 @@ describe("version-1 Decision Support PDF", () => {
     const [s1, e1] = statusRegion(v1);
     const [s0, e0] = statusRegion(old);
     expect(v1.slice(0, s1)).toEqual(old.slice(0, s0));
-    const after1 = v1.slice(e1);
+    // Item 7A: the literal structured-output section (two shortfall fixtures only) is the one addition after the region.
+    const section7a = v1[e1] === "Structured output completeness" ? ITEM7A_STRUCTURED_OUTPUT[stateOf(name)] ?? [] : [];
+    expect(v1.slice(e1, e1 + section7a.length)).toEqual(section7a);
+    const after1 = v1.slice(e1 + section7a.length);
     const after0 = old.slice(e0);
     expect(after1.length).toBe(after0.length);
     const conclusionAt = after0[0] === "Conclusion" ? 1 : -1;
+    // Item 6A structural correction (owner Option A, 2026-11-23): criterion labels in Receipt lines are now quoted,
+    // escaped data. Only that quoting is reverted (verified exact inverse) before the node-for-node comparison; every
+    // other node must still equal the historical PDF, and the reverted nodes are exactly the historical criterion and
+    // assessment lines.
+    let reverted = 0;
     after1.forEach((t, i) => {
-      if (i !== conclusionAt) expect(t).toBe(after0[i]);
+      if (i === conclusionAt) return;
+      const h = historicalReceiptText(t);
+      if (h !== t) reverted++;
+      // Cases added after the capture are built by today's builder on both sides; the inverse is identity on frozen text.
+      expect(h).toBe(historicalReceiptText(after0[i]));
     });
+    const historicalCriterionLines = after0.map(historicalReceiptText).filter((t) => /^Criterion: |^.+ × .+: /.test(t) || t === LEGACY_INFERRED_CRITERIA_LIMITATION).length;
+    expect([name, reverted]).toEqual([name, historicalCriterionLines]);
   });
 
   it("the historical status region is exactly what version 1 replaces: Consensus, Source grounding, caption", () => {
