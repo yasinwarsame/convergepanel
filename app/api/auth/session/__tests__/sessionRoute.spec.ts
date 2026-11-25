@@ -109,6 +109,111 @@ describe("POST /api/auth/session", () => {
     expect(JSON.stringify(body)).not.toMatch(/internal Firebase Admin detail/);
   });
 
+  describe("SESSREV: the mint refuses revoked / disabled identities and fails closed on outages", () => {
+    const fbErr = (code: string, message = "firebase detail") => Object.assign(new Error(message), { code });
+
+    function expectNoCookie(res: Response & { cookies?: { get(n: string): unknown } }) {
+      expect(mockCreateSessionCookie).not.toHaveBeenCalled();
+      expect((res as unknown as { cookies: { get(n: string): unknown } }).cookies.get("__session")).toBeUndefined();
+      expect(res.headers.get("set-cookie")).toBeNull();
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+    }
+
+    it("verifies the ID token WITH checkRevoked = true (the SDK's live disabled + tokensValidAfterTime check)", async () => {
+      mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
+      mockCreateSessionCookie.mockResolvedValue("signed-cookie-value");
+      const res = await POST(postRequest({ idToken: "valid-token" }));
+      expect(res.status).toBe(200);
+      expect(mockVerifyIdToken).toHaveBeenCalledTimes(1);
+      expect(mockVerifyIdToken).toHaveBeenCalledWith("valid-token", true);
+      expect(mockCreateSessionCookie).toHaveBeenCalledWith("valid-token", { expiresIn: 60 * 60 * 24 * 5 * 1000 });
+    });
+
+    it("revoked token (auth/id-token-revoked) → 401, no cookie minted, generic body", async () => {
+      mockVerifyIdToken.mockRejectedValue(fbErr("auth/id-token-revoked", "The Firebase ID token has been revoked."));
+      const res = await POST(postRequest({ idToken: "revoked-token" }));
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: "Invalid or expired token" });
+      expectNoCookie(res);
+      expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "revoked_token" });
+    });
+
+    it("disabled account (auth/user-disabled) → 401, no cookie minted, account state not disclosed", async () => {
+      mockVerifyIdToken.mockRejectedValue(fbErr("auth/user-disabled", "The user record is disabled."));
+      const res = await POST(postRequest({ idToken: "disabled-user-token" }));
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body).toEqual({ error: "Invalid or expired token" });
+      expect(JSON.stringify(body)).not.toMatch(/disabled/i);
+      expectNoCookie(res);
+      expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "account_disabled" });
+    });
+
+    it("deleted account (auth/user-not-found from the checkRevoked lookup) → 401, no cookie", async () => {
+      mockVerifyIdToken.mockRejectedValue(fbErr("auth/user-not-found"));
+      const res = await POST(postRequest({ idToken: "t" }));
+      expect(res.status).toBe(401);
+      expectNoCookie(res);
+    });
+
+    it.each(["auth/internal-error", "app/internal-error", "app/network-error", "app/network-timeout"])(
+      "transient verifier failure %s → 503 (never 200, never a cookie, never 401)",
+      async (code) => {
+        mockVerifyIdToken.mockRejectedValue(fbErr(code, "upstream detail xyz"));
+        const res = await POST(postRequest({ idToken: "t" }));
+        expect(res.status).toBe(503);
+        const body = await res.json();
+        expect(body).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
+        expect(JSON.stringify(body)).not.toMatch(/upstream detail/);
+        expectNoCookie(res);
+        expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
+        expect(mockLoggerError).toHaveBeenCalledWith(expect.any(String), { errorCode: code });
+      }
+    );
+
+    it.each([
+      ["no code", new Error("boom")],
+      ["non-string code", Object.assign(new Error("boom"), { code: 503 })],
+      ["a thrown non-Error", "string-rejection"],
+      ["near-miss transient code", fbErr("auth/internal-error ")],
+    ])("an unclassified failure (%s) is a credential failure → 401, no cookie", async (_label, err) => {
+      mockVerifyIdToken.mockRejectedValue(err);
+      const res = await POST(postRequest({ idToken: "t" }));
+      expect(res.status).toBe(401);
+      expectNoCookie(res);
+    });
+
+    it.each([[{}], [{ uid: "" }], [{ uid: 42 }], [null]])("a verified-but-uidless decode (%p) → 401, no cookie", async (decoded) => {
+      mockVerifyIdToken.mockResolvedValue(decoded);
+      const res = await POST(postRequest({ idToken: "t" }));
+      expect(res.status).toBe(401);
+      expectNoCookie(res);
+    });
+  });
+
+  it("never logs the ID token or a provider error message (code only), on every failure path", async () => {
+    const TOKEN = "eyJhbGciOiJSUzI1NiJ9.SECRET-PAYLOAD.sig";
+    const leaky = (code: string) => Object.assign(new Error(`bad token ${TOKEN} for user@example.com`), { code });
+    const paths: Array<() => void> = [
+      () => mockVerifyIdToken.mockRejectedValue(leaky("auth/id-token-revoked")),
+      () => mockVerifyIdToken.mockRejectedValue(leaky("auth/user-disabled")),
+      () => mockVerifyIdToken.mockRejectedValue(leaky("app/network-error")),
+      () => {
+        mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
+        mockCreateSessionCookie.mockRejectedValue(leaky("auth/invalid-id-token"));
+      },
+    ];
+    for (const arrange of paths) {
+      jest.clearAllMocks();
+      arrange();
+      await POST(postRequest({ idToken: TOKEN }));
+      const logged = JSON.stringify([...mockLoggerError.mock.calls, ...mockLogAuthSessionEvent.mock.calls]);
+      expect(logged).not.toContain("SECRET-PAYLOAD");
+      expect(logged).not.toContain("user@example.com");
+      expect(logged).not.toContain("bad token");
+    }
+  });
+
   it("ignores a client-supplied uid in the request body entirely", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "server-verified-uid" });
     mockCreateSessionCookie.mockResolvedValue("cookie");

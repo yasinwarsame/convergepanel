@@ -378,8 +378,9 @@ describe("STRUCTURED CONTAINMENT CONTRACT — steps identified by stable ID", ()
 describe("the session-mint claim matches the code", () => {
   /**
    * C10 asserted that POST /api/auth/session refuses to mint for a disabled or
-   * revoked identity. The route calls verifyIdToken WITHOUT checkRevoked, so
-   * that was false — and it contradicted §B.5 of the same document.
+   * revoked identity while the route called verifyIdToken WITHOUT checkRevoked,
+   * so that was false. SESSREV made the route pass checkRevoked = true; the doc
+   * now states the refusal, and this pin keeps code and doc in step.
    */
   const src = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
   const ROUTE = readFileSync("app/api/auth/session/route.ts", "utf8");
@@ -389,11 +390,14 @@ describe("the session-mint claim matches the code", () => {
     expect(ROUTE).toContain("createSessionCookie");
   });
 
-  it("the route does NOT pass checkRevoked — so the doc must not claim it refuses", () => {
+  it("the route passes checkRevoked = true — and the doc states the refusal, not the old gap", () => {
     // If this ever changes, the documentation below should change with it.
-    expect(ROUTE).not.toMatch(/verifyIdToken\([^)]*,\s*true\s*\)/);
-    expect(src).toMatch(/without\s*\n?\s*`checkRevoked`/);
-    expect(src.replace(/\s+/g, " ")).toContain("Minting a NEW cookie is not blocked by this application");
+    expect(ROUTE).toMatch(/adminAuth\.verifyIdToken\(idToken,\s*true\s*\)/);
+    expect(ROUTE).not.toMatch(/adminAuth\.verifyIdToken\(idToken\s*\)/);
+    const flat = src.replace(/\s+/g, " ");
+    expect(flat).toContain("Minting a NEW cookie is refused for the disabled account (SESSREV)");
+    expect(flat).toContain("Minting a fresh session cookie is refused for a revoked or disabled identity (SESSREV)");
+    expect(flat).not.toContain("Minting a NEW cookie is not blocked by this application");
   });
 
   it("does not assert an immediate bearer-path cutoff", () => {
