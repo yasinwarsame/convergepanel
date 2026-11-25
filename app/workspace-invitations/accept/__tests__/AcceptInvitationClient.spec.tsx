@@ -73,7 +73,7 @@ function authState(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const AUTHENTICATED_USER = { uid: "user-1", reload: jest.fn().mockResolvedValue(undefined) };
+const AUTHENTICATED_USER = { uid: "user-1", reload: jest.fn().mockResolvedValue(undefined), getIdToken: jest.fn().mockResolvedValue("id-token-user-1") };
 
 function setWindow({ hash = "", historyState = { nextRouterState: true } }: { hash?: string; historyState?: unknown } = {}) {
   const storage = fakeStorage();

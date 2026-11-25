@@ -23,7 +23,7 @@
  * - `inFlightRef` is a hard single-flight guard: at most one POST is ever
  *   in the air for a given credential. Only `attemptAcceptance` itself
  *   acquires/releases it — checked and set synchronously, with no async
- *   gap, before `fetch` is ever called. `handleRetry` never force-resets
+ *   gap, before the request is ever sent. `handleRetry` never force-resets
  *   it; a rapid double-click on Retry (a real Production defect found via
  *   canary testing, Phase 8D.3.4-R1) must see the guard still held by the
  *   first in-flight attempt and no-op. This flow never auto-polls or
@@ -31,12 +31,21 @@
  * - `successLatchRef` is a second, independent guard: once a successful
  *   acceptance response has been observed, no later response — however it
  *   might arrive — is ever allowed to regress the UI away from success.
+ * - Identity-isolation C1 (owner D-3, 2026-11-25): the acceptance POST is
+ *   sent through `authedFetch`, so it carries THIS tab's Firebase ID token
+ *   as `Authorization: Bearer` alongside the shared `__session` cookie.
+ *   The server (`resolveRequestIdentity`) then requires both to verify and
+ *   name the same uid; a stale cookie for a different account yields a
+ *   401 (`credential_mismatch`) and is never accepted as that account.
+ *   The token is read from the user this page shows (`useAuth().user`) at
+ *   the moment of the attempt; it never appears in a URL or in storage.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { sendEmailVerification, signOut } from "firebase/auth";
+import { sendEmailVerification, signOut, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
+import { authedFetch } from "@/lib/client/authedFetch";
 import { useAuth } from "@/components/AuthProvider";
 import { clearServerSession } from "@/lib/client/sessionSync";
 import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
@@ -179,7 +188,9 @@ export default function AcceptInvitationClient() {
       case 401:
         // We only ever POST after syncState === "authenticated" — a 401
         // here means the server session has since gone stale, not that the
-        // caller was never authenticated in the first place.
+        // caller was never authenticated in the first place. Since C1 it also
+        // covers a cookie that names a different account than this tab's
+        // bearer token (`credential_mismatch`); "Sign in again" clears both.
         return "session_expired";
       case 403:
         if (body?.errorCode === "email_verification_required") return "needs_verification";
@@ -194,7 +205,7 @@ export default function AcceptInvitationClient() {
     }
   };
 
-  const attemptAcceptance = useCallback(async (credential: InvitationAcceptanceCredential) => {
+  const attemptAcceptance = useCallback(async (credential: InvitationAcceptanceCredential, acceptingUser: User | null) => {
     // Synchronous acquire — no async gap between the check and the set, so
     // a second invocation (rapid double-click, a re-firing effect, an
     // overlapping explicit retry) that lands before this one completes
@@ -204,9 +215,22 @@ export default function AcceptInvitationClient() {
     setIsAccepting(true);
     setViewState("accepting");
 
+    // C1: no signed-in Firebase user means no bearer credential to send. Never fall back to a cookie-only request;
+    // treat it exactly like a server 401 (keep the credential for the re-authentication round trip).
+    if (!acceptingUser) {
+      storeInvitationAcceptance(window.sessionStorage, credential, Date.now());
+      inFlightRef.current = false;
+      setIsAccepting(false);
+      if (isInvitationDocumentSuperseded()) return;
+      if (successLatchRef.current) return;
+      setViewState("session_expired");
+      return;
+    }
+
     let res: Response;
     try {
-      res = await fetch(`/api/workspace-invitations/${encodeURIComponent(credential.invitationId)}/accept`, {
+      res = await authedFetch(`/api/workspace-invitations/${encodeURIComponent(credential.invitationId)}/accept`, {
+        user: acceptingUser,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
@@ -214,6 +238,7 @@ export default function AcceptInvitationClient() {
         body: JSON.stringify({ token: credential.token }),
       });
     } catch {
+      // Network failure, or (C1) the ID token could not be obtained — in which case no request was sent at all.
       inFlightRef.current = false;
       setIsAccepting(false);
       // Review R6 MINOR-3: a later invitation took over this tab while A was in flight; A's failure is not B's.
@@ -323,7 +348,7 @@ export default function AcceptInvitationClient() {
     }
 
     if (syncState === "authenticated" && canMutate) {
-      void attemptAcceptance(credential);
+      void attemptAcceptance(credential, user);
       return;
     }
 
@@ -335,7 +360,7 @@ export default function AcceptInvitationClient() {
     }
 
     // authenticating / syncing_session / signing_out — keep waiting.
-  }, [viewState, authReady, syncState, canMutate, attemptAcceptance, router]);
+  }, [viewState, authReady, syncState, canMutate, user, attemptAcceptance, router]);
 
   const handleRetry = useCallback(() => {
     const credential = credentialRef.current;
@@ -345,8 +370,8 @@ export default function AcceptInvitationClient() {
     // this call synchronously no-ops inside attemptAcceptance; if the
     // previous attempt already completed, the lock was already released
     // there, and this is a legitimate new attempt.
-    void attemptAcceptance(credential);
-  }, [attemptAcceptance]);
+    void attemptAcceptance(credential, user);
+  }, [attemptAcceptance, user]);
 
   const handleSendVerification = useCallback(async () => {
     if (!user || verificationSendState === "pending" || isInvitationDocumentSuperseded()) return; // review R7 F3
