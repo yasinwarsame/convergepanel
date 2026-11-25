@@ -31,25 +31,33 @@
  * - `successLatchRef` is a second, independent guard: once a successful
  *   acceptance response has been observed, no later response — however it
  *   might arrive — is ever allowed to regress the UI away from success.
- * - Identity-isolation C1 (owner D-3, 2026-11-25): the acceptance POST is
- *   sent through `authedFetch`, so it carries the Firebase ID token of the
- *   user this page currently shows (`Authorization: Bearer`) alongside the
- *   shared `__session` cookie. (The Firebase client session is shared by all
+ * - Identity-isolation C1 (owner D-3, 2026-11-25): the acceptance POST
+ *   carries the Firebase ID token (`Authorization: Bearer`, built by
+ *   `prepareAuthedHeaders` from `lib/client/authedFetch`) of the user this
+ *   page currently shows, alongside the shared `__session` cookie. (The Firebase client session is shared by all
  *   tabs of this origin; the token is not unique to a tab. What it adds is
  *   that the server checks the identity the page renders, not whichever
  *   account last wrote the cookie.)
  *   The server (`resolveRequestIdentity`) then requires both to verify and
  *   name the same uid; a stale cookie for a different account yields a
  *   401 (`credential_mismatch`) and is never accepted as that account.
- *   The token is read from the user this page shows (`useAuth().user`) at
- *   the moment of the attempt; it never appears in a URL or in storage.
+ *   The identity is read from `authStateRef` (the latest `useAuth()` render)
+ *   when the attempt starts — never from a value captured before an awaited
+ *   step such as `user.reload()` — and is checked again after the token is
+ *   obtained (immediately before sending) and when the response arrives. If
+ *   the shown account changed, became unavailable or lost `canMutate`, no
+ *   request is sent for the earlier account, a response for it is not shown,
+ *   and the page returns to `auth_loading` so the ordinary orchestration
+ *   re-evaluates the CURRENT state. A request already sent cannot be recalled;
+ *   its outcome is simply not presented. The token never appears in a URL or
+ *   in storage.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { sendEmailVerification, signOut, type User } from "firebase/auth";
+import { sendEmailVerification, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
-import { authedFetch } from "@/lib/client/authedFetch";
+import { prepareAuthedHeaders } from "@/lib/client/authedFetch";
 import { useAuth } from "@/components/AuthProvider";
 import { clearServerSession } from "@/lib/client/sessionSync";
 import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
@@ -115,6 +123,10 @@ export default function AcceptInvitationClient() {
   const superseded = useSyncExternalStore(subscribeInvitationDocumentSuperseded, isInvitationDocumentSuperseded, () => false);
 
   const credentialRef = useRef<InvitationAcceptanceCredential | null>(null);
+  // C1 correction: the latest auth state, updated on every render, so an attempt resumed after an await (e.g. the
+  // "I've verified" reload) sees the CURRENT account, never one captured by an older callback closure.
+  const authStateRef = useRef({ user, syncState, canMutate });
+  authStateRef.current = { user, syncState, canMutate };
   const captureDoneRef = useRef(false);
   const inFlightRef = useRef(false);
   const successLatchRef = useRef(false);
@@ -209,7 +221,7 @@ export default function AcceptInvitationClient() {
     }
   };
 
-  const attemptAcceptance = useCallback(async (credential: InvitationAcceptanceCredential, acceptingUser: User | null) => {
+  const attemptAcceptance = useCallback(async (credential: InvitationAcceptanceCredential) => {
     // Synchronous acquire — no async gap between the check and the set, so
     // a second invocation (rapid double-click, a re-firing effect, an
     // overlapping explicit retry) that lands before this one completes
@@ -219,35 +231,77 @@ export default function AcceptInvitationClient() {
     setIsAccepting(true);
     setViewState("accepting");
 
+    const release = () => {
+      inFlightRef.current = false;
+      setIsAccepting(false);
+    };
+    // The page no longer shows a mutation-ready account (signing out, re-syncing, switched): send nothing and let the
+    // ordinary orchestration re-evaluate the current state (sign-in redirect, wait, or one attempt as the shown user).
+    const reevaluate = () => {
+      release();
+      if (isInvitationDocumentSuperseded()) return;
+      if (successLatchRef.current) return;
+      setViewState("auth_loading");
+    };
+
+    const startState = authStateRef.current;
+    if (startState.syncState !== "authenticated" || !startState.canMutate) {
+      reevaluate();
+      return;
+    }
+    const acceptingUser = startState.user;
     // C1: no signed-in Firebase user means no bearer credential to send. Never fall back to a cookie-only request;
     // treat it exactly like a server 401 (keep the credential for the re-authentication round trip).
     if (!acceptingUser) {
       storeInvitationAcceptance(window.sessionStorage, credential, Date.now());
-      inFlightRef.current = false;
-      setIsAccepting(false);
+      release();
       if (isInvitationDocumentSuperseded()) return;
       if (successLatchRef.current) return;
       setViewState("session_expired");
       return;
     }
+    const stillShown = () => {
+      const now = authStateRef.current;
+      return now.syncState === "authenticated" && now.canMutate && now.user !== null && now.user.uid === acceptingUser.uid;
+    };
+
+    let headers: Headers;
+    try {
+      headers = await prepareAuthedHeaders(acceptingUser, { "Content-Type": "application/json" });
+    } catch {
+      // The ID token could not be obtained: no request is sent at all.
+      release();
+      // Review R6 MINOR-3: a later invitation took over this tab while A was in flight; A's failure is not B's.
+      if (isInvitationDocumentSuperseded()) return;
+      if (successLatchRef.current) return;
+      setViewState("temporarily_unavailable");
+      return;
+    }
+
+    // Re-check immediately before sending: the account may have changed or lost authorization during token retrieval.
+    if (!stillShown()) {
+      reevaluate();
+      return;
+    }
 
     let res: Response;
     try {
-      res = await authedFetch(`/api/workspace-invitations/${encodeURIComponent(credential.invitationId)}/accept`, {
-        user: acceptingUser,
+      res = await fetch(`/api/workspace-invitations/${encodeURIComponent(credential.invitationId)}/accept`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         credentials: "same-origin",
         cache: "no-store",
         body: JSON.stringify({ token: credential.token }),
       });
     } catch {
-      // Network failure, or (C1) the ID token could not be obtained — in which case no request was sent at all.
-      inFlightRef.current = false;
-      setIsAccepting(false);
+      release();
       // Review R6 MINOR-3: a later invitation took over this tab while A was in flight; A's failure is not B's.
       if (isInvitationDocumentSuperseded()) return;
       if (successLatchRef.current) return;
+      if (!stillShown()) {
+        setViewState("auth_loading");
+        return;
+      }
       setViewState("temporarily_unavailable");
       return;
     }
@@ -266,6 +320,13 @@ export default function AcceptInvitationClient() {
     if (isInvitationDocumentSuperseded()) {
       inFlightRef.current = false;
       setIsAccepting(false);
+      return;
+    }
+
+    // C1 correction: the account changed while this request was in flight. Its outcome belongs to the earlier
+    // account and is not presented (the request itself cannot be recalled); re-evaluate the current state instead.
+    if (!stillShown()) {
+      reevaluate();
       return;
     }
 
@@ -352,7 +413,7 @@ export default function AcceptInvitationClient() {
     }
 
     if (syncState === "authenticated" && canMutate) {
-      void attemptAcceptance(credential, user);
+      void attemptAcceptance(credential);
       return;
     }
 
@@ -374,8 +435,8 @@ export default function AcceptInvitationClient() {
     // this call synchronously no-ops inside attemptAcceptance; if the
     // previous attempt already completed, the lock was already released
     // there, and this is a legitimate new attempt.
-    void attemptAcceptance(credential, user);
-  }, [attemptAcceptance, user]);
+    void attemptAcceptance(credential);
+  }, [attemptAcceptance]);
 
   const handleSendVerification = useCallback(async () => {
     if (!user || verificationSendState === "pending" || isInvitationDocumentSuperseded()) return; // review R7 F3
