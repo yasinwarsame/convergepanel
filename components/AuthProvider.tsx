@@ -160,6 +160,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // late successful mint for any other identity (or for anyone after logout began) has its cookie removed
   // (Correction C).
   const currentUidRef = useRef<string | null>(null);
+  // #332 identity-isolation gate: the Firebase user this tab currently shows (null exactly when currentUidRef is null).
+  const currentUserRef = useRef<User | null>(null);
   const endEpisode = () => {
     const e = episodeRef.current;
     if (e) {
@@ -205,14 +207,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }, 3000);
 
-    const unsubscribe = onIdTokenChanged(auth, async (nextUser) => {
+    const onIdentity = async (nextUser: User | null, reestablish = false): Promise<void> => {
       if (!isMounted) return;
 
       // #332 R8: same identity while its episode is active or exhausted. This callback is the SDK re-firing after a
       // token change (often caused by our own refresh). It starts no attempt, resets no budget and bumps no
       // generation, so the episode's own in-flight attempt is not discarded.
       const active = episodeRef.current;
-      if (nextUser && active && !active.cancelled && active.uid === nextUser.uid) {
+      if (!reestablish && nextUser && active && !active.cancelled && active.uid === nextUser.uid) {
         setUser(nextUser);
         setLoading(false);
         logAuthSessionClientEvent("stale_auth_operation_discarded", { failureCategory: "same_identity_reentry", operationGeneration: active.generation });
@@ -260,6 +262,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
         prevUidRef.current = null;
         currentUidRef.current = null;
+        currentUserRef.current = null;
         dispatchSync({ type: "client_signed_out" });
         setUser(null);
         setIdentityProvisional(false); // R5: Firebase answered — after setUser, so no render pairs the old user with it
@@ -297,6 +300,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       currentUidRef.current = nextUser.uid;
+      currentUserRef.current = nextUser;
       const signedInUser = nextUser;
       const episode: SyncEpisode = { uid: nextUser.uid, generation: myGeneration, attempts: 1, timer: null, exhausted: false, cancelled: false };
       episodeRef.current = episode;
@@ -310,6 +314,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // never adopted. R8 (Correction C): if it minted a cookie for an identity this tab no longer shows (signed
           // out, or switched away), remove that cookie so it cannot authorize anything.
           logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
+          // #332 identity-isolation gate: a discarded sync for a DIFFERENT identity has touched the one shared
+          // __session cookie after this tab moved on (its mint installed that identity's cookie, or its fail-closed
+          // DELETE removed the cookie). The identity this tab now shows can no longer be assumed to own the server
+          // session, and cookie-only surfaces (Server Components, routes called without a bearer) cannot tell. So
+          // re-establish the shown identity from scratch: the synchronous start of that sync leaves `authenticated` at
+          // once (non-mutable), its fresh mint overwrites whatever cookie the stale response left (this does NOT
+          // depend on a DELETE succeeding), and any failure takes the ordinary fail-closed path. Bounded: only a sync
+          // for another identity triggers this, and the re-established sync is for the shown identity itself.
+          const shown = currentUserRef.current;
+          if (isMounted && shown !== null && shown.uid !== episode.uid) {
+            logAuthSessionClientEvent("session_identity_mismatch", { failureCategory: "stale_foreign_session", operationGeneration: myGeneration });
+            prevUidRef.current = null; // the shown identity is unconfirmed until the re-established sync verifies it
+            void onIdentity(shown, true);
+            return;
+          }
           if (result.ok && currentUidRef.current !== result.uid) await clearServerSession();
           return;
         }
@@ -389,7 +408,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // outcome this branch exists to guarantee.
         }
       }
-    });
+    };
+    const unsubscribe = onIdTokenChanged(auth, (nextUser) => onIdentity(nextUser));
 
     return () => {
       isMounted = false;
@@ -404,6 +424,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const beginLogout = () => {
     endEpisode();
     currentUidRef.current = null; // from now on no late mint may keep a cookie, even for the same uid
+    currentUserRef.current = null;
     dispatchSync({ type: "logout_started" });
   };
 
