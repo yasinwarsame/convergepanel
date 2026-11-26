@@ -26,11 +26,36 @@ export interface MinimalAuthUser {
 
 export type SessionSyncOutcome =
   | { ok: true; uid: string }
-  | { ok: false; reason: "network_error" | "server_error" | "invalid_response" | "uid_mismatch" };
+  | { ok: false; reason: "network_error" | "server_error" | "invalid_response" | "uid_mismatch" }
+  /**
+   * Stage 0 F3: returned ONLY when the caller passed `keepSessionOnAuthUnavailable`
+   * and the mint answered exactly 503 `{ code: "auth_unavailable" }` — the server
+   * could not run verification, so it made no verdict and set no cookie. The
+   * existing cookie is left untouched (not cleared) in this one case.
+   */
+  | { ok: false; reason: "auth_unavailable" };
 
 interface SessionSyncOptions {
   /** Non-sensitive operation-generation number (see `authGeneration.ts`), logged only for correlating client/server telemetry — never an identity value. */
   generation?: number;
+  /**
+   * Stage 0 F3. Set by `AuthProvider` ONLY for a same-uid token refresh of a session
+   * this tab already confirmed. When true, an exact 503 `auth_unavailable` answer
+   * returns `{ reason: "auth_unavailable" }` WITHOUT clearing the cookie. Every other
+   * failure — and every failure when this is false/absent — still clears it.
+   */
+  keepSessionOnAuthUnavailable?: boolean;
+}
+
+/** Exactly 503 with body `code === "auth_unavailable"`; any read/parse problem → false (fail closed). */
+async function isAuthUnavailableAnswer(res: Response): Promise<boolean> {
+  if (res.status !== 503) return false;
+  try {
+    const body: unknown = await res.json();
+    return typeof body === "object" && body !== null && (body as { code?: unknown }).code === "auth_unavailable";
+  } catch {
+    return false;
+  }
 }
 
 function isValidSessionBody(body: unknown): body is { authenticated: true; uid: string } {
@@ -84,6 +109,11 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
   }
 
   if (!res.ok) {
+    if (options.keepSessionOnAuthUnavailable === true && (await isAuthUnavailableAnswer(res))) {
+      // No verdict, no new cookie: keep the existing one (the caller keeps its confirmed state). No retry here.
+      logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "auth_unavailable_kept", operationGeneration: options.generation });
+      return { ok: false, reason: "auth_unavailable" };
+    }
     logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: `http_${res.status}`, operationGeneration: options.generation });
     await clearServerSession();
     return { ok: false, reason: "server_error" };

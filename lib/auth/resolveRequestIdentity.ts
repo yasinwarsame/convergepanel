@@ -124,10 +124,11 @@ function extractBearerToken(request: NextRequest): { present: boolean; token: st
  * credential failures (401).
  *
  * POLICY for an UNKNOWN or absent code (R4, deliberate): it is a credential
- * failure (`invalid_*`, 401) — never an allow. Rationale: a 503 tells the
- * client to retry the SAME credential, while a 401 sends it through re-auth,
- * so misclassifying an unlisted credential error as an outage would leave a
- * user stuck retrying a bad token; and the SDK already funnels every unmapped
+ * failure (`invalid_*`, 401) — never an allow. Rationale: a 503 says "the
+ * credential was not judged", while a 401 says "re-authenticate"; a client that
+ * treats the 503 as temporary (today only AuthProvider's same-uid token refresh
+ * does, via the session mint) would keep a bad token if an unlisted credential
+ * error were misclassified as an outage; and the SDK already funnels every unmapped
  * server error into `auth/internal-error` (above), so new outage shapes still
  * land in this set. Pinned by bearerRevocationRealSdk.spec.ts ("classification
  * of EVERY firebase-admin Auth/App error code") and the near-miss tests.
@@ -150,6 +151,16 @@ const TRANSIENT_VERIFY_CODES: ReadonlySet<string> = new Set([
   "app/unable-to-parse-response",
   "app/invalid-credential",
 ]);
+
+/**
+ * The ONE outage-code predicate (Stage 0 F1): `POST /api/auth/session` uses it for
+ * both its `verifyIdToken(…, true)` and its `createSessionCookie` failures, so the
+ * mint and every `resolveRequestIdentity` caller agree on "could not run" vs
+ * "credential failure". Exact match on the code string only.
+ */
+export function isVerifierUnavailableCode(code: string): boolean {
+  return TRANSIENT_VERIFY_CODES.has(code);
+}
 
 function classifyVerificationError(err: unknown, kind: "cookie" | "bearer"): RequestIdentityUnauthenticatedReason {
   const raw = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;

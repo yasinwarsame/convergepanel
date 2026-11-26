@@ -1,9 +1,9 @@
 /**
- * #332 R7: the session mint's client/server error contract.
+ * The session mint's client/server error contract (Stage 0; originally #332 R7).
  *  - "Verification could not run" answers exactly 503 + code "auth_unavailable", sets no cookie, and discloses nothing.
  *  - A credential verdict (revoked / disabled / invalid) answers 401 WITHOUT that code, so the client's ordinary
  *    fail-closed sign-out still applies.
- *  - createSessionCookie: a transient Auth failure becomes the same retryable 503; any other failure stays the 500.
+ *  - createSessionCookie: a transient Auth failure becomes the same 503 auth_unavailable; any other failure stays the 500.
  */
 const mockVerifyIdToken = jest.fn();
 const mockCreateSessionCookie = jest.fn();
@@ -46,7 +46,7 @@ describe("#332 R7 — the mint's auth_unavailable contract", () => {
   );
 
   it.each(["auth/internal-error", "app/internal-error", "app/network-error", "app/network-timeout"])(
-    "createSessionCookie transient failure %s → the same retryable 503 + code, no cookie, code-only log",
+    "createSessionCookie transient failure %s → the same 503 + code, no cookie, code-only log",
     async (code) => {
       mockVerifyIdToken.mockResolvedValue({ uid: "uid-a" });
       mockCreateSessionCookie.mockRejectedValue(fbErr(code));

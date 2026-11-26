@@ -198,3 +198,74 @@ describe("verifyClientServerIdentityMatch", () => {
     await expect(verifyClientServerIdentityMatch("user-1")).resolves.toBe(false);
   });
 });
+
+describe("Stage 0 F3 — keepSessionOnAuthUnavailable (same-uid refresh only)", () => {
+  let fetchMock: jest.Mock;
+  const UNAVAILABLE = { error: "Authentication service unavailable", code: "auth_unavailable" };
+  const methods = () => fetchMock.mock.calls.map((c) => (c[1] as RequestInit).method);
+
+  beforeEach(() => {
+    fetchMock = jest.fn();
+    (global as any).fetch = fetchMock;
+    jest.clearAllMocks();
+  });
+
+  it("flag + exact 503 auth_unavailable → reason auth_unavailable, NO cookie DELETE, exactly one POST (no retry)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, UNAVAILABLE));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "auth_unavailable" });
+    expect(methods()).toEqual(["POST"]);
+  });
+
+  it("flag ABSENT + the same 503 → unchanged: server_error and the cookie is cleared", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, UNAVAILABLE)).mockResolvedValueOnce(jsonResponse(200, {}));
+    const outcome = await establishServerSession(mockUser("u"));
+    expect(outcome).toEqual({ ok: false, reason: "server_error" });
+    expect(methods()).toEqual(["POST", "DELETE"]);
+  });
+
+  it.each([
+    ["503 without the code", 503, { error: "x" }],
+    ["503 with another code", 503, { code: "auth_unavailable " }],
+    ["503 with a non-object body", 503, "auth_unavailable"],
+    ["500 with the code", 500, UNAVAILABLE],
+    ["502 with the code", 502, UNAVAILABLE],
+  ])("flag + %s → fail closed (server_error, cookie cleared)", async (_l, status, body) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(status as number, body)).mockResolvedValueOnce(jsonResponse(200, {}));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "server_error" });
+    expect(methods()).toEqual(["POST", "DELETE"]);
+  });
+
+  it("flag + 503 whose body cannot be parsed → fail closed", async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => { throw new SyntaxError("html"); } } as unknown as Response)
+      .mockResolvedValueOnce(jsonResponse(200, {}));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "server_error" });
+    expect(methods()).toEqual(["POST", "DELETE"]);
+  });
+
+  it("flag + 401 (credential verdict) → still retried once, then fail closed with the cookie cleared", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error: "Invalid or expired token" }))
+      .mockResolvedValueOnce(jsonResponse(401, { error: "Invalid or expired token" }))
+      .mockResolvedValueOnce(jsonResponse(200, {}));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "server_error" });
+    expect(methods()).toEqual(["POST", "POST", "DELETE"]);
+  });
+
+  it("flag + network error → unchanged network_error", async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "network_error" });
+  });
+
+  it("flag + uid mismatch → unchanged uid_mismatch with the cookie cleared", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "other" })).mockResolvedValueOnce(jsonResponse(200, {}));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "uid_mismatch" });
+    expect(methods()).toEqual(["POST", "DELETE"]);
+  });
+});

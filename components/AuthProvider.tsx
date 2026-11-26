@@ -236,7 +236,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         dispatchSync({ type: "token_refresh_started" });
       }
 
-      const outcome = await establishServerSession(nextUser, { generation: myGeneration });
+      // Stage 0 F3: only a same-uid refresh of a session THIS tab already confirmed may
+      // keep its cookie when the mint says "verification could not run" (503 auth_unavailable).
+      const outcome = await establishServerSession(nextUser, { generation: myGeneration, keepSessionOnAuthUnavailable: !isNewIdentity });
 
       if (!generationGuard.isCurrent(myGeneration)) {
         // A newer callback (another refresh, a switch, a logout) has already
@@ -264,6 +266,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
             setAdminResolved(true);
           }
         }
+      } else if (!isNewIdentity && outcome.reason === "auth_unavailable") {
+        // Stage 0 F3: a routine same-uid refresh hit a verification OUTAGE, not a
+        // credential verdict. Keep the confirmed session (no cookie clear, no
+        // sign-out — so no lost /verify input and no sign-out of every other tab).
+        // No retry: the next Firebase token event re-attempts. A revoked/disabled/
+        // invalid answer (401), any other failure, and every new identity still
+        // take the fail-closed branch below.
+        dispatchSync({ type: "token_refresh_deferred" });
+        logAuthSessionClientEvent("token_refresh_deferred", { operationGeneration: myGeneration });
       } else {
         // Fail closed: `establishServerSession` already cleared the server
         // cookie. The previous identity must never be retained on the

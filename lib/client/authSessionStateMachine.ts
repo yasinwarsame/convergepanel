@@ -49,6 +49,11 @@ export type SessionSyncEvent =
   | { type: "token_refresh_started" }
   | { type: "token_refresh_succeeded" }
   | { type: "token_refresh_failed" }
+  /**
+   * Stage 0 F3: a same-uid refresh's mint answered 503 `auth_unavailable` (the server could not run verification and
+   * made no verdict). Keeps `authenticated` ONLY if already `authenticated`; from any other state it is `session_error`.
+   */
+  | { type: "token_refresh_deferred" }
   /** Explicit, user-initiated logout has begun (before Firebase sign-out or the DELETE call has resolved). */
   | { type: "logout_started" }
   /** Both the server session was cleared and the Firebase client was signed out. */
@@ -121,6 +126,12 @@ export function nextSessionSyncState(current: SessionSyncState, event: SessionSy
       // A failed refresh does NOT retain the previous authenticated state —
       // the server session may now be stale relative to the client's token.
       return "session_error";
+
+    case "token_refresh_deferred":
+      // Not a verdict on the credential: the existing confirmed session stands (the
+      // server re-verifies its cookie, revocation-checked, on every request). Never
+      // upgrades any other state.
+      return current === "authenticated" ? "authenticated" : "session_error";
 
     case "logout_started":
       return "signing_out";

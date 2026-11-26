@@ -21,7 +21,8 @@ export type AuthSessionClientOperation =
   | "session_identity_mismatch"
   | "session_cleared"
   | "logout_clear_failed"
-  | "stale_auth_operation_discarded";
+  | "stale_auth_operation_discarded"
+  | "token_refresh_deferred";
 
 export type AuthSessionClientTelemetryMetadata = {
   route?: string;
@@ -37,7 +38,8 @@ export function logAuthSessionClientEvent(
   const isFailure =
     operation === "session_sync_failed" ||
     operation === "session_identity_mismatch" ||
-    operation === "logout_clear_failed";
+    operation === "logout_clear_failed" ||
+    operation === "token_refresh_deferred";
   try {
     if (isFailure) {
       console.warn(`[auth-session] ${operation}`, payload);

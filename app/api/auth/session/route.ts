@@ -17,6 +17,7 @@ import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
 import { logAuthSessionEvent } from "@/lib/authTelemetry";
 import { logger } from "@/lib/logger";
 import { startVerificationDeadline, type VerificationOutcome } from "@/lib/auth/authVerificationDeadline";
+import { isVerifierUnavailableCode } from "@/lib/auth/resolveRequestIdentity";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -38,22 +39,15 @@ const SESSION_COOKIE_BASE_ATTRS = {
 const SESSION_MAX_AGE_MS = 60 * 60 * 24 * 5 * 1000; // 5 days
 
 /**
- * firebase-admin 12.x codes meaning "the verifier could not run", not "the
- * credential is bad" — the `checkRevoked` `getUser` read can raise these
- * (AuthClientErrorCode.INTERNAL_ERROR; AppErrorCodes INTERNAL_ERROR /
- * NETWORK_ERROR / NETWORK_TIMEOUT). Exact codes only; anything else is a
- * credential failure (401). Same set as lib/auth/resolveManagementIdentity.ts
- * (API-1a). LIMITATION: a Google public-key fetch failure surfaces as
+ * "The verifier could not run" vs "the credential is bad" (Stage 0 F1): the SAME
+ * nine exact firebase-admin codes as `resolveRequestIdentity`
+ * (`isVerifierUnavailableCode`, listed and justified there), applied to both the
+ * `checkRevoked` live read and `createSessionCookie`. Anything else is a
+ * credential failure (401) or, for cookie creation, the existing 500.
+ * LIMITATION: a Google public-key fetch failure surfaces as
  * `auth/argument-error`, indistinguishable from a forged token, so that outage
  * answers 401 — fail closed either way.
  */
-const TRANSIENT_VERIFY_CODES: ReadonlySet<string> = new Set([
-  "auth/internal-error",
-  "app/internal-error",
-  "app/network-error",
-  "app/network-timeout",
-]);
-
 function errorCodeOf(err: unknown): string {
   if (typeof err === "object" && err !== null && "code" in err) {
     const code = (err as { code?: unknown }).code;
@@ -124,7 +118,7 @@ export async function POST(request: NextRequest) {
       decodedUid = decoded.uid;
     } catch (err) {
       const code = errorCodeOf(err);
-      if (TRANSIENT_VERIFY_CODES.has(code)) {
+      if (isVerifierUnavailableCode(code)) {
         // The verifier could not run (Auth backend / network) — not a verdict on
         // the credential. Fail closed with 503 so no cookie is minted, but do not
         // tell the client its token is bad.
@@ -148,10 +142,9 @@ export async function POST(request: NextRequest) {
     if (created.kind === "rejected") {
       // Code only: a provider error message may echo request content (the ID token); never log it.
       const createCode = errorCodeOf(created.error);
-      if (TRANSIENT_VERIFY_CODES.has(createCode)) {
-        // #332 R7: the same "service could not run" codes as the verifier above. The identity was verified, but no
-        // cookie could be created, so fail closed with the same retryable 503 (no cookie set). The client must not
-        // treat this as a bad credential.
+      if (isVerifierUnavailableCode(createCode)) {
+        // The same "service could not run" codes as the verifier above. The identity was verified, but no cookie
+        // could be created, so fail closed with the same 503 (no cookie set) — not a verdict on the credential.
         logger.error("[auth-session] POST failed: session cookie creation unavailable", { errorCode: createCode });
         logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
         return authUnavailableResponse();
@@ -180,10 +173,12 @@ function verificationUnavailable(step: string, cause: Exclude<VerificationOutcom
 
 /**
  * Stage 0 (identity isolation, owner D-7): the single "verification could not run" answer: HTTP 503 plus the
- * machine-readable `code: "auth_unavailable"` (the same code that getRequestUid / reportReviewCaller answer). The
- * current client (`lib/client/sessionSync.ts`) ends both the earlier outage answer (401, after its one bounded
- * retry) and this 503 the same way: `server_error`, with the cookie cleared. Only the extra 401 retry is skipped. A
- * later client change may key on the code. No cookie is set. The body says nothing about the account.
+ * machine-readable `code: "auth_unavailable"` (the same code that getRequestUid / reportReviewCaller answer). No
+ * cookie is set, and the body says nothing about the account. How the current client handles it
+ * (`lib/client/sessionSync.ts`, `components/AuthProvider.tsx`, Stage 0 F3):
+ *  - a same-uid token refresh of an already-confirmed session keeps its existing cookie and state (no sign-out);
+ *  - every other mint (sign-in, cold load, account switch) ends as `server_error`: the cookie is cleared and Firebase
+ *    is signed out, exactly as for any other failure. The client never retries a 503 automatically.
  */
 const SESSION_AUTH_UNAVAILABLE_CODE = "auth_unavailable";
 function authUnavailableResponse(): NextResponse {
