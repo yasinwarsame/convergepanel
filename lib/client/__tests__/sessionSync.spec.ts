@@ -256,6 +256,13 @@ describe("Stage 0 F3 — keepSessionOnAuthUnavailable (same-uid refresh only)", 
     expect(methods()).toEqual(["POST", "POST", "DELETE"]);
   });
 
+  it.each([401, 500, 502, 504])("flag + %d EVEN IF its body carries code auth_unavailable → fail closed (only an exact 503 is kept)", async (status) => {
+    fetchMock.mockResolvedValue(jsonResponse(status, UNAVAILABLE));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "server_error" });
+    expect(methods()).toContain("DELETE");
+  });
+
   it("flag + network error → unchanged network_error", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
