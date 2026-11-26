@@ -238,7 +238,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // Stage 0 F3: only a same-uid refresh of a session THIS tab already confirmed may
       // keep its cookie when the mint says "verification could not run" (503 auth_unavailable).
-      const outcome = await establishServerSession(nextUser, { generation: myGeneration, keepSessionOnAuthUnavailable: !isNewIdentity });
+      // Stage 0 B1: the same-uid refresh uses the token this callback was delivered for (no forced refresh), so its
+      // own sync cannot mint a new token that re-notifies this listener. New identities still force (Step 6.5).
+      const outcome = await establishServerSession(nextUser, {
+        generation: myGeneration,
+        keepSessionOnAuthUnavailable: !isNewIdentity,
+        forceRefresh: isNewIdentity,
+      });
 
       if (!generationGuard.isCurrent(myGeneration)) {
         // A newer callback (another refresh, a switch, a logout) has already

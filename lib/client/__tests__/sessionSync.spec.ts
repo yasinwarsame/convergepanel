@@ -276,3 +276,86 @@ describe("Stage 0 F3 — keepSessionOnAuthUnavailable (same-uid refresh only)", 
     expect(methods()).toEqual(["POST", "DELETE"]);
   });
 });
+
+describe("Stage 0 B2 — a credential rejection is never erased by a later outage answer", () => {
+  let fetchMock: jest.Mock;
+  const UNAVAILABLE = { error: "Authentication service unavailable", code: "auth_unavailable" };
+  const REJECTED = { error: "Invalid or expired token" };
+  const methods = () => fetchMock.mock.calls.map((c) => (c[1] as RequestInit).method);
+
+  beforeEach(() => {
+    fetchMock = jest.fn();
+    (global as any).fetch = fetchMock;
+    jest.clearAllMocks();
+  });
+
+  // The 401 body is uniform for an invalid, revoked, disabled or expired credential (route: "Invalid or expired
+  // token"), so the client cannot tell an expiry race from a real rejection: every 401 → 503 fails closed.
+  it.each(["invalid", "revoked", "disabled", "expired / refresh race"])(
+    "flag + 401 (%s) then 503 auth_unavailable on the retry → fail closed: server_error, cookie DELETE, never auth_unavailable",
+    async () => {
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse(401, REJECTED))
+        .mockResolvedValueOnce(jsonResponse(503, UNAVAILABLE))
+        .mockResolvedValueOnce(jsonResponse(200, {}));
+      const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+      expect(outcome).toEqual({ ok: false, reason: "server_error" });
+      expect(methods()).toEqual(["POST", "POST", "DELETE"]);
+      expect(logAuthSessionClientEvent).toHaveBeenCalledWith("session_sync_failed", expect.objectContaining({ failureCategory: "http_401_then_503" }));
+      expect(logAuthSessionClientEvent).not.toHaveBeenCalledWith("session_sync_failed", expect.objectContaining({ failureCategory: "auth_unavailable_kept" }));
+    },
+  );
+
+  it("control: flag + 503 on the FIRST attempt (no prior verdict) is still kept", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, UNAVAILABLE));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: false, reason: "auth_unavailable" });
+    expect(methods()).toEqual(["POST"]);
+  });
+
+  it("control: 401 then 200 (the documented expiry race) still succeeds", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, REJECTED)).mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "u" }));
+    const outcome = await establishServerSession(mockUser("u"), { keepSessionOnAuthUnavailable: true });
+    expect(outcome).toEqual({ ok: true, uid: "u" });
+  });
+});
+
+describe("Stage 0 B1 — forceRefresh (the first attempt only; the 401 retry always forces)", () => {
+  let fetchMock: jest.Mock;
+  beforeEach(() => {
+    fetchMock = jest.fn();
+    (global as any).fetch = fetchMock;
+    jest.clearAllMocks();
+  });
+
+  it("default (absent) → the first attempt force-refreshes (Step 6.5 unchanged for every other caller)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "u" }));
+    const user = mockUser("u");
+    await establishServerSession(user);
+    expect(user.getIdToken.mock.calls).toEqual([[true]]);
+  });
+
+  it("forceRefresh: true → forced", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "u" }));
+    const user = mockUser("u");
+    await establishServerSession(user, { forceRefresh: true });
+    expect(user.getIdToken.mock.calls).toEqual([[true]]);
+  });
+
+  it("forceRefresh: false → the first attempt reads the delivered (cached) token, not forced", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "u" }));
+    const user = mockUser("u");
+    await establishServerSession(user, { forceRefresh: false });
+    expect(user.getIdToken.mock.calls).toEqual([[false]]);
+  });
+
+  it("forceRefresh: false + 401 → the bounded retry IS forced (expiry race still covered)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error: "Invalid or expired token" }))
+      .mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "u" }));
+    const user = mockUser("u");
+    const outcome = await establishServerSession(user, { forceRefresh: false });
+    expect(outcome).toEqual({ ok: true, uid: "u" });
+    expect(user.getIdToken.mock.calls).toEqual([[false], [true]]);
+  });
+});

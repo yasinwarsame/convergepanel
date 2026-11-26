@@ -45,6 +45,15 @@ interface SessionSyncOptions {
    * failure — and every failure when this is false/absent — still clears it.
    */
   keepSessionOnAuthUnavailable?: boolean;
+  /**
+   * Stage 0 B1. Whether the FIRST attempt force-refreshes the ID token (default true — Step 6.5, every new
+   * identity). `AuthProvider` passes false ONLY for a same-uid refresh of a confirmed session: that callback was
+   * itself delivered because the token just changed, so the cached token is already the fresh one, and forcing
+   * another refresh would mint yet another token, re-notify `onIdTokenChanged`, and start the next callback (a
+   * self-sustaining chain whenever the securetoken round trip crosses the token's 1 s `iat` granularity). An
+   * expired cached token is still refreshed by the SDK. The bounded 401 retry always forces.
+   */
+  forceRefresh?: boolean;
 }
 
 /** Exactly 503 with body `code === "auth_unavailable"`; any read/parse problem → false (fail closed). */
@@ -85,8 +94,8 @@ function isValidSessionBody(body: unknown): body is { authenticated: true; uid: 
 export async function establishServerSession(user: MinimalAuthUser, options: SessionSyncOptions = {}): Promise<SessionSyncOutcome> {
   logAuthSessionClientEvent("session_sync_started", { route: SESSION_ENDPOINT, operationGeneration: options.generation });
 
-  const attempt = async (): Promise<Response> => {
-    const idToken = await user.getIdToken(true);
+  const attempt = async (force: boolean): Promise<Response> => {
+    const idToken = await user.getIdToken(force);
     return fetch(SESSION_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -97,11 +106,17 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
   };
 
   let res: Response;
+  // Stage 0 B2: a credential rejection (401) on the first attempt is a verdict. A 503 on the retry only says the
+  // second check could not run — it does not show the first rejection was harmless (the client cannot tell an
+  // expired-token race from a revoked, disabled or invalid credential: the 401 body is uniform). So once a 401
+  // was seen, the outcome can never be the kept-session `auth_unavailable`; it fails closed.
+  let rejectedFirst = false;
   try {
-    res = await attempt();
+    res = await attempt(options.forceRefresh !== false);
     if (res.status === 401) {
-      // Bounded, single retry — documented token-expiration race only.
-      res = await attempt();
+      rejectedFirst = true;
+      // Bounded, single retry — documented token-expiration race only. Always force-refreshed.
+      res = await attempt(true);
     }
   } catch {
     logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "network_error", operationGeneration: options.generation });
@@ -109,12 +124,16 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
   }
 
   if (!res.ok) {
-    if (options.keepSessionOnAuthUnavailable === true && (await isAuthUnavailableAnswer(res))) {
+    if (options.keepSessionOnAuthUnavailable === true && !rejectedFirst && (await isAuthUnavailableAnswer(res))) {
       // No verdict, no new cookie: keep the existing one (the caller keeps its confirmed state). No retry here.
       logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "auth_unavailable_kept", operationGeneration: options.generation });
       return { ok: false, reason: "auth_unavailable" };
     }
-    logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: `http_${res.status}`, operationGeneration: options.generation });
+    logAuthSessionClientEvent("session_sync_failed", {
+      route: SESSION_ENDPOINT,
+      failureCategory: rejectedFirst ? `http_401_then_${res.status}` : `http_${res.status}`,
+      operationGeneration: options.generation,
+    });
     await clearServerSession();
     return { ok: false, reason: "server_error" };
   }

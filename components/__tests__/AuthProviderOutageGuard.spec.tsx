@@ -57,6 +57,8 @@ describe("AuthProvider never keeps a NEW identity on auth_unavailable", () => {
     await emit({ uid: "uid-a" });
     await emit({ uid: "uid-b" });
     expect(mockEstablish.mock.calls.map((c: any[]) => c[1].keepSessionOnAuthUnavailable)).toEqual([false, true, false]);
+    // Stage 0 B1: only the same-uid refresh skips the forced refresh; every new identity forces (Step 6.5).
+    expect(mockEstablish.mock.calls.map((c: any[]) => c[1].forceRefresh)).toEqual([true, false, true]);
   });
 
   it("first callback (sign-in / cold load) + auth_unavailable → signed out, never authenticated", async () => {
