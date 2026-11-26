@@ -315,7 +315,7 @@ describe("Stage 0 contract — kept session under realistic callback re-entry", 
     expect(probe.syncState).toBe("authenticated");
   });
 
-  it.each(LAT)("repeated SDK notifications (every 7 s) during the outage: one mint per notification, nothing after they stop — refresh %i / mint %i", async (rl, ml) => {
+  it.each(LAT)("repeated SDK notifications (every 7 s) during the outage: at most one mint per notification, nothing after they stop — refresh %i / mint %i", async (rl, ml) => {
     await signInThen(rl, ml);
     server.mode = "outage";
     let notifications = 0;
@@ -325,8 +325,15 @@ describe("Stage 0 contract — kept session under realistic callback re-entry", 
         fb.notify();
       }
     });
-    expect(server.posts).toBe(notifications);
-    expect(server.maxInFlight).toBeLessThanOrEqual(Math.ceil(ml / 7_000) + 1);
+    // R-S0-6: a notification arriving while a refresh is in flight is coalesced into it (single-flight); a deferred
+    // (auth_unavailable) answer drops the queued follow-up and the next notification re-attempts. So when the mint is
+    // slower than the notification interval there are FEWER mints than notifications — never more, never concurrent.
+    if (ml < 7_000) expect(server.posts).toBe(notifications); // a routine refresh is non-forced (B1): the mint alone sets the pace
+    else {
+      expect(server.posts).toBeLessThanOrEqual(notifications);
+      expect(server.posts).toBeGreaterThanOrEqual(Math.floor(notifications / Math.ceil((ml + 1) / 7_000)) - 1);
+    }
+    expect(server.maxInFlight).toBe(1);
     expect(mockSignOut).not.toHaveBeenCalled();
     const before = server.posts;
     await run(120_000);

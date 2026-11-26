@@ -291,8 +291,22 @@ describe("Stage 0 F3 — every other case is unchanged and fail closed", () => {
     verifyOutage();
     const b = user("uid-b");
     await emit(b);
+    expect(mockSignOut).toHaveBeenCalledTimes(1); // B's failed initial sync failed closed
     mockSignOut.mockClear();
+    calls.length = 0;
+    mockClientEvents.length = 0;
+    // R-S0-6: the SAME User object again with no null in between (here the sign-out double does not emit null) is
+    // never restarted into the failed episode: no new mint, no state upgrade — still fail closed.
     await emit(b);
+    expect(latest.canMutate).toBe(false);
+    expect(latest.syncState).not.toBe("authenticated");
+    expect(calls.filter((c) => c === "POST")).toHaveLength(0);
+    expect(mockClientEvents.map((e) => e[0])).toContain("failed_episode_callback_dropped");
+    // Once Firebase reports null, B may sync again — and, the outage persisting, fails closed again.
+    await emit(null);
+    calls.length = 0;
+    await emit(b);
+    expect(calls.filter((c) => c === "POST").length).toBeGreaterThanOrEqual(1);
     expect(latest.canMutate).toBe(false);
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });

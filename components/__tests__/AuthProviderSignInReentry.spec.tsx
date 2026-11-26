@@ -367,14 +367,15 @@ describe("R-S0-4 contract — one identity event never becomes a self-sustaining
     expect(server.posts).toBe(before);
   });
 
-  it("an external token change DURING the mint request (after the refresh resolved) is not coalesced: it starts its own sync", async () => {
+  it("an external token change DURING the mint request (after the refresh resolved) is reconciled by exactly one follow-up sync (R-S0-6), not a new forced sync", async () => {
     const a = await confirmedA(1_500, 10_000);
     startSignIn(new FakeUser("uid-b")); // B: refresh 1.5 s, then a 10 s mint
     await flush(3_000); // B's refresh resolved; B's mint in flight
     const b = fb.current!;
     b.externalChange();
     await run(60_000);
-    expect(server.postsByUid["uid-b"]).toBe(2); // the external event got its own sync; its echo did not chain
+    expect(server.postsByUid["uid-b"]).toBe(2); // R-S0-6: coalesced into B's episode, then ONE non-forced follow-up; no chain
+    expect(fb.refreshes).toBe(1); // only B's Step 6.5 forced refresh
     expect(probe.syncState).toBe("authenticated");
     expect(probe.uid).toBe("uid-b");
     void a;

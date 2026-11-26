@@ -90,6 +90,19 @@ interface AuthContextType {
 
 const noop = () => {};
 
+/**
+ * R-S0-6: hard client deadline for one session-synchronization episode (token read → server answer → handling), the
+ * initial sync of an identity and a confirmed session's refresh alike.
+ * Worst legitimate case: two attempts (the first plus the bounded 401 retry), each = one forced securetoken refresh
+ * (normally < 2 s) + one mint bounded server-side by AUTH_VERIFICATION_DEADLINE_MS (10 s, one end-to-end deadline per
+ * mint) + transport / cold start (~2–3 s) ≈ 2 × 15 s = 30 s. Past it the attempt cannot be a legitimate slow success
+ * of the reviewed server contract, so it FAILS CLOSED: the POST is aborted, late results are invalidated, the cookie is
+ * cleared and Firebase is signed out (the same fail-closed transition as a failed sync, which for a routine refresh's
+ * network error is already sign-out); the user signs in again explicitly. It never falls back to the pre-R-S0-6
+ * callback handling.
+ */
+export const SESSION_SYNC_DEADLINE_MS = 30_000;
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
@@ -153,6 +166,76 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return false;
     };
 
+    // R-S0-6 (owner decision 2026-11-27): every session synchronization is single-flight. Root cause (real browsers,
+    // diagnosis 09): until a tab's server session was confirmed, every callback counted as a new identity, bumped the
+    // generation (which discarded the pending mint, valid 200 or 401 alike) and forced another refresh; with ≥ 2 tabs
+    // and a mint slower than the cross-tab token cycle, each tab's new token restarted the other tabs' syncs
+    // indefinitely and no answer was ever applied. The same supersession also starved a CONFIRMED session's bounded
+    // 401 retry: its forced refresh's new token came back from another tab and superseded the retry before its 401
+    // could fail closed, so the tab stayed `authenticated` while the server kept refusing. Now one episode owns each
+    // sync from token read through the server answer and its result handling, for exactly one uid AND one Firebase
+    // User object, under its own generation.
+    // - A callback for that same uid and same object (a token change arriving through persistence or the SDK) is
+    //   coalesced into the episode: no generation bump, no new forced refresh; it queues at most ONE follow-up, an
+    //   ordinary non-forced same-uid refresh that runs only after a successful answer.
+    // - Anything else (null, another uid, a replaced User object) supersedes the episode immediately, as before, and
+    //   aborts its pending POST, so a superseded answer is never applied and, once aborted, sets no cookie.
+    // - The episode has a hard client deadline that FAILS CLOSED (see SESSION_SYNC_DEADLINE_MS).
+    // - Own refresh echoes are still coalesced first by R-S0-4 (they queue no follow-up: the sync uses that token).
+    // - After a fail-closed outcome, callbacks for that same User object are dropped until Firebase reports null or a
+    //   different user (no automatic restart into the failed episode; a fresh sign-in creates a new User object).
+    type SyncEpisode = {
+      readonly generation: number;
+      readonly uid: string;
+      readonly user: User;
+      readonly isNewIdentity: boolean;
+      readonly controller: AbortController;
+      readonly timer: ReturnType<typeof setTimeout>;
+      followUp: boolean;
+    };
+    let syncEpisode: SyncEpisode | null = null;
+    let failedEpisodeUser: User | null = null;
+    const endSyncEpisode = (): SyncEpisode | null => {
+      const ep = syncEpisode;
+      if (ep) {
+        clearTimeout(ep.timer);
+        syncEpisode = null;
+      }
+      return ep;
+    };
+    /** Supersede: a newer identity event owns state now. The episode's in-flight POST is aborted (its answer is stale). */
+    const supersedeSyncEpisode = () => {
+      endSyncEpisode()?.controller.abort();
+    };
+    const failClosed = async (failedUser: User) => {
+      failedEpisodeUser = failedUser;
+      prevUidRef.current = null;
+      setIsAdmin(false);
+      setAdminResolved(true);
+      try {
+        await signOut(auth);
+      } catch {
+        // If sign-out itself fails, the state machine is already in session_error (never authenticated) and later
+        // callbacks for this User object are dropped — the fail-closed outcome this exists to guarantee.
+      }
+    };
+    const expireSyncEpisode = (ep: SyncEpisode) => {
+      if (!isMounted || syncEpisode !== ep) return;
+      endSyncEpisode();
+      ep.controller.abort(); // before the DELETE below: an aborted POST can no longer set a cookie after it
+      generationGuard.next(); // every late result of the expired episode is now stale
+      failedEpisodeUser = ep.user; // synchronously: no callback during the DELETE below may restart this episode
+      prevUidRef.current = null;
+      logAuthSessionClientEvent("sync_episode_deadline_exceeded", { operationGeneration: ep.generation });
+      dispatchSync({ type: ep.isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
+      setIsAdmin(false);
+      setAdminResolved(true);
+      void (async () => {
+        await clearServerSession();
+        await failClosed(ep.user);
+      })();
+    };
+
     const timeoutId = setTimeout(() => {
       if (!resolved && isMounted) {
         console.warn("[AuthProvider] Auth check timeout (3s) - unblocking shell, assuming no user");
@@ -174,7 +257,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }, 3000);
 
-    const unsubscribe = onIdTokenChanged(auth, async (nextUser) => {
+    const handleTokenEvent = async (nextUser: User | null): Promise<void> => {
       if (!isMounted) return;
 
       if (nextUser && isOwnRefreshEcho(nextUser.uid)) {
@@ -182,6 +265,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
 
+      // R-S0-6: same uid AND same User object while its sync is still current → part of that episode.
+      if (
+        nextUser &&
+        syncEpisode !== null &&
+        nextUser === syncEpisode.user &&
+        nextUser.uid === syncEpisode.uid &&
+        generationGuard.isCurrent(syncEpisode.generation)
+      ) {
+        syncEpisode.followUp = true;
+        logAuthSessionClientEvent("sync_episode_callback_coalesced", { operationGeneration: syncEpisode.generation });
+        return;
+      }
+
+      // R-S0-6: no automatic restart into an episode that already failed closed (same User object, no null between).
+      if (nextUser && failedEpisodeUser !== null && nextUser === failedEpisodeUser) {
+        logAuthSessionClientEvent("failed_episode_callback_dropped", {});
+        return;
+      }
+      failedEpisodeUser = null;
+
+      supersedeSyncEpisode();
       const myGeneration = generationGuard.next();
 
       if (!authReadySet) {
@@ -271,6 +375,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
         },
       };
+      // R-S0-6: this sync is an episode (see above): single-flight until its answer is handled.
+      const episode: SyncEpisode = {
+        generation: myGeneration,
+        uid: nextUser.uid,
+        user: nextUser,
+        isNewIdentity,
+        controller: new AbortController(),
+        timer: setTimeout(() => expireSyncEpisode(episode), SESSION_SYNC_DEADLINE_MS),
+        followUp: false,
+      };
+      syncEpisode = episode;
+
       // Stage 0 F3: only a same-uid refresh of a session THIS tab already confirmed may
       // keep its cookie when the mint says "verification could not run" (503 auth_unavailable).
       // Stage 0 B1 (also closes R-S0-5): the same-uid refresh uses the token this callback was delivered for (no forced
@@ -280,14 +396,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         generation: myGeneration,
         keepSessionOnAuthUnavailable: !isNewIdentity,
         forceRefresh: isNewIdentity,
+        signal: episode.controller.signal,
       });
 
       if (!generationGuard.isCurrent(myGeneration)) {
-        // A newer callback (another refresh, a switch, a logout) has already
-        // started since this one began — its own processing owns state now.
+        // A newer callback (another refresh, a switch, a logout) or the initial-sync deadline has already
+        // taken over since this one began — its own processing owns state now.
         logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
         return;
       }
+      // Still current, so the episode (if any) is still this one: it ends here, with this answer.
+      const followUp = syncEpisode === episode && episode.followUp;
+      if (syncEpisode === episode) endSyncEpisode();
 
       if (outcome.ok) {
         prevUidRef.current = outcome.uid;
@@ -308,6 +428,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
             setAdminResolved(true);
           }
         }
+        // R-S0-6: token changes coalesced during the episode get exactly ONE reconciliation — an ordinary same-uid
+        // refresh of the now-confirmed session (non-forced, Stage 0 B1; its own episode and fail-closed rules). Only if
+        // nothing newer has happened meanwhile; never repeated for this episode. A failed or deferred episode drops it.
+        if (followUp && isMounted && generationGuard.isCurrent(myGeneration)) {
+          logAuthSessionClientEvent("sync_episode_follow_up", { operationGeneration: myGeneration });
+          await handleTokenEvent(nextUser);
+        }
       } else if (!isNewIdentity && outcome.reason === "auth_unavailable") {
         // Stage 0 F3: a routine same-uid refresh hit a verification OUTAGE, not a
         // credential verdict. Keep the confirmed session (no cookie clear, no
@@ -322,24 +449,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // cookie. The previous identity must never be retained on the
         // client either, so sign Firebase out too — this itself fires
         // another onIdTokenChanged(null) callback that completes the
-        // transition to `signed_out`.
+        // transition to `signed_out`. Queued follow-up work is dropped, and this
+        // User object cannot restart a sync until Firebase reports null or another user.
         prevUidRef.current = null;
         dispatchSync({ type: isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
-        setIsAdmin(false);
-        setAdminResolved(true);
-        try {
-          await signOut(auth);
-        } catch {
-          // If sign-out itself fails, the state machine is already in
-          // session_error (never authenticated), which is the fail-closed
-          // outcome this branch exists to guarantee.
-        }
+        await failClosed(nextUser);
       }
-    });
+    };
+
+    const unsubscribe = onIdTokenChanged(auth, handleTokenEvent);
 
     return () => {
       isMounted = false;
       clearTimeout(timeoutId);
+      supersedeSyncEpisode();
       unsubscribe();
     };
   }, []);

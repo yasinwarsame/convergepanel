@@ -57,6 +57,12 @@ interface SessionSyncOptions {
    * bounded 401 retry always forces.
    */
   forceRefresh?: boolean;
+  /**
+   * R-S0-6. Aborts the POST(s) when `AuthProvider` supersedes or expires the sync episode. An aborted
+   * request's response is never processed by the browser, so a superseded mint can no longer set a cookie after the
+   * abort. Result: `network_error` (the caller has already discarded it as stale).
+   */
+  signal?: AbortSignal;
 }
 
 /** Exactly 503 with body `code === "auth_unavailable"`; any read/parse problem → false (fail closed). */
@@ -107,6 +113,7 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
       credentials: "same-origin",
       cache: "no-store",
       body: JSON.stringify({ idToken }),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   };
 
@@ -124,7 +131,8 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
       res = await attempt(true);
     }
   } catch {
-    logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "network_error", operationGeneration: options.generation });
+    const failureCategory = options.signal?.aborted === true ? "aborted" : "network_error";
+    logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory, operationGeneration: options.generation });
     return { ok: false, reason: "network_error" };
   }
 
