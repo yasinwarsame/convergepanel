@@ -21,7 +21,9 @@ export type AuthSessionClientOperation =
   | "session_identity_mismatch"
   | "session_cleared"
   | "logout_clear_failed"
-  | "stale_auth_operation_discarded";
+  | "stale_auth_operation_discarded"
+  /** R-S0-4: a same-uid token callback arrived while this tab's own sync refresh was pending and was coalesced into it. */
+  | "own_refresh_echo_coalesced";
 
 export type AuthSessionClientTelemetryMetadata = {
   route?: string;
