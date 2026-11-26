@@ -434,6 +434,24 @@ describe("R-S0-4 contract — one identity event never becomes a self-sustaining
     expect(intact("uid-a")).toBe(false);
   });
 
+  it("logout while A's refresh is pending, then A signs in again while that old refresh is STILL pending: the new sign-in is not coalesced into the stale one", async () => {
+    fb.refreshLatencyMs = 20_000;
+    const a = new FakeUser("uid-a");
+    startSignIn(a);
+    await flush(1_000); // A's first forced refresh pending (gen 1)
+    await act(async () => {
+      await mockSignOut();
+    });
+    await flush(1_000);
+    fb.refreshLatencyMs = 0;
+    startSignIn(a); // the same uid again; the stale refresh is still pending for another ~18 s
+    await flush(3_000);
+    expect(probe.syncState).toBe("authenticated");
+    expect(probe.uid).toBe("uid-a");
+    await run(60_000);
+    expect(probe.syncState).toBe("authenticated");
+  });
+
   it("switch to B while A's sign-in refresh is pending (refresh 5 s): B is not coalesced into A; A's late result never applies", async () => {
     fb.refreshLatencyMs = 5_000;
     startSignIn(new FakeUser("uid-a"));
