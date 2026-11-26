@@ -121,6 +121,7 @@ const server = {
 };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const uidOfToken = (t: string) => /^synthetic-(.+)-\d+$/.exec(t)?.[1] ?? "";
+const RUNAWAY_POSTS = 200;
 const abortError = () => Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
 async function sessionFetch(_url: string, init?: { method?: string; body?: string; signal?: AbortSignal }): Promise<Response> {
   if (init?.method === "DELETE") {
@@ -134,6 +135,8 @@ async function sessionFetch(_url: string, init?: { method?: string; body?: strin
     throw abortError();
   }
   server.posts += 1;
+  // Runaway guard: an unbounded mint chain becomes a failed request (and so a failed assertion), never an OOM crash.
+  if (server.posts > RUNAWAY_POSTS) throw new TypeError("runaway mint chain");
   server.inFlight += 1;
   server.maxInFlight = Math.max(server.maxInFlight, server.inFlight);
   try {
@@ -403,6 +406,17 @@ describe("R-S0-6 — revocation and failures during the initial episode are appl
     await flush(100);
     startSignIn(new FakeUser("uid-a"));
     await run(30_000);
+    expect(probe.syncState).toBe("authenticated");
+  });
+});
+
+describe("R-S0-6 — the follow-up is bounded", () => {
+  it.each([0, 2_000])("a sign-in with no other token change (mint %i ms) gets NO follow-up: exactly one mint over 10 minutes", async (ml) => {
+    server.mintLatencyMs = ml;
+    startSignIn(new FakeUser("uid-a"));
+    await run(TEN_MIN);
+    expect(server.posts).toBe(1);
+    expect(mockEvents).not.toContain("sync_episode_follow_up");
     expect(probe.syncState).toBe("authenticated");
   });
 });
