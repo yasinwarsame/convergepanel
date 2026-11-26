@@ -98,7 +98,7 @@ function setWindow(hash: string) {
 }
 
 function auth(overrides: Record<string, unknown> = {}) {
-  return { user: { uid: "u1", reload: jest.fn().mockResolvedValue(undefined) }, authReady: true, syncState: "authenticated", canMutate: true, beginLogout: jest.fn(), ...overrides };
+  return { user: { uid: "u1", reload: jest.fn().mockResolvedValue(undefined), getIdToken: jest.fn().mockResolvedValue("id-token-u1") }, authReady: true, syncState: "authenticated", canMutate: true, beginLogout: jest.fn(), ...overrides };
 }
 
 async function mount(doc: ReturnType<typeof loadDocument>, a: ReturnType<typeof auth>) {
