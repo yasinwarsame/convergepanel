@@ -136,6 +136,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // before the fail-closed signOut). "Was someone signed in?" for the
     // sign-out cleanup must not depend on whether their sync succeeded.
     const lastIdentityRef = { current: null as string | null };
+    // R-S0-4: the ID-token refreshes THIS provider's own session sync currently has pending, as generation → uid.
+    // firebase 12.7.0 notifies onIdTokenChanged from inside `getIdToken` when the refreshed token differs (before
+    // the call resolves), so a callback that arrives for the SAME uid while that sync's own refresh is pending is
+    // the echo of (or concurrent with) the refresh the sync is already doing, and the sync will use that token.
+    // Starting another sync for it would force yet another refresh, which notifies again: with a securetoken round
+    // trip of about 1 s or more (tokens carry `iat` in whole seconds) that repeats indefinitely. Such a callback is
+    // coalesced: no new sync, no generation bump, so the in-flight sync stays current and decides the outcome.
+    // Never coalesced: a null user (logout / invalidation), a different uid (account switch), a callback after the
+    // refresh resolved (an external event during the mint request), or one whose sync is no longer current.
+    const ownPendingRefresh = new Map<number, string>();
+    const isOwnRefreshEcho = (uid: string): boolean => {
+      for (const [gen, pendingUid] of ownPendingRefresh) {
+        if (pendingUid === uid && generationGuard.isCurrent(gen)) return true;
+      }
+      return false;
+    };
 
     const timeoutId = setTimeout(() => {
       if (!resolved && isMounted) {
@@ -160,6 +176,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const unsubscribe = onIdTokenChanged(auth, async (nextUser) => {
       if (!isMounted) return;
+
+      if (nextUser && isOwnRefreshEcho(nextUser.uid)) {
+        logAuthSessionClientEvent("own_refresh_echo_coalesced", {});
+        return;
+      }
 
       const myGeneration = generationGuard.next();
 
@@ -236,11 +257,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
         dispatchSync({ type: "token_refresh_started" });
       }
 
+      // R-S0-4: the sync reads its token through this wrapper, so whatever refresh it performs is marked pending for
+      // exactly as long as `getIdToken` runs, and a same-uid callback that refresh causes is coalesced into this sync.
+      // The token itself still comes from the SDK unchanged, and the wrapper forwards `forceRefresh` exactly as given.
+      const syncUser = {
+        uid: nextUser.uid,
+        getIdToken: async (forceRefresh?: boolean): Promise<string> => {
+          ownPendingRefresh.set(myGeneration, nextUser.uid);
+          try {
+            return await nextUser.getIdToken(forceRefresh);
+          } finally {
+            ownPendingRefresh.delete(myGeneration);
+          }
+        },
+      };
       // Stage 0 F3: only a same-uid refresh of a session THIS tab already confirmed may
       // keep its cookie when the mint says "verification could not run" (503 auth_unavailable).
-      // Stage 0 B1: the same-uid refresh uses the token this callback was delivered for (no forced refresh), so its
-      // own sync cannot mint a new token that re-notifies this listener. New identities still force (Step 6.5).
-      const outcome = await establishServerSession(nextUser, {
+      // Stage 0 B1 (also closes R-S0-5): the same-uid refresh uses the token this callback was delivered for (no forced
+      // refresh), so neither this tab's own sync nor another tab's persisted token can make it mint a new token that
+      // re-notifies every tab. New identities still force (Step 6.5); the bounded 401 retry always forces.
+      const outcome = await establishServerSession(syncUser, {
         generation: myGeneration,
         keepSessionOnAuthUnavailable: !isNewIdentity,
         forceRefresh: isNewIdentity,

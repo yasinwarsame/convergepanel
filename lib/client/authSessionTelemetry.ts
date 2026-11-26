@@ -22,7 +22,9 @@ export type AuthSessionClientOperation =
   | "session_cleared"
   | "logout_clear_failed"
   | "stale_auth_operation_discarded"
-  | "token_refresh_deferred";
+  | "token_refresh_deferred"
+  /** R-S0-4: a same-uid token callback arrived while this tab's own sync refresh was pending and was coalesced into it. */
+  | "own_refresh_echo_coalesced";
 
 export type AuthSessionClientTelemetryMetadata = {
   route?: string;
