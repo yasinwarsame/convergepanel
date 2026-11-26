@@ -51,7 +51,10 @@ interface SessionSyncOptions {
    * itself delivered because the token just changed, so the cached token is already the fresh one, and forcing
    * another refresh would mint yet another token, re-notify `onIdTokenChanged`, and start the next callback (a
    * self-sustaining chain whenever the securetoken round trip crosses the token's 1 s `iat` granularity). An
-   * expired cached token is still refreshed by the SDK. The bounded 401 retry always forces.
+   * expired cached token is still refreshed by the SDK. A non-forced read is NOT guaranteed silent: after
+   * `user.reload()` or a cross-tab persistence update (`_assign`), the SDK can notify once more when its cached
+   * token differs from the one it last reported — at most one extra mint per such event, never a chain. The
+   * bounded 401 retry always forces.
    */
   forceRefresh?: boolean;
 }
@@ -79,8 +82,10 @@ function isValidSessionBody(body: unknown): body is { authenticated: true; uid: 
 
 /**
  * Establishes (or re-establishes) the server `__session` cookie for `user`.
- * Always fetches a FORCE-REFRESHED ID token (Step 6.5) so a just-completed
- * sign-in or account switch can never send a stale token. A single, bounded
+ * The first attempt fetches a FORCE-REFRESHED ID token by default (Step 6.5) so a
+ * just-completed sign-in or account switch can never send a stale token;
+ * `options.forceRefresh: false` (Stage 0 B1, a same-uid refresh of a confirmed
+ * session only) reads the SDK's current token instead. A single, bounded
  * retry (Step 6.5's documented exception to "no infinite retry") covers the
  * one legitimate race this can hit: the token was valid when read but
  * expired in the few hundred milliseconds before the server verified it.
