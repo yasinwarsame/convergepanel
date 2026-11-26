@@ -400,12 +400,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       });
 
       if (!generationGuard.isCurrent(myGeneration)) {
-        // A newer callback (another refresh, a switch, a logout) or the initial-sync deadline has already
+        // A newer callback (a switch, a logout, a replaced User object) or the episode deadline has already
         // taken over since this one began — its own processing owns state now.
         logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
         return;
       }
-      // Still current, so the episode (if any) is still this one: it ends here, with this answer.
+      // Still current, so the episode is still this one: it ends here, with this answer.
       const followUp = syncEpisode === episode && episode.followUp;
       if (syncEpisode === episode) endSyncEpisode();
 
