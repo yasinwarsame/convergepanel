@@ -104,6 +104,12 @@ export default function LoginPage() {
       clearPendingLogin();
       setLoading(false);
       setError("Sign-in could not be completed. Please try again.");
+    } else if (syncState === "session_unavailable") {
+      // #332 R7: the sign-in service could not verify the account just now. That is not a wrong password. Say so
+      // accurately. The pending login stays armed, so AuthProvider's bounded retry still completes the redirect if
+      // the service recovers within this page's own wait.
+      setLoading(false);
+      setError("The sign-in service is temporarily unavailable. We'll keep trying. You can also try again in a moment.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingLoginUid, syncState, authedUser, router]);

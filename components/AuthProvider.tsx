@@ -54,7 +54,7 @@ import { auth } from "@/lib/firebase/client";
 import { perf } from "@/lib/utils/performance";
 import { nextSessionSyncState, canPerformProtectedMutation, type SessionSyncState } from "@/lib/client/authSessionStateMachine";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
-import { establishServerSession, clearServerSession } from "@/lib/client/sessionSync";
+import { establishServerSession, clearServerSession, type SessionSyncOutcome } from "@/lib/client/sessionSync";
 import { logAuthSessionClientEvent } from "@/lib/client/authSessionTelemetry";
 import { clearLocalPrivateDataOnSignOut, clearOtherAccountsLocalData } from "@/lib/client/localPrivateData";
 import posthog from "posthog-js";
@@ -90,6 +90,38 @@ interface AuthContextType {
 
 const noop = () => {};
 
+/**
+ * #332 R7/R8 (owner decisions 2026-11-25): a temporary outage (the mint answered `auth_unavailable`, or the Firebase
+ * client could not refresh its token: `auth/network-request-failed`, or the request never reached the server) gets a
+ * bounded re-sync instead of a sign-out.
+ *
+ * R8: the bound belongs to ONE recovery episode per identity, held in `episodeRef`. It is not per callback. A forced
+ * token refresh re-fires `onIdTokenChanged` (firebase 12.7.0 `User.getIdToken` → `_notifyListenersIfCurrent` →
+ * `idTokenSubscription.next`). R7 restarted its counter on every such callback (241 mint calls in a reproduced
+ * 10-minute outage). Now:
+ * - a same-uid callback while an episode is active or exhausted starts nothing and resets nothing;
+ * - retries do not force a refresh;
+ * - the episode ends only on a verified session (success), a credential verdict (fail-closed sign-out), sign-out,
+ *   `beginLogout`, an account switch, or unmount.
+ *
+ * The bound is per mounted AuthProvider, i.e. per tab. It is not a cross-tab or server-wide limit; every attempt is an
+ * ordinary mint call under the server's own verification deadline and in-flight cap. After the bound, the client stays
+ * in the non-mutable `session_unavailable` state until a reload or a new sign-in.
+ */
+export const SESSION_SYNC_MAX_ATTEMPTS_PER_EPISODE = 4;
+/** Delay before retry n (1-based) of an episode: attempts 2, 3 and 4. */
+export const SESSION_UNAVAILABLE_RETRY_DELAYS_MS: readonly number[] = [5_000, 15_000, 45_000];
+
+/** #332 R8: one session-sync episode for one identity (see above). Mutable, owned by AuthProvider. */
+interface SyncEpisode {
+  readonly uid: string;
+  readonly generation: number;
+  attempts: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  exhausted: boolean;
+  cancelled: boolean;
+}
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
@@ -122,6 +154,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [adminResolved, setAdminResolved] = useState(false);
   const [identityProvisional, setIdentityProvisional] = useState(false);
   const [syncState, dispatchSync] = useReducer(nextSessionSyncState, "signed_out");
+  // #332 R8: the single authoritative sync episode (see SyncEpisode). A ref, so `beginLogout` can end it too.
+  const episodeRef = useRef<SyncEpisode | null>(null);
+  // #332 R8: the identity this tab currently shows, or null after a sign-out OR once an explicit logout has begun. A
+  // late successful mint for any other identity (or for anyone after logout began) has its cookie removed
+  // (Correction C).
+  const currentUidRef = useRef<string | null>(null);
+  // #332 identity-isolation gate: the Firebase user this tab currently shows (null exactly when currentUidRef is null).
+  const currentUserRef = useRef<User | null>(null);
+  const endEpisode = () => {
+    const e = episodeRef.current;
+    if (e) {
+      e.cancelled = true;
+      if (e.timer !== null) clearTimeout(e.timer);
+      e.timer = null;
+      episodeRef.current = null;
+    }
+  };
 
   useEffect(() => {
     perf.mark('auth_check_start');
@@ -158,10 +207,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }, 3000);
 
-    const unsubscribe = onIdTokenChanged(auth, async (nextUser) => {
+    const onIdentity = async (nextUser: User | null, reestablish = false): Promise<void> => {
       if (!isMounted) return;
 
+      // #332 R8: same identity while its episode is active or exhausted. This callback is the SDK re-firing after a
+      // token change (often caused by our own refresh). It starts no attempt, resets no budget and bumps no
+      // generation, so the episode's own in-flight attempt is not discarded.
+      const active = episodeRef.current;
+      if (!reestablish && nextUser && active && !active.cancelled && active.uid === nextUser.uid) {
+        setUser(nextUser);
+        setLoading(false);
+        logAuthSessionClientEvent("stale_auth_operation_discarded", { failureCategory: "same_identity_reentry", operationGeneration: active.generation });
+        return;
+      }
+
       const myGeneration = generationGuard.next();
+      endEpisode(); // a sign-out, account switch or ended episode: no older chain may continue
 
       if (!authReadySet) {
         setAuthReady(true);
@@ -200,6 +261,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
         }
         prevUidRef.current = null;
+        currentUidRef.current = null;
+        currentUserRef.current = null;
         dispatchSync({ type: "client_signed_out" });
         setUser(null);
         setIdentityProvisional(false); // R5: Firebase answered — after setUser, so no render pairs the old user with it
@@ -236,42 +299,105 @@ export function AuthProvider({ children }: AuthProviderProps) {
         dispatchSync({ type: "token_refresh_started" });
       }
 
-      const outcome = await establishServerSession(nextUser, { generation: myGeneration });
+      currentUidRef.current = nextUser.uid;
+      currentUserRef.current = nextUser;
+      const signedInUser = nextUser;
+      const episode: SyncEpisode = { uid: nextUser.uid, generation: myGeneration, attempts: 1, timer: null, exhausted: false, cancelled: false };
+      episodeRef.current = episode;
 
-      if (!generationGuard.isCurrent(myGeneration)) {
-        // A newer callback (another refresh, a switch, a logout) has already
-        // started since this one began — its own processing owns state now.
-        logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
-        return;
-      }
+      const outcome = await establishServerSession(signedInUser, { generation: myGeneration });
+      await settleOutcome(outcome, isNewIdentity);
 
-      if (outcome.ok) {
-        prevUidRef.current = outcome.uid;
-        dispatchSync({ type: isNewIdentity ? "session_sync_succeeded" : "token_refresh_succeeded" });
-
-        // Admin claim check — only meaningful once the server agrees this is
-        // the current identity. Non-blocking for isMounted races: guarded by
-        // the SAME generation check above before this point.
-        try {
-          const tokenResult = await getIdTokenResult(nextUser);
-          if (isMounted && generationGuard.isCurrent(myGeneration)) {
-            setIsAdmin(tokenResult.claims.admin === true);
-            setAdminResolved(true);
+      async function settleOutcome(result: SessionSyncOutcome, newIdentity: boolean): Promise<void> {
+        if (!isMounted || episode.cancelled || !generationGuard.isCurrent(myGeneration)) {
+          // A newer callback (a switch or a sign-out), beginLogout or unmount ended this episode. Its result is
+          // never adopted. R8 (Correction C): if it minted a cookie for an identity this tab no longer shows (signed
+          // out, or switched away), remove that cookie so it cannot authorize anything.
+          logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
+          // #332 identity-isolation gate: a discarded sync for a DIFFERENT identity has touched the one shared
+          // __session cookie after this tab moved on (its mint installed that identity's cookie, or its fail-closed
+          // DELETE removed the cookie). The identity this tab now shows can no longer be assumed to own the server
+          // session, and cookie-only surfaces (Server Components, routes called without a bearer) cannot tell. So
+          // re-establish the shown identity from scratch: the synchronous start of that sync leaves `authenticated` at
+          // once (non-mutable), its fresh mint overwrites whatever cookie the stale response left (this does NOT
+          // depend on a DELETE succeeding), and any failure takes the ordinary fail-closed path. Bounded: only a sync
+          // for another identity triggers this, and the re-established sync is for the shown identity itself.
+          const shown = currentUserRef.current;
+          if (isMounted && shown !== null && shown.uid !== episode.uid) {
+            logAuthSessionClientEvent("session_identity_mismatch", { failureCategory: "stale_foreign_session", operationGeneration: myGeneration });
+            prevUidRef.current = null; // the shown identity is unconfirmed until the re-established sync verifies it
+            void onIdentity(shown, true);
+            return;
           }
-        } catch {
-          if (isMounted && generationGuard.isCurrent(myGeneration)) {
-            setIsAdmin(false);
-            setAdminResolved(true);
-          }
+          if (result.ok && currentUidRef.current !== result.uid) await clearServerSession();
+          return;
         }
-      } else {
+
+        if (result.ok) {
+          episodeRef.current = null; // episode boundary: a verified session
+          prevUidRef.current = result.uid;
+          dispatchSync({ type: newIdentity ? "session_sync_succeeded" : "token_refresh_succeeded" });
+
+          // Admin claim check — only meaningful once the server agrees this is
+          // the current identity. Non-blocking for isMounted races: guarded by
+          // the SAME generation check above before this point.
+          try {
+            const tokenResult = await getIdTokenResult(signedInUser);
+            if (isMounted && generationGuard.isCurrent(myGeneration)) {
+              setIsAdmin(tokenResult.claims.admin === true);
+              setAdminResolved(true);
+            }
+          } catch {
+            if (isMounted && generationGuard.isCurrent(myGeneration)) {
+              setIsAdmin(false);
+              setAdminResolved(true);
+            }
+          }
+          return;
+        }
+
+        // #332 R7/R8: a temporary outage, i.e. verification could not run (mint `auth_unavailable`, client token
+        // refresh `auth/network-request-failed`, or the mint request never reached the server). It is not a credential
+        // verdict, so the client is NOT signed out and the sign-out cleanup (history cache, unsubmitted /verify input,
+        // analytics reset) does not run. Fail closed: `establishServerSession` attempted to clear the server cookie;
+        // `session_unavailable` is never mutable. R8 (Correction C): for a NEW identity (first sign-in or account
+        // switch), if that clear did not succeed, a cookie this sync did not verify (possibly another account's) may
+        // remain. So take the ordinary fail-closed sign-out instead (unchanged pre-#332 behaviour).
+        // Only the explicit contract counts: sessionSync returns "auth_unavailable" for the mint's 503+code, for the one
+        // classified SDK code and for a rejected fetch. "network_error" (an unclassified throw) still fails closed.
+        const temporary = result.reason === "auth_unavailable";
+        if (temporary && (result.serverSessionCleared || !newIdentity)) {
+          prevUidRef.current = null; // unconfirmed until a verified session
+          dispatchSync({ type: "session_sync_unavailable" });
+          setIsAdmin(false);
+          setAdminResolved(true);
+          if (episode.attempts >= SESSION_SYNC_MAX_ATTEMPTS_PER_EPISODE) {
+            episode.exhausted = true; // stays in episodeRef: same-uid callbacks keep starting nothing
+            logAuthSessionClientEvent("session_sync_failed", { failureCategory: "recovery_budget_exhausted", operationGeneration: myGeneration });
+            return;
+          }
+          episode.timer = setTimeout(() => {
+            episode.timer = null;
+            if (!isMounted || episode.cancelled || !generationGuard.isCurrent(myGeneration)) return;
+            episode.attempts += 1;
+            dispatchSync({ type: "session_retry_started" });
+            // No forced refresh on a retry: a forced refresh re-fires onIdTokenChanged. The server still verifies
+            // this valid, unexpired ID token with checkRevoked.
+            void establishServerSession(signedInUser, { generation: myGeneration, forceRefresh: false }).then((retried) =>
+              settleOutcome(retried, true)
+            );
+          }, SESSION_UNAVAILABLE_RETRY_DELAYS_MS[episode.attempts - 1]);
+          return;
+        }
+
         // Fail closed: `establishServerSession` already cleared the server
         // cookie. The previous identity must never be retained on the
         // client either, so sign Firebase out too — this itself fires
         // another onIdTokenChanged(null) callback that completes the
         // transition to `signed_out`.
+        episodeRef.current = null; // episode boundary: a credential verdict (or an unclassified failure)
         prevUidRef.current = null;
-        dispatchSync({ type: isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
+        dispatchSync({ type: newIdentity ? "session_sync_failed" : "token_refresh_failed" });
         setIsAdmin(false);
         setAdminResolved(true);
         try {
@@ -282,16 +408,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // outcome this branch exists to guarantee.
         }
       }
-    });
+    };
+    const unsubscribe = onIdTokenChanged(auth, (nextUser) => onIdentity(nextUser));
 
     return () => {
       isMounted = false;
+      endEpisode();
       clearTimeout(timeoutId);
       unsubscribe();
     };
   }, []);
 
-  const beginLogout = () => dispatchSync({ type: "logout_started" });
+  // #332 R8: an explicit logout ends the sync episode at once: its timer is cancelled, and a pending attempt's late
+  // result is discarded (its cookie removed) rather than adopted.
+  const beginLogout = () => {
+    endEpisode();
+    currentUidRef.current = null; // from now on no late mint may keep a cookie, even for the same uid
+    currentUserRef.current = null;
+    dispatchSync({ type: "logout_started" });
+  };
 
   return (
     <AuthContext.Provider
