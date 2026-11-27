@@ -32,7 +32,9 @@ export type AuthSessionClientOperation =
   /** R-S0-6: a sync exceeded its client deadline and failed closed. */
   | "sync_episode_deadline_exceeded"
   /** R-S0-6: a callback for a User object whose sync already failed closed was dropped (no automatic restart). */
-  | "failed_episode_callback_dropped";
+  | "failed_episode_callback_dropped"
+  /** R-S0-7: a stale operation's destructive cleanup (cookie DELETE / Firebase sign-out) was skipped because a newer identity state owns the tab. */
+  | "stale_cleanup_skipped";
 
 export type AuthSessionClientTelemetryMetadata = {
   route?: string;

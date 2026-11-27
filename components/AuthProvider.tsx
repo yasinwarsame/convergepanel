@@ -149,19 +149,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // before the fail-closed signOut). "Was someone signed in?" for the
     // sign-out cleanup must not depend on whether their sync succeeded.
     const lastIdentityRef = { current: null as string | null };
-    // R-S0-4: the ID-token refreshes THIS provider's own session sync currently has pending, as generation → uid.
+    // R-S0-4: the ID-token refreshes THIS provider's own session sync currently has pending, as generation → User object.
     // firebase 12.7.0 notifies onIdTokenChanged from inside `getIdToken` when the refreshed token differs (before
-    // the call resolves), so a callback that arrives for the SAME uid while that sync's own refresh is pending is
+    // the call resolves), so a callback that arrives for the SAME User object while that sync's own refresh is pending is
     // the echo of (or concurrent with) the refresh the sync is already doing, and the sync will use that token.
     // Starting another sync for it would force yet another refresh, which notifies again: with a securetoken round
     // trip of about 1 s or more (tokens carry `iat` in whole seconds) that repeats indefinitely. Such a callback is
     // coalesced: no new sync, no generation bump, so the in-flight sync stays current and decides the outcome.
-    // Never coalesced: a null user (logout / invalidation), a different uid (account switch), a callback after the
+    // Never coalesced: a null user (logout / invalidation), a different uid (account switch), a replaced User object
+    // with the same uid (R-S0-7), a callback after the
     // refresh resolved (an external event during the mint request), or one whose sync is no longer current.
-    const ownPendingRefresh = new Map<number, string>();
-    const isOwnRefreshEcho = (uid: string): boolean => {
-      for (const [gen, pendingUid] of ownPendingRefresh) {
-        if (pendingUid === uid && generationGuard.isCurrent(gen)) return true;
+    // R-S0-7 (owner decision 2026-11-27, review MINOR-2): an echo is identified by the Firebase User OBJECT, not the uid.
+    // The SDK delivers its own refresh notification (and a cross-tab `_assign`) for the same object; a different object
+    // with the same uid is a replacement (a new sign-in of that account) and must reach the episode logic below, which
+    // supersedes the old episode. Comparing uids alone silently swallowed such a replacement while a refresh was pending.
+    const ownPendingRefresh = new Map<number, User>();
+    const isOwnRefreshEcho = (user: User): boolean => {
+      for (const [gen, pendingUser] of ownPendingRefresh) {
+        if (pendingUser === user && generationGuard.isCurrent(gen)) return true;
       }
       return false;
     };
@@ -181,7 +186,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // - Anything else (null, another uid, a replaced User object) supersedes the episode immediately, as before, and
     //   aborts its pending POST, so a superseded answer is never applied and, once aborted, sets no cookie.
     // - The episode has a hard client deadline that FAILS CLOSED (see SESSION_SYNC_DEADLINE_MS).
-    // - Own refresh echoes are still coalesced first by R-S0-4 (they queue no follow-up: the sync uses that token).
+    // - Own refresh echoes (same User object, R-S0-7) are still coalesced first by R-S0-4 (no follow-up: the sync uses
+    //   that token).
     // - After a fail-closed outcome, callbacks for that same User object are dropped until Firebase reports null or a
     //   different user (no automatic restart into the failed episode; a fresh sign-in creates a new User object).
     type SyncEpisode = {
@@ -207,11 +213,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const supersedeSyncEpisode = () => {
       endSyncEpisode()?.controller.abort();
     };
-    const failClosed = async (failedUser: User) => {
-      failedEpisodeUser = failedUser;
-      prevUidRef.current = null;
-      setIsAdmin(false);
-      setAdminResolved(true);
+    /**
+     * R-S0-7: `signOut(auth)` signs out whoever Firebase reports NOW, not the identity a stale operation was about. So a
+     * fail-closed sign-out is issued only while Firebase still reports exactly the failed User object (object identity:
+     * a replacement object with the same uid is a different sign-in and is never signed out by the old episode). If
+     * Firebase already reports another user or nobody, that newer state owns the tab: its own callback runs its own
+     * episode (or the null branch's cleanup), and this operation does nothing destructive. Checked synchronously
+     * immediately before the call, so no await separates the check from the sign-out it guards.
+     */
+    const signOutIfStillCurrent = async (failedUser: User): Promise<void> => {
+      if (auth.currentUser !== failedUser) {
+        logAuthSessionClientEvent("stale_cleanup_skipped", {});
+        return;
+      }
       try {
         await signOut(auth);
       } catch {
@@ -219,20 +233,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // callbacks for this User object are dropped — the fail-closed outcome this exists to guarantee.
       }
     };
+    const failClosed = async (failedUser: User) => {
+      failedEpisodeUser = failedUser;
+      prevUidRef.current = null;
+      setIsAdmin(false);
+      setAdminResolved(true);
+      await signOutIfStillCurrent(failedUser);
+    };
     const expireSyncEpisode = (ep: SyncEpisode) => {
       if (!isMounted || syncEpisode !== ep) return;
       endSyncEpisode();
       ep.controller.abort(); // before the DELETE below: an aborted POST can no longer set a cookie after it
-      generationGuard.next(); // every late result of the expired episode is now stale
+      const expiryGeneration = generationGuard.next(); // every late result of the expired episode is now stale
       failedEpisodeUser = ep.user; // synchronously: no callback during the DELETE below may restart this episode
       prevUidRef.current = null;
       logAuthSessionClientEvent("sync_episode_deadline_exceeded", { operationGeneration: ep.generation });
       dispatchSync({ type: ep.isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
       setIsAdmin(false);
       setAdminResolved(true);
+      // R-S0-7 (owner decision 2026-11-27, review MINOR-1): every state change above is synchronous, so protected
+      // operations are disabled now. The two destructive steps below act ONLY while the expired identity still owns the
+      // tab: no newer identity event has bumped the generation since the expiry, and Firebase still reports the expired
+      // User object (object identity, never the uid). Ownership is checked synchronously before each step:
+      // - DELETE: issued at once (still synchronous with the expiry). A sign-in that starts while it is pending cannot
+      //   be clobbered by it: `establishServerSession` sends no mint until every DELETE already in flight has settled
+      //   (lib/client/sessionSync.ts), so the newer cookie is always set after this clear, never before it.
+      // - signOut: only if, after the DELETE, the expired identity STILL owns the tab. A newer user (A→B), a new sign-in
+      //   of the same account (a new User object, A→B→A or logout→login) or a logout that happened meanwhile owns state
+      //   now; the expired episode's cleanup never signs it out and never writes React state again.
+      const expiredStillOwnsTab = () => isMounted && generationGuard.isCurrent(expiryGeneration) && auth.currentUser === ep.user;
+      if (!expiredStillOwnsTab()) {
+        logAuthSessionClientEvent("stale_cleanup_skipped", { operationGeneration: ep.generation });
+        return;
+      }
       void (async () => {
         await clearServerSession();
-        await failClosed(ep.user);
+        if (!expiredStillOwnsTab()) {
+          logAuthSessionClientEvent("stale_cleanup_skipped", { operationGeneration: ep.generation });
+          return;
+        }
+        await signOutIfStillCurrent(ep.user);
       })();
     };
 
@@ -260,7 +300,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const handleTokenEvent = async (nextUser: User | null): Promise<void> => {
       if (!isMounted) return;
 
-      if (nextUser && isOwnRefreshEcho(nextUser.uid)) {
+      if (nextUser && isOwnRefreshEcho(nextUser)) {
         logAuthSessionClientEvent("own_refresh_echo_coalesced", {});
         return;
       }
@@ -367,7 +407,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const syncUser = {
         uid: nextUser.uid,
         getIdToken: async (forceRefresh?: boolean): Promise<string> => {
-          ownPendingRefresh.set(myGeneration, nextUser.uid);
+          ownPendingRefresh.set(myGeneration, nextUser);
           try {
             return await nextUser.getIdToken(forceRefresh);
           } finally {

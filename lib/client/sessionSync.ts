@@ -98,7 +98,7 @@ function isValidSessionBody(body: unknown): body is { authenticated: true; uid: 
  *
  * On ANY failure — network error, non-2xx, malformed body, or (critically)
  * a server-returned uid that does not match `user.uid` — this function
- * calls `clearServerSession()` itself before returning failure, so a
+ * calls `clearServerSession()` itself before returning failure (R-S0-7: unless the sync was superseded), so a
  * caller can never accidentally leave a mismatched or half-established
  * cookie in place just by forgetting to handle the failure branch.
  */
@@ -107,6 +107,9 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
 
   const attempt = async (force: boolean): Promise<Response> => {
     const idToken = await user.getIdToken(force);
+    // R-S0-7: never mint while an earlier DELETE from this tab is still in flight (see `pendingClears`).
+    await settlePendingClears();
+    if (options.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
     return fetch(SESSION_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -147,7 +150,7 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
       failureCategory: rejectedFirst ? `http_401_then_${res.status}` : `http_${res.status}`,
       operationGeneration: options.generation,
     });
-    await clearServerSession();
+    await clearUnlessSuperseded(options.signal);
     return { ok: false, reason: "server_error" };
   }
 
@@ -156,13 +159,13 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
     body = await res.json();
   } catch {
     logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "invalid_response", operationGeneration: options.generation });
-    await clearServerSession();
+    await clearUnlessSuperseded(options.signal);
     return { ok: false, reason: "invalid_response" };
   }
 
   if (!isValidSessionBody(body)) {
     logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "invalid_response", operationGeneration: options.generation });
-    await clearServerSession();
+    await clearUnlessSuperseded(options.signal);
     return { ok: false, reason: "invalid_response" };
   }
 
@@ -171,12 +174,42 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
     // verified SOME valid token, but not the one belonging to the uid the
     // client believes is now signed in. Never trust it; never leave it.
     logAuthSessionClientEvent("session_identity_mismatch", { route: SESSION_ENDPOINT, operationGeneration: options.generation });
-    await clearServerSession();
+    await clearUnlessSuperseded(options.signal);
     return { ok: false, reason: "uid_mismatch" };
   }
 
   logAuthSessionClientEvent("session_sync_succeeded", { route: SESSION_ENDPOINT, operationGeneration: options.generation });
   return { ok: true, uid: body.uid };
+}
+
+/**
+ * R-S0-7 (owner decision 2026-11-27, review MINOR-1): the DELETEs this tab currently has in flight. A cookie clear and a
+ * later mint race at the server and in the cookie jar: if an older clear (an expired episode's cleanup, the defensive
+ * clear after a sign-out) is answered AFTER a newer identity's mint, it deletes the newer identity's cookie. So every
+ * mint first waits until every DELETE already in flight has settled. The browser applies a response's Set-Cookie before
+ * `fetch` resolves, so after the wait the older clear has taken effect and the newer cookie is set after it. A DELETE
+ * that hangs delays the mint only until the caller's own deadline (AuthProvider SESSION_SYNC_DEADLINE_MS), which then
+ * fails closed — never a mint racing a pending clear.
+ */
+const pendingClears = new Set<Promise<boolean>>();
+
+async function settlePendingClears(): Promise<void> {
+  while (pendingClears.size > 0) {
+    await Promise.allSettled([...pendingClears]);
+  }
+}
+
+/**
+ * R-S0-7: a failure-path clear of a sync that was SUPERSEDED (its signal aborted by AuthProvider) is skipped. A newer
+ * identity event owns the cookie now: a newer sign-in mints its own cookie (or clears it on its own failure), and a
+ * sign-out runs AuthProvider's own clear. Issuing the stale clear here could land after the newer mint and delete it.
+ */
+async function clearUnlessSuperseded(signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted === true) {
+    logAuthSessionClientEvent("stale_cleanup_skipped", { route: SESSION_ENDPOINT });
+    return;
+  }
+  await clearServerSession();
 }
 
 /**
@@ -187,6 +220,16 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
  * `establishServerSession` above.
  */
 export async function clearServerSession(): Promise<boolean> {
+  const clear = deleteServerSession();
+  pendingClears.add(clear);
+  try {
+    return await clear;
+  } finally {
+    pendingClears.delete(clear);
+  }
+}
+
+async function deleteServerSession(): Promise<boolean> {
   try {
     const res = await fetch(SESSION_ENDPOINT, { method: "DELETE", credentials: "same-origin", cache: "no-store" });
     if (res.ok) {
