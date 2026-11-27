@@ -13,7 +13,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth as firebaseAdminAuth } from "@/lib/firebase/admin";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
 import { logAuthSessionEvent } from "@/lib/authTelemetry";
 import { logger } from "@/lib/logger";
 import { startVerificationDeadline, type VerificationOutcome } from "@/lib/auth/authVerificationDeadline";
@@ -218,23 +217,8 @@ export async function DELETE(_request: NextRequest) {
 }
 
 /**
- * GET — reports whether the caller currently has a valid session, and if
- * so, its uid. Returns ONLY `{ authenticated, uid? }` — never email,
- * claims, the token/cookie itself, team data, or a raw verification error.
- * This is the read side of the Step 6.9 client/server identity check.
+ * There is deliberately NO `GET` (ZCA L-2). It used to report the identity of the `__session`
+ * cookie, which made the cookie alone disclose a uid. It had no caller in the app. Under the
+ * zero-cookie-authority contract the cookie identifies no one: a client's identity is its Firebase
+ * user, and the server's is the bearer verified on each request. Next.js answers 405 for `GET`.
  */
-export async function GET(request: NextRequest) {
-  try {
-    const result = await verifySessionCookie(request);
-    if (!result) {
-      return noStore(NextResponse.json({ authenticated: false }));
-    }
-    return noStore(NextResponse.json({ authenticated: true, uid: result.uid }));
-  } catch {
-    // Expired/revoked/malformed cookie — never a raw error, never a 500;
-    // from the caller's point of view this is indistinguishable from "no
-    // session," which is the correct, fail-closed behavior.
-    logAuthSessionEvent("revoked_or_expired_session", { route: "GET /api/auth/session" });
-    return noStore(NextResponse.json({ authenticated: false }));
-  }
-}

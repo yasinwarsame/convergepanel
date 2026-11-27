@@ -244,36 +244,8 @@ async function deleteServerSession(): Promise<boolean> {
   }
 }
 
-/**
- * Reads the server's current session identity without mutating anything.
- * Returns `{ authenticated: false }` on any error — never throws — since
- * every caller uses this for a safety check, not a hard dependency.
+/*
+ * ZCA L-2: the cookie-identity status read (`getServerSessionIdentity`) and the Step 6.9
+ * `verifyClientServerIdentityMatch` built on it were removed with `GET /api/auth/session`.
+ * Neither had a caller. The client's identity is its Firebase user; the server's is the bearer.
  */
-export async function getServerSessionIdentity(): Promise<{ authenticated: boolean; uid?: string }> {
-  try {
-    const res = await fetch(SESSION_ENDPOINT, { method: "GET", credentials: "same-origin", cache: "no-store" });
-    if (!res.ok) return { authenticated: false };
-    const body = await res.json();
-    if (isValidSessionBody(body)) return { authenticated: true, uid: body.uid };
-    return { authenticated: false };
-  } catch {
-    return { authenticated: false };
-  }
-}
-
-/**
- * Step 6.9 — the client/server identity consistency assertion. Compares
- * the CURRENT Firebase client uid against what the server's `__session`
- * cookie actually resolves to. Intended for use right after login/switch
- * synchronization (defense in depth on top of `establishServerSession`'s
- * own check) and, optionally, on entry to an especially sensitive
- * protected route. Never logs either uid — only the fact of a mismatch.
- */
-export async function verifyClientServerIdentityMatch(clientUid: string): Promise<boolean> {
-  const server = await getServerSessionIdentity();
-  const match = server.authenticated && server.uid === clientUid;
-  if (!match) {
-    logAuthSessionClientEvent("session_identity_mismatch", { route: SESSION_ENDPOINT });
-  }
-  return match;
-}

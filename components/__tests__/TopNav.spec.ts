@@ -13,34 +13,24 @@ import { join } from "path";
 
 const source = readFileSync(join(__dirname, "..", "TopNav.tsx"), "utf8");
 
-describe("TopNav — logout source-level wiring guarantees", () => {
-  it("imports and calls clearServerSession from the shared sessionSync module", () => {
-    expect(source).toMatch(/import\s*\{\s*clearServerSession\s*\}\s*from\s*["']@\/lib\/client\/sessionSync["']/);
-    expect(source).toMatch(/await clearServerSession\(\)/);
+describe("TopNav — logout source-level wiring guarantees (ZCA L-2)", () => {
+  const logout = () => source.slice(source.indexOf("const handleLogout"), source.indexOf("const navLinks"));
+
+  it("delegates to the shared performLogout sequence (no private signOut / clear ordering of its own)", () => {
+    expect(source).toMatch(/import\s*\{\s*performLogout,\s*loginHrefAfterLogout\s*\}\s*from\s*["']@\/lib\/client\/logout["']/);
+    expect(logout()).toMatch(/await performLogout\(\{ auth, beginLogout \}\)/);
+    expect(source).not.toMatch(/\bsignOut\s*\(/);
+    expect(source).not.toMatch(/\bclearServerSession\b/);
   });
 
-  it("awaits clearServerSession — never fire-and-forget", () => {
-    const handleLogoutMatch = source.match(/const handleLogout = async \(\) => \{[\s\S]*?\n  \};/);
-    expect(handleLogoutMatch).not.toBeNull();
-    const body = handleLogoutMatch![0];
-    expect(body).toMatch(/await clearServerSession\(\)/);
-    expect(body).toMatch(/await signOut\(auth\)/);
-  });
-
-  it("calls beginLogout() to disable protected mutation UI before any async work starts", () => {
-    const handleLogoutMatch = source.match(/const handleLogout = async \(\) => \{([\s\S]*?)\n  \};/);
-    expect(handleLogoutMatch).not.toBeNull();
-    const body = handleLogoutMatch![1];
-    const beginLogoutIndex = body.indexOf("beginLogout()");
-    const clearServerSessionIndex = body.indexOf("clearServerSession()");
-    expect(beginLogoutIndex).toBeGreaterThan(-1);
-    expect(clearServerSessionIndex).toBeGreaterThan(-1);
-    expect(beginLogoutIndex).toBeLessThan(clearServerSessionIndex);
-  });
-
-  it("does not present a clean signed-out redirect when the server session clear fails", () => {
-    expect(source).toMatch(/if \(!cleared\)/);
-    expect(source).toMatch(/sessionClearFailed/);
+  it("navigates only after a successful LOCAL sign-out, to the outcome-specific login URL", () => {
+    const body = logout();
+    const call = body.indexOf("await performLogout(");
+    const guard = body.indexOf("if (!result.signedOut)");
+    const nav = body.indexOf("router.replace(loginHrefAfterLogout(result))");
+    expect(call).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(call);
+    expect(nav).toBeGreaterThan(guard);
   });
 });
 
@@ -337,18 +327,11 @@ describe("TopNav — Phase 11B.5 WorkspaceSwitcher integration wiring", () => {
     expect(logout).toMatch(/setMoreMenuOpen\(false\)/);
   });
 
-  it("leaves the hardened logout ORDER untouched: beginLogout -> clearServerSession -> signOut -> navigate", () => {
+  it("closes the navigation popups BEFORE the logout sequence starts, never interleaved into it", () => {
     const logout = source.slice(source.indexOf("const handleLogout"), source.indexOf("const navLinks"));
-    const begin = logout.indexOf("beginLogout()");
-    const clear = logout.indexOf("await clearServerSession()");
-    const signOutIdx = logout.indexOf("await signOut(auth)");
-    const nav = logout.indexOf("router.replace");
-    expect(begin).toBeGreaterThan(-1);
-    expect(begin).toBeLessThan(clear);
-    expect(clear).toBeLessThan(signOutIdx);
-    expect(signOutIdx).toBeLessThan(nav);
-    // and the switcher close happens BEFORE beginLogout, never interleaved into the sequence
-    expect(logout.indexOf("setWorkspaceMenuOpen(false)")).toBeLessThan(begin);
+    expect(logout.indexOf("setWorkspaceMenuOpen(false)")).toBeGreaterThan(-1);
+    expect(logout.indexOf("setWorkspaceMenuOpen(false)")).toBeLessThan(logout.indexOf("await performLogout("));
+    expect(logout.indexOf("setMoreMenuOpen(false)")).toBeLessThan(logout.indexOf("await performLogout("));
   });
 
   it("derives the Personal destination from workspaceUiEnabled, because /workspace is itself rollout-gated", () => {
@@ -586,7 +569,9 @@ describe("TopNav — Phase 11B.6 single navigation model", () => {
     expect(source).toMatch(/setWorkspaceMenuOpen\(false\);\s*\n\s*setMoreMenuOpen\(false\);\s*\n\s*\}, \[pathname\]\)/);
     const logout = source.slice(source.indexOf("const handleLogout"), source.indexOf("const navLinks"));
     expect(logout).toContain("setMoreMenuOpen(false)");
-    expect(logout.indexOf("setMoreMenuOpen(false)")).toBeLessThan(logout.indexOf("beginLogout()"));
+    // ZCA L-2: beginLogout now runs inside performLogout; the popups still close before that call.
+    expect(logout.indexOf("await performLogout(")).toBeGreaterThan(-1);
+    expect(logout.indexOf("setMoreMenuOpen(false)")).toBeLessThan(logout.indexOf("await performLogout("));
   });
 
   it("WorkspaceSwitcher stays in the primary header and is untouched by this phase", () => {

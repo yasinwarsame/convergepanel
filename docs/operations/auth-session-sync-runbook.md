@@ -57,7 +57,7 @@ Both now: (1) invalidate any existing DIFFERENT session (`clearServerSession()` 
 
 ### Client: `components/TopNav.tsx`
 
-Logout now: calls `beginLogout()` immediately (disables protected mutation UI app-wide before any async work starts) → awaits `clearServerSession()` → awaits `signOut(auth)` → only THEN navigates to a "signed out" page. If the server clear fails, the Firebase client is still signed out (so the UI hides protected content), but the redirect carries a `sessionClearFailed=1` marker instead of the normal clean-logout state, rather than silently claiming a fully clean sign-out while the server cookie might still be valid.
+Logout (ZCA L-2, `lib/client/logout.ts`, shared by TopNav and the profile page): calls `beginLogout()` immediately (disables protected mutation UI app-wide) → awaits Firebase `signOut(auth)`, which is LOCAL (no network; every tab is notified, and the AuthProvider's null branch aborts any in-flight mint and sends its own defensive `DELETE`) → a best-effort `clearServerSession()` bounded at 5 s for reporting (the request itself is not cancelled) → navigates. A failed or timed-out clear navigates to `/login?signedOut=1&sessionClearFailed=1`, which shows a distinct "signed out on this device; server session not confirmed cleared" state with a retry. Local sign-out comes first because, under the zero-cookie-authority contract, the cookie authorizes nothing: the local sign-out is what ends the browser's access. (Before L-2 the order was clear → signOut, and the profile page called only `signOut`.)
 
 ### Client: governance mutation UI
 
@@ -88,7 +88,7 @@ Two real, non-production seeded identities (`gov-e2e-owner@example.com`, `gov-e2
 
 - **Login**: fresh sign-in and a persisted-session restore (new tab, already-signed-in Firebase client state) both correctly resolved to `syncState === "authenticated"` with server/client uid agreement confirmed via `GET /api/auth/session`.
 - **Direct account switch**: submitting the login form while a DIFFERENT user was already signed in correctly invalidated the old session first, established the new one, and the server uid matched the newly-displayed identity — confirmed via direct API check, not just visual inspection.
-- **Logout**: server session confirmed cleared (`GET /api/auth/session` → `{authenticated: false}`) and a protected endpoint confirmed to return `401` immediately afterward.
+- **Logout** (historical verification; `GET /api/auth/session` was removed in ZCA L-2): server session confirmed cleared (`GET /api/auth/session` → `{authenticated: false}`) and a protected endpoint confirmed to return `401` immediately afterward.
 - **Multi-tab, direction 1**: a tab left open with an active session, when logout happens via a DIFFERENT means (another tab), reactively transitioned to a signed-out state with no manual reload — Firebase's shared cross-tab persistence propagating `onIdTokenChanged(null)`.
 - **Multi-tab, direction 2**: an account switch performed in one tab reactively updated a SECOND, already-open tab's displayed name, governance capability flags (Owner Override section correctly disappearing for the new, non-owner identity), and vote attribution (correctly re-labeled to the new identity) — with no reload.
 - **Governance regression**: the owner-only Override section was confirmed visible only to the owner identity and correctly absent once the tab's identity reactively switched to a non-owner reviewer; the reviewer's own vote row correctly updated its "You" attribution to match.

@@ -55,6 +55,13 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const signedOut = searchParams.get("signedOut") === "1" || searchParams.get("signedOut") === "true";
+  // ZCA L-2: set by the shared logout sequence when the cookie clear failed or timed out.
+  const sessionClearFailed = signedOut && searchParams.get("sessionClearFailed") === "1";
+  const [clearRetry, setClearRetry] = useState<"idle" | "pending" | "cleared" | "failed">("idle");
+  const retrySessionClear = async () => {
+    setClearRetry("pending");
+    setClearRetry((await clearServerSession()) ? "cleared" : "failed");
+  };
   const { syncState, user: authedUser } = useAuth();
 
   /**
@@ -303,15 +310,38 @@ export default function LoginPage() {
               Sign in to ConvergePanel
             </h2>
 
-            {signedOut && (
+            {signedOut && sessionClearFailed && clearRetry !== "cleared" ? (
+              <div
+                className="mt-4 rounded-xl border border-cp-border bg-cp-orange-soft px-3 py-3 text-sm text-cp-muted"
+                role="status"
+                data-testid="session-clear-failed"
+              >
+                <p className="font-medium text-cp-text">You&apos;re signed out on this device.</p>
+                <p className="mt-1 text-cp-muted">
+                  We couldn&apos;t confirm that this browser&apos;s server session was cleared. It can&apos;t be used to open your
+                  account: signing in again is required.
+                </p>
+                <button
+                  type="button"
+                  onClick={retrySessionClear}
+                  disabled={clearRetry === "pending"}
+                  className="mt-2 text-sm font-medium text-cp-accent underline-offset-2 hover:underline disabled:opacity-60"
+                >
+                  {clearRetry === "pending" ? "Clearing…" : "Try clearing it again"}
+                </button>
+                {clearRetry === "failed" && <p className="mt-1 text-cp-muted">Still couldn&apos;t reach the server.</p>}
+              </div>
+            ) : signedOut ? (
               <div
                 className="mt-4 rounded-xl border border-cp-border bg-cp-raised px-3 py-3 text-sm text-cp-muted"
                 role="status"
               >
                 <p className="font-medium text-cp-text">You&apos;ve been signed out.</p>
-                <p className="mt-1 text-cp-muted">Thanks for using ConvergePanel. Sign back in below.</p>
+                <p className="mt-1 text-cp-muted">
+                  {clearRetry === "cleared" ? "This browser's server session is cleared. " : ""}Thanks for using ConvergePanel. Sign back in below.
+                </p>
               </div>
-            )}
+            ) : null}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               <div>

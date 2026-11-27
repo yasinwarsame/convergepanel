@@ -24,7 +24,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
-import { signOut } from "firebase/auth";
+import { performLogout, loginHrefAfterLogout } from "@/lib/client/logout";
 import { auth } from "@/lib/firebase/client";
 import Link from "next/link";
 import { useUserPlan } from "@/hooks/useUserPlan";
@@ -36,7 +36,7 @@ import {
 } from "@/components/profile/GovernanceSettingsSection";
 
 export default function ProfilePage() {
-  const { user, loading: authLoading, authReady, isAdmin } = useAuth();
+  const { user, loading: authLoading, authReady, isAdmin, beginLogout } = useAuth();
   const router = useRouter();
   const {
     plan,
@@ -219,13 +219,14 @@ export default function ProfilePage() {
     }
   };
 
+  // ZCA L-2: the same sequence as TopNav (it used to call only `signOut`, sending no clear of its own).
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      router.replace("/login?signedOut=1");
-    } catch (error) {
-      console.error("Error signing out:", error);
+    const result = await performLogout({ auth, beginLogout });
+    if (!result.signedOut) {
+      console.error("Error signing out");
+      return;
     }
+    router.replace(loginHrefAfterLogout(result));
   };
 
   /**

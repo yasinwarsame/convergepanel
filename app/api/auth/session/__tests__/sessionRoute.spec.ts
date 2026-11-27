@@ -29,19 +29,14 @@ jest.mock("@/lib/authTelemetry", () => ({
 }));
 
 import { NextRequest } from "next/server";
-import { POST, DELETE, GET } from "@/app/api/auth/session/route";
+import * as sessionRouteModule from "@/app/api/auth/session/route";
+import { POST, DELETE } from "@/app/api/auth/session/route";
 
 function postRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/auth/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
-}
-
-function getRequest(cookie?: string): NextRequest {
-  return new NextRequest("http://localhost/api/auth/session", {
-    headers: cookie ? { Cookie: cookie } : undefined,
   });
 }
 
@@ -255,37 +250,9 @@ describe("DELETE /api/auth/session", () => {
   });
 });
 
-describe("GET /api/auth/session", () => {
-  it("returns { authenticated: false } when no cookie is present", async () => {
-    const res = await GET(getRequest());
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ authenticated: false });
-  });
-
-  it("returns { authenticated: true, uid } for a valid cookie", async () => {
-    mockVerifySessionCookieOnAdmin.mockResolvedValue({ uid: "user-1" });
-    const res = await GET(getRequest("__session=valid-cookie"));
-    await expect(res.json()).resolves.toEqual({ authenticated: true, uid: "user-1" });
-  });
-
-  it("returns { authenticated: false } (never a raw error, never a 500) for an expired/revoked/malformed cookie", async () => {
-    mockVerifySessionCookieOnAdmin.mockRejectedValue(new Error("Firebase session cookie has been revoked."));
-    const res = await GET(getRequest("__session=revoked-cookie"));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ authenticated: false });
-    expect(JSON.stringify(body)).not.toMatch(/revoked/);
-  });
-
-  it("never returns email, claims, the cookie/token value, or team data", async () => {
-    mockVerifySessionCookieOnAdmin.mockResolvedValue({ uid: "user-1", isAdmin: true });
-    const res = await GET(getRequest("__session=valid-cookie"));
-    const body = await res.json();
-    expect(Object.keys(body).sort()).toEqual(["authenticated", "uid"].sort());
-  });
-
-  it("sets Cache-Control: no-store", async () => {
-    const res = await GET(getRequest());
-    expect(res.headers.get("Cache-Control")).toBe("no-store");
+describe("GET /api/auth/session (removed, ZCA L-2)", () => {
+  it("the route exports no GET handler, so a cookie can no longer be asked whose it is", () => {
+    expect(Object.keys(sessionRouteModule).filter((k) => /^(GET|HEAD)$/.test(k))).toEqual([]);
+    expect(Object.keys(sessionRouteModule).filter((k) => /^(POST|DELETE)$/.test(k)).sort()).toEqual(["DELETE", "POST"]);
   });
 });

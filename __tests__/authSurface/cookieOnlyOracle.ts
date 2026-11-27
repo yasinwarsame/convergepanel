@@ -20,7 +20,6 @@ const NO_IDENTITY_CLASSES = new Set(["signature", "telemetry-proxy"]);
 const NO_BEARER_IDENTITY = new Set([
   "POST app/api/auth/session/route.ts", // mints from an ID token in the BODY
   "DELETE app/api/auth/session/route.ts", // only removes authority
-  "GET app/api/auth/session/route.ts", // reports the COOKIE's identity; has no bearer path
 ]);
 /**
  * Inputs a route validates BEFORE identity. Without them both sides of the comparison would be

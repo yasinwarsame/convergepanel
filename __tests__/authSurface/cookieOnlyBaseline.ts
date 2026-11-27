@@ -16,7 +16,6 @@ export const COOKIE_AUTHORITY_AT_BASELINE: readonly string[] = [
   "GET app/api/admin/runs/[runId]/route.ts",
   "GET app/api/admin/runs/route.ts",
   "GET app/api/admin/users/route.ts",
-  "GET app/api/auth/session/route.ts",
   "GET app/api/governance/audit/route.ts",
   "GET app/api/governance/policy/route.ts",
   "GET app/api/governance/queue/route.ts",

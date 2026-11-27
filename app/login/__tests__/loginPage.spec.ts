@@ -115,3 +115,22 @@ describe("Login page — source-level wiring guarantees", () => {
     });
   });
 });
+
+describe("Login page — failed logout clear is surfaced (ZCA L-2)", () => {
+  it("reads sessionClearFailed only together with signedOut", () => {
+    expect(source).toMatch(/const sessionClearFailed = signedOut && searchParams\.get\("sessionClearFailed"\) === "1";/);
+  });
+
+  it("renders a distinct failed-clear state (never the clean 'You've been signed out.' text alone) with a retry", () => {
+    const block = source.slice(source.indexOf('data-testid="session-clear-failed"') - 400, source.indexOf(") : signedOut ? ("));
+    expect(block).toMatch(/signedOut && sessionClearFailed && clearRetry !== "cleared"/);
+    expect(block).toMatch(/You&apos;re signed out on this device\./);
+    expect(block).toMatch(/couldn&apos;t confirm/);
+    expect(block).toMatch(/onClick=\{retrySessionClear\}/);
+    expect(block).not.toMatch(/You&apos;ve been signed out\./);
+  });
+
+  it("the retry uses the shared clear and only a true result counts as cleared", () => {
+    expect(source).toMatch(/setClearRetry\(\(await clearServerSession\(\)\) \? "cleared" : "failed"\);/);
+  });
+});

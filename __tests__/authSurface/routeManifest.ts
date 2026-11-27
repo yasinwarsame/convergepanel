@@ -16,7 +16,7 @@
  *   governance       resolveGovernanceRequestUser (lib/governance/authCheck.ts) -> authenticatePrivilegedPrincipal
  *                    (governance/policy also gates POST with requirePrivilegedAccess("GOVERNANCE_ADMIN"))
  *   privileged       requirePrivilegedAccess(tier) (lib/admin/privilegedAccess.ts); `tiers` per method
- *   session          /api/auth/session (POST mint from an ID token; GET status from the cookie; DELETE clears).
+ *   session          /api/auth/session (POST mints from an ID token; DELETE clears). GET was removed in ZCA L-2.
  *                    It imports `isVerifierUnavailableCode` from resolveRequestIdentity (outage classification only).
  *   signature        authenticated by a provider signature only; resolves no user identity
  *   telemetry-proxy  first-party analytics proxies; credentials are stripped in middleware; no identity
@@ -50,7 +50,7 @@ export const ROUTE_MANIFEST: readonly RouteEntry[] = [
   { path: "app/api/admin/users/[uid]/stripe/sync/route.ts", methods: ["POST"], cls: "privileged", enforcement: ["requirePrivilegedAccess"], tiers: {"POST": "SYSTEM_ADMIN"} },
   { path: "app/api/admin/users/route.ts", methods: ["GET"], cls: "privileged", enforcement: ["requirePrivilegedAccess"], tiers: {"GET": "ADMIN_PORTAL"} },
   { path: "app/api/admin/users/search/route.ts", methods: ["GET"], cls: "privileged", enforcement: ["requirePrivilegedAccess"], tiers: {"GET": "SYSTEM_ADMIN"} },
-  { path: "app/api/auth/session/route.ts", methods: ["DELETE", "GET", "POST"], cls: "session", enforcement: ["verifyIdToken (POST mint)", "verifySessionCookie (GET status)", "none (DELETE)", "resolveRequestIdentity"] },
+  { path: "app/api/auth/session/route.ts", methods: ["DELETE", "POST"], cls: "session", enforcement: ["verifyIdToken (POST mint)", "none (DELETE)", "resolveRequestIdentity"] },
   { path: "app/api/billing/create-checkout-session/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/billing/create-portal-session/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/billing/sync-plan/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },

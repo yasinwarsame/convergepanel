@@ -4,11 +4,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "./AuthProvider";
 import { useUserPlan } from "@/hooks/useUserPlan";
-import { clearServerSession } from "@/lib/client/sessionSync";
+import { performLogout, loginHrefAfterLogout } from "@/lib/client/logout";
 import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
 import { useWorkspaceList } from "@/hooks/useWorkspaceList";
 import MoreNav, { type MoreNavItem } from "@/components/MoreNav";
@@ -162,54 +161,32 @@ export default function TopNav() {
   }, [user]);
 
   /**
-   * Auth Lifecycle Hardening, Step 6.7 — this previously called ONLY
-   * `signOut(auth)` (the Firebase CLIENT SDK), never clearing the server
-   * `__session` cookie at all. Since every protected API route checks that
-   * cookie before falling back to a request's bearer token
-   * (`getRequestUid()`, `lib/teams/teamApiAuth.ts`), the cookie stayed
-   * valid — for up to its full 5-day lifetime — even after the UI showed
-   * "signed out," and would silently authorize a LATER sign-in on the same
-   * browser as the wrong identity if that sign-in's own session-sync
-   * happened to race (see `AuthProvider.tsx`'s module doc for the full
-   * root-cause writeup). Required sequence now: disable protected UI
-   * immediately (`beginLogout`) → await the server cookie's deletion →
-   * sign the Firebase client out → navigate. If the server clear fails,
-   * this does NOT present a signed-out state while the cookie may still
-   * authorize requests — it stays on the current page with an error
-   * instead of navigating to a page that would look safely logged out.
+   * Explicit logout (ZCA L-2): the shared `performLogout` sequence — disable protected operations,
+   * sign the Firebase client out LOCALLY, then a bounded best-effort clear of the `__session` cookie.
+   * Under the zero-cookie-authority contract the cookie authorizes nothing, so the local sign-out is
+   * what ends this browser's access even if the clear never reaches the server. An unconfirmed clear
+   * is surfaced on the login page (`sessionClearFailed=1`), never presented as a clean sign-out.
+   * (History, Step 6.7: this once called only `signOut`, leaving a cookie that authorized requests for
+   * up to five days; Step 6.7 added the clear, but a failed clear still left that authority behind.)
    */
   const handleLogout = async () => {
     if (logoutInProgressRef.current) return;
     logoutInProgressRef.current = true;
     setUserMenuOpen(false);
     setMobileMenuOpen(false);
-    // Phase 11B.5/11B.6 — dismiss both navigation popups too. The hardened
-    // sequence below (beginLogout -> clearServerSession -> signOut -> navigate)
-    // is deliberately untouched; this only closes UI before it starts.
+    // Phase 11B.5/11B.6 — dismiss both navigation popups too; this only closes UI before the sequence.
     setWorkspaceMenuOpen(false);
     setMoreMenuOpen(false);
-    beginLogout();
-    try {
-      const cleared = await clearServerSession();
-      await signOut(auth);
-      if (!cleared) {
-        // Fail safely: the Firebase client is signed out (so the UI won't
-        // show stale protected content), but do NOT claim a clean
-        // sign-out via the normal redirect — surface it as an error so
-        // the user (or support) knows the server session may not have
-        // been fully revoked, rather than silently trusting it.
-        console.error("[TopNav] Server session could not be cleared during logout");
-        router.replace("/login?signedOut=1&sessionClearFailed=1");
-      } else {
-        router.replace("/login?signedOut=1");
-      }
-      setTimeout(() => {
-        logoutInProgressRef.current = false;
-      }, 1000);
-    } catch (error) {
-      console.error("[TopNav] Error signing out:", error);
+    const result = await performLogout({ auth, beginLogout });
+    if (!result.signedOut) {
+      console.error("[TopNav] Firebase sign-out failed during logout");
       logoutInProgressRef.current = false;
+      return;
     }
+    router.replace(loginHrefAfterLogout(result));
+    setTimeout(() => {
+      logoutInProgressRef.current = false;
+    }, 1000);
   };
 
   /**

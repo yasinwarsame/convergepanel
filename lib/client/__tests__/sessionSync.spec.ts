@@ -12,8 +12,6 @@ jest.mock("@/lib/client/authSessionTelemetry", () => ({
 import {
   establishServerSession,
   clearServerSession,
-  getServerSessionIdentity,
-  verifyClientServerIdentityMatch,
   type MinimalAuthUser,
 } from "@/lib/client/sessionSync";
 import { logAuthSessionClientEvent } from "@/lib/client/authSessionTelemetry";
@@ -152,52 +150,6 @@ describe("clearServerSession", () => {
   });
 });
 
-describe("getServerSessionIdentity", () => {
-  let fetchMock: jest.Mock;
-  beforeEach(() => {
-    fetchMock = jest.fn();
-    (global as any).fetch = fetchMock;
-  });
-
-  it("returns authenticated:true + uid on success", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "user-1" }));
-    await expect(getServerSessionIdentity()).resolves.toEqual({ authenticated: true, uid: "user-1" });
-  });
-
-  it("returns authenticated:false on a non-2xx response, never throwing", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(401, {}));
-    await expect(getServerSessionIdentity()).resolves.toEqual({ authenticated: false });
-  });
-
-  it("returns authenticated:false on a network error, never throwing", async () => {
-    fetchMock.mockRejectedValueOnce(new Error("offline"));
-    await expect(getServerSessionIdentity()).resolves.toEqual({ authenticated: false });
-  });
-});
-
-describe("verifyClientServerIdentityMatch", () => {
-  let fetchMock: jest.Mock;
-  beforeEach(() => {
-    fetchMock = jest.fn();
-    (global as any).fetch = fetchMock;
-  });
-
-  it("returns true when the server-reported uid matches the client uid", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "user-1" }));
-    await expect(verifyClientServerIdentityMatch("user-1")).resolves.toBe(true);
-  });
-
-  it("returns false and logs a mismatch when the server-reported uid differs", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: true, uid: "someone-else" }));
-    await expect(verifyClientServerIdentityMatch("user-1")).resolves.toBe(false);
-    expect(logAuthSessionClientEvent).toHaveBeenCalledWith("session_identity_mismatch", expect.any(Object));
-  });
-
-  it("returns false when the server reports no session at all", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { authenticated: false }));
-    await expect(verifyClientServerIdentityMatch("user-1")).resolves.toBe(false);
-  });
-});
 
 describe("Stage 0 F3 — keepSessionOnAuthUnavailable (same-uid refresh only)", () => {
   let fetchMock: jest.Mock;

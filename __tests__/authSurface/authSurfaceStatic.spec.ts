@@ -89,7 +89,6 @@ describe("Route Handlers: the manifest is exactly the source tree", () => {
 describe("Credential → identity derivation is confined to a pinned allow-list", () => {
   test("session-cookie verification", () => {
     expect(filesMatching(/\bverifySessionCookie(Value)?\s*\(/)).toEqual([
-      "app/api/auth/session/route.ts",
       "lib/admin/privilegedAccess.ts",
       "lib/auth/resolveRequestIdentity.ts",
       "lib/auth/resolveServerComponentIdentity.ts",
@@ -221,7 +220,7 @@ const RAW_CLIENT_API_FETCHES = [
  * Every raw fetch() call site in client code, by file. Pinned at L-1 from the tree:
  * authedFetch.ts (the bearer-attaching helper), fetchWithTimeout.ts (generic; its /api callers
  * pass prepared bearer headers), sessionSync.ts (the exempt session endpoint: mint / clear / status),
- * and the raw /api calls listed above.
+ * and the raw /api calls listed above. (ZCA L-2 removed the third sessionSync call, the GET status read.)
  */
 const RAW_CLIENT_FETCH_SITES: Record<string, number> = {
   "app/admin/users/page.tsx": 1,
@@ -230,5 +229,5 @@ const RAW_CLIENT_FETCH_SITES: Record<string, number> = {
   "components/VideoUploader.tsx": 1,
   "lib/client/authedFetch.ts": 1,
   "lib/client/fetchWithTimeout.ts": 1,
-  "lib/client/sessionSync.ts": 3,
+  "lib/client/sessionSync.ts": 2,
 };
