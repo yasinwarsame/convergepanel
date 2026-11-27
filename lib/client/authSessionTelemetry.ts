@@ -21,7 +21,20 @@ export type AuthSessionClientOperation =
   | "session_identity_mismatch"
   | "session_cleared"
   | "logout_clear_failed"
-  | "stale_auth_operation_discarded";
+  | "stale_auth_operation_discarded"
+  | "token_refresh_deferred"
+  /** R-S0-4: a same-uid token callback arrived while this tab's own sync refresh was pending and was coalesced into it. */
+  | "own_refresh_echo_coalesced"
+  /** R-S0-6: a same-uid, same-User-object callback during this tab's in-flight sync was coalesced into it (one follow-up queued). */
+  | "sync_episode_callback_coalesced"
+  /** R-S0-6: the one queued follow-up of a successful sync started (an ordinary non-forced same-uid refresh). */
+  | "sync_episode_follow_up"
+  /** R-S0-6: a sync exceeded its client deadline and failed closed. */
+  | "sync_episode_deadline_exceeded"
+  /** R-S0-6: a callback for a User object whose sync already failed closed was dropped (no automatic restart). */
+  | "failed_episode_callback_dropped"
+  /** R-S0-7: a stale operation's destructive cleanup (cookie DELETE / Firebase sign-out) was skipped because a newer identity state owns the tab. */
+  | "stale_cleanup_skipped";
 
 export type AuthSessionClientTelemetryMetadata = {
   route?: string;
@@ -37,7 +50,9 @@ export function logAuthSessionClientEvent(
   const isFailure =
     operation === "session_sync_failed" ||
     operation === "session_identity_mismatch" ||
-    operation === "logout_clear_failed";
+    operation === "logout_clear_failed" ||
+    operation === "token_refresh_deferred" ||
+    operation === "sync_episode_deadline_exceeded";
   try {
     if (isFailure) {
       console.warn(`[auth-session] ${operation}`, payload);

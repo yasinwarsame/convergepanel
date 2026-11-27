@@ -27,7 +27,13 @@ export async function verifyIdToken(token: string) {
   }
   
   try {
-    const decoded = await adminAuth.verifyIdToken(token, false);
+    // checkRevoked = true (BEARERREV): the SDK reads the live Auth record
+    // (`getUser`) and rejects a DISABLED account (`auth/user-disabled`) and a
+    // token whose `auth_time` predates `tokensValidAfterTime`
+    // (`auth/id-token-revoked`). With `false` it checked signature and expiry
+    // only, so a revoked or disabled identity's still-unexpired ID token (≤1 h)
+    // authenticated every resolveRequestIdentity route as a bearer credential.
+    const decoded = await adminAuth.verifyIdToken(token, true);
     return decoded;
   } catch (error: any) {
     // Enhanced diagnostic logging (no token contents)
@@ -43,6 +49,10 @@ export async function verifyIdToken(token: string) {
     
     const authError = new Error("INVALID_ID_TOKEN");
     (authError as any).cause = error;
+    // Carry the Firebase code (never the message) so the caller can tell a
+    // revoked / disabled / expired credential from a verifier outage.
+    // Without it every failure classified as a generic invalid token.
+    if (typeof error?.code === "string") (authError as any).code = error.code;
     throw authError;
   }
 }

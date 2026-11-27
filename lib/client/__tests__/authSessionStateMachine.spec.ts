@@ -107,3 +107,13 @@ describe("canPerformProtectedMutation / NON_MUTABLE_SYNC_STATES", () => {
     expect(NON_MUTABLE_SYNC_STATES.size).toBe(ALL_STATES.length - 1);
   });
 });
+
+describe("Stage 0 F3 — token_refresh_deferred", () => {
+  it("keeps authenticated ONLY when already authenticated; every other state becomes session_error (never an upgrade)", () => {
+    const { nextSessionSyncState: next } = jest.requireActual("@/lib/client/authSessionStateMachine");
+    expect(next("authenticated", { type: "token_refresh_deferred" })).toBe("authenticated");
+    for (const s of ["signed_out", "authenticating", "syncing_session", "signing_out", "session_error"]) {
+      expect(next(s, { type: "token_refresh_deferred" })).toBe("session_error");
+    }
+  });
+});

@@ -29,6 +29,13 @@ export async function getRequestUid(req: NextRequest): Promise<string | NextResp
   if (result.status === "authenticated") return result.uid;
 
   logIdentityResolutionFailure({ route: "teamApiAuth.getRequestUid", failureCategory: result.reason });
+  if (result.reason === "auth_unavailable") {
+    // Verifier outage: fail closed, but do not tell the client its credential is bad.
+    return NextResponse.json(
+      { ok: false, error: { code: "auth_unavailable", message: "Authentication is temporarily unavailable." } },
+      { status: 503 }
+    );
+  }
   const message = result.reason === "missing_credentials" ? "Please sign in." : "Authentication failed.";
   return NextResponse.json(
     { ok: false, error: { code: "unauthorized", message } },

@@ -43,6 +43,7 @@ export async function reportReviewCaller(req: NextRequest, route: string, worksp
   if (identity.status !== "authenticated") {
     logIdentityResolutionFailure({ route, method, failureCategory: identity.reason });
     if (identity.reason === "missing_credentials") return reportReviewErrorBody(401, "unauthorized", "Please sign in.");
+    if (identity.reason === "auth_unavailable") return reportReviewErrorBody(503, "auth_unavailable", "Authentication is temporarily unavailable.");
     return reportReviewErrorBody(401, "auth_error", "Authentication failed.");
   }
   // Report review is review machinery: it also requires Approval Workflow admission (concealed when not admitted).
