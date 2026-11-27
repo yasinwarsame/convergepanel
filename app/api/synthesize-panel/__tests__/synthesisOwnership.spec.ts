@@ -9,8 +9,9 @@
  * reaches Firestore path resolution.
  */
 jest.mock("@/lib/env", () => ({ OPENAI_API_KEY: "test-key", ANTHROPIC_API_KEY: "test-key" }));
+// ZCA L-8: identity is bearer-only; these wiring tests authenticate like a real browser (bearer + the same user's cookie).
 jest.mock("@/lib/firebase/auth-helpers", () => ({ verifySessionCookie: jest.fn().mockResolvedValue({ uid: "owner-uid" }) }));
-jest.mock("@/lib/firebase/auth", () => ({ verifyIdToken: jest.fn() }));
+jest.mock("@/lib/firebase/auth", () => ({ verifyIdToken: jest.fn().mockResolvedValue({ uid: "owner-uid" }) }));
 jest.mock("@/lib/security/rateLimit", () => ({
   checkRateLimit: jest.fn().mockResolvedValue({ allowed: true, remaining: 19, resetAt: new Date() }),
 }));
@@ -101,10 +102,10 @@ const CACHED = { synthesizedStructuredReport: { executiveSummary: "cached" }, sc
 const post = (runId: unknown) =>
   POST(new NextRequest("http://localhost/api/synthesize-panel", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json" },
     body: JSON.stringify({ runId, question: "q", results: [{ modelId: "chatgpt", text: TEXT_A }, { modelId: "claude", text: TEXT_B }] }),
   }));
-const get = (runId: string) => GET(new NextRequest(`http://localhost/api/synthesize-panel?runId=${encodeURIComponent(runId)}&mode=cache`));
+const get = (runId: string) => GET(new NextRequest(`http://localhost/api/synthesize-panel?runId=${encodeURIComponent(runId)}&mode=cache`, { headers: { authorization: "Bearer zca-test-bearer" } }));
 
 const CONCEALED = { errorCode: "FORBIDDEN", message: "You don't have access to this run." };
 async function expectConcealed(res: Response) {

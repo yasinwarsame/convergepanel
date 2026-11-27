@@ -128,8 +128,9 @@ describe("bearer only", () => {
 describe("dual-credential rules are unchanged (parity matrix)", () => {
   const cases: Array<[string, { bearer?: string; cookie?: string; rawAuth?: string }, unknown]> = [
     ["no credentials", {}, { status: "unauthenticated", reason: "missing_credentials" }],
-    ["cookie valid only", { cookie: token("valid") }, { status: "authenticated", uid: "valid", source: "session_cookie" }],
-    ["cookie revoked only", { cookie: token("revoked") }, { status: "unauthenticated", reason: "revoked_session" }],
+    // ZCA L-8: a cookie ALONE is the anonymous answer, whatever its state (it is not verified at all).
+    ["cookie valid only → missing_credentials (ZCA L-8)", { cookie: token("valid") }, { status: "unauthenticated", reason: "missing_credentials" }],
+    ["cookie revoked only → missing_credentials (ZCA L-8)", { cookie: token("revoked") }, { status: "unauthenticated", reason: "missing_credentials" }],
     ["cookie A + bearer A (both valid)", { cookie: token("valid"), bearer: token("valid") }, { status: "authenticated", uid: "valid", source: "matching_cookie_and_bearer" }],
     ["cookie A + bearer B (both valid) → mismatch", { cookie: token("valid"), bearer: token("valid2") }, { status: "unauthenticated", reason: "credential_mismatch" }],
     ["cookie valid + bearer revoked (same uid space) → bearer reason, no cookie fallback", { cookie: token("valid"), bearer: token("revoked") }, { status: "unauthenticated", reason: "revoked_session" }],
@@ -161,9 +162,9 @@ describe("dual-credential rules under a verifier OUTAGE (fail closed; no fallbac
     mockOutage.bearer = OUT;
     await expect(resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
   });
-  it("cookie outage alone → auth_unavailable; bearer outage alone → auth_unavailable", async () => {
+  it("cookie outage alone → missing_credentials (ZCA L-8: a lone cookie is never verified); bearer outage alone → auth_unavailable", async () => {
     mockOutage.cookie = OUT;
-    await expect(resolveRequestIdentity(req({ cookie: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+    await expect(resolveRequestIdentity(req({ cookie: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "missing_credentials" });
     mockOutage.cookie = null;
     mockOutage.bearer = OUT;
     await expect(resolveRequestIdentity(req({ bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
@@ -214,7 +215,7 @@ describe("R4 — Auth getUser lookups per request type (availability / quota cos
   const cases: Array<[string, { bearer?: string; cookie?: string; rawAuth?: string }, number]> = [
     ["no credentials", {}, 0],
     ["bearer only", { bearer: token("valid") }, 1],
-    ["cookie only", { cookie: token("valid") }, 1],
+    ["cookie only (ZCA L-8: never verified, no live read)", { cookie: token("valid") }, 0],
     ["cookie + bearer, same uid", { cookie: token("valid"), bearer: token("valid") }, 2],
     ["cookie A + bearer B (mismatch)", { cookie: token("valid"), bearer: token("valid2") }, 2],
     ["cookie + EXPIRED bearer (expiry fails before the live read)", { cookie: token("valid"), bearer: token("valid", { exp: NOW - 10 }) }, 1],

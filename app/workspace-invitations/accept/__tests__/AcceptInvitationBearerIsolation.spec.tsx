@@ -319,7 +319,7 @@ describe("C1 — existing invitation checks are preserved under the bearer", () 
 });
 
 describe("C1 scope pins", () => {
-  it("characterization (NOT changed by C1): the server route still accepts a cookie-only request — refusing it is Option B Stage 3", async () => {
+  it("ZCA L-8 (this was the 'Option B Stage 3' characterization): the server route REFUSES a cookie-only request — nothing is accepted", async () => {
     jar.value = "sess:uid-a";
     const req = new NextRequest(`http://localhost/api/workspace-invitations/${INVITATION_ID}/accept`, {
       method: "POST",
@@ -327,8 +327,8 @@ describe("C1 scope pins", () => {
       body: JSON.stringify({ token: SENTINEL }),
     });
     const res = await POST(req, { params: { invitationId: INVITATION_ID } });
-    expect(res.status).toBe(200);
-    expect(mockedAccept).toHaveBeenCalledWith(expect.objectContaining({ uid: "uid-a" }));
+    expect(res.status).toBe(401);
+    expect(mockedAccept).not.toHaveBeenCalled();
   });
 
   it("the acceptance client sends exactly one request, whose headers come only from prepareAuthedHeaders", () => {

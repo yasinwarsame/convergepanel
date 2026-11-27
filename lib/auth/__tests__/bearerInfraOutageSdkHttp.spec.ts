@@ -149,9 +149,9 @@ describe("infrastructure failures of the live lookup → auth_unavailable (fail 
     expect(mockState.lookups).toBeGreaterThanOrEqual(1);
   });
 
-  it("quota exceeded on the COOKIE slot → auth_unavailable as well", async () => {
+  it("ZCA L-8: during the outage a cookie ALONE is the anonymous answer — it is never sent upstream, so it can neither pass nor be classified", async () => {
     mockState.reply = cases[0][1];
-    await expect(resolveRequestIdentity(req({ cookie: sessionCookie("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+    await expect(resolveRequestIdentity(req({ cookie: sessionCookie("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "missing_credentials" });
   });
 
   it("quota exceeded while a matching cookie is ALSO presented → still unauthenticated (no fallback to either credential)", async () => {

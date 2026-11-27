@@ -8,8 +8,8 @@
  * is a plain (non-async) component, renders identical neutral markup for any params, and hands the
  * client only URL params plus the identity-free values listed per page.
  */
-const mockIdentity = jest.fn();
-jest.mock("@/lib/auth/resolveServerComponentIdentity", () => ({ resolveServerComponentIdentity: (...a: unknown[]) => mockIdentity(...a) }));
+// ZCA L-8 deleted lib/auth/resolveServerComponentIdentity; a page that re-imported it would fail to build, and the
+// source checks below (and the static oracle) forbid the import.
 const mockAccess = jest.fn();
 jest.mock("@/lib/workspaces/resolveWorkspaceAccess", () => ({ resolveWorkspaceAccess: (...a: unknown[]) => mockAccess(...a) }));
 const mockCookies = jest.fn();
@@ -49,7 +49,6 @@ describe.each(CASES)("team page '$sub'", ({ sub, params, searchParams, expected 
   });
   it("resolves no identity, reads no cookie, reads no workspace", () => {
     load(sub)({ params, searchParams });
-    expect(mockIdentity).not.toHaveBeenCalled();
     expect(mockCookies).not.toHaveBeenCalled();
     expect(mockAccess).not.toHaveBeenCalled();
   });

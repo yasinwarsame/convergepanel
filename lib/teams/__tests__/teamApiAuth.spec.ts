@@ -45,10 +45,14 @@ describe("getRequestUid", () => {
     mockVerifyIdToken.mockReset();
   });
 
-  it("returns the cookie's uid when no Authorization header is present", async () => {
+  it("ZCA L-8: a valid cookie with no Authorization header is refused exactly like no credential (401), and never verified", async () => {
     mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
     const result = await getRequestUid(buildRequest({ cookie: "__session=cookie-token" }));
-    expect(result).toBe("user-a");
+    const anonymous = await getRequestUid(buildRequest({}));
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(401);
+    expect(await (result as Response).text()).toBe(await (anonymous as Response).text());
+    expect(mockVerifySessionCookie).not.toHaveBeenCalled();
     expect(mockVerifyIdToken).not.toHaveBeenCalled();
   });
 

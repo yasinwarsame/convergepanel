@@ -72,18 +72,17 @@ beforeEach(() => {
   presented.length = 0;
 });
 
-describe("T3 — middleware gates /admin on the Firebase __session cookie only", () => {
-  it.each(["/admin", "/admin/login", "/admin/users"])("%s with only an admin_session cookie redirects to /login", (path) => {
+describe("T3 — middleware reads no credential for /admin (ZCA L-8 removed the __session presence gate)", () => {
+  it.each(["/admin", "/admin/login", "/admin/users"])("%s with only an admin_session cookie is neither authorized nor specially routed by middleware", (path) => {
     const res = middleware(req(path, { admin_session: LEGACY_SECRET }));
-    expect([307, 308]).toContain(res.status);
-    const loc = new URL(res.headers.get("location") as string);
-    expect(loc.pathname).toBe("/login");
-    expect(loc.searchParams.get("next")).toBe(path);
+    expect(res.headers.get("location")).toBeNull();
+    // The legacy value is never presented to Firebase by any path.
+    expect(presented).not.toContain(LEGACY_SECRET);
   });
-  it("POSITIVE CONTROL: a __session cookie passes the presence gate (unchanged)", () => {
+  it("a __session cookie is equally irrelevant to middleware (no presence gate any more)", () => {
     const res = middleware(req("/admin", { __session: FIREBASE_CRED }));
     expect(res.headers.get("location")).toBeNull();
-    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(presented).not.toContain(FIREBASE_CRED);
   });
 });
 
@@ -93,9 +92,10 @@ describe("T3 — ADMIN_PORTAL ignores admin_session and keeps its Firebase autho
     expect(await requireAdminPortalAccess(req("/api/admin/users", { admin_session: LEGACY_SECRET }))).toBeNull();
     expect(presented).not.toContain(LEGACY_SECRET);
   });
-  it("POSITIVE CONTROL: Firebase __session + admin claim → allowed (unchanged)", async () => {
+  it("ZCA L-8: Firebase __session + admin claim alone → DENIED (the legacy helper is bearer-only); the cookie is never presented", async () => {
     decoded = { uid: "u1", admin: true, email: "x@test.invalid" };
-    expect(await requireAdminPortalAccess(req("/api/admin/users", { __session: FIREBASE_CRED }))).toEqual({ uid: "u1", email: "x@test.invalid" });
+    expect(await requireAdminPortalAccess(req("/api/admin/users", { __session: FIREBASE_CRED }))).toBeNull();
+    expect(presented).not.toContain(FIREBASE_CRED);
   });
   it("POSITIVE CONTROL: verified ADMIN_EMAILS member via bearer → allowed (unchanged)", async () => {
     process.env.ADMIN_EMAILS = "member@test.invalid";

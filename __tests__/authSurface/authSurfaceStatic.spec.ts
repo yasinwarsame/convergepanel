@@ -91,7 +91,6 @@ describe("Credential → identity derivation is confined to a pinned allow-list"
     expect(filesMatching(/\bverifySessionCookie(Value)?\s*\(/)).toEqual([
       "lib/admin/privilegedAccess.ts",
       "lib/auth/resolveRequestIdentity.ts",
-      "lib/auth/resolveServerComponentIdentity.ts",
       "lib/firebase/auth-helpers.ts",
     ]);
   });
@@ -116,13 +115,18 @@ describe("Credential → identity derivation is confined to a pinned allow-list"
     expect(filesMatching(/cookies(\(\))?\s*\.\s*get\s*\(\s*(["'`]__session["'`]|SESSION_COOKIE(_NAME)?)\s*\)/)).toEqual([
       "lib/admin/privilegedAccess.ts",
       "lib/auth/resolveRequestIdentity.ts",
-      "lib/auth/resolveServerComponentIdentity.ts",
       "lib/firebase/auth-helpers.ts",
-      "middleware.ts",
     ]);
   });
   test("next/headers (the only cookie API a Server Component has)", () => {
-    expect(filesMatching(/from\s+["']next\/headers["']/)).toEqual(["lib/auth/resolveServerComponentIdentity.ts"]);
+    // ZCA L-8: resolveServerComponentIdentity (its only importer) was deleted with the neutral-shell migration.
+    expect(filesMatching(/from\s+["']next\/headers["']/)).toEqual([]);
+  });
+  test("the legacy admin helpers in auth-helpers.ts (bearer-only since ZCA L-8) are used by no route or page", () => {
+    const users = SOURCES.filter((s) => s.path !== "lib/firebase/auth-helpers.ts" && s.path !== "lib/firebase/adminAuth.ts")
+      .filter((s) => /\b(verifyAdminToken|requireSystemAdminAccess|requireAdminPortalAccess|requireSystemAdminBearer)\b/.test(code(s.text)))
+      .map((s) => s.path);
+    expect(users).toEqual([]);
   });
   test("lib/firebase/adminAuth.ts (verifyIdToken WITHOUT checkRevoked) has no importer", () => {
     expect(filesMatching(/["']@\/lib\/firebase\/adminAuth["']|["'][./]+firebase\/adminAuth["']/)).toEqual([]);
@@ -148,9 +152,12 @@ describe("Other callable server entry points", () => {
 });
 
 describe("Middleware", () => {
-  test("middleware reads __session in exactly one place (presence only, /admin*)", () => {
+  test("middleware reads no credential at all (the /admin cookie-presence gate was removed in ZCA L-8)", () => {
     const t = code(SOURCES.find((s) => s.path === "middleware.ts")!.text);
-    expect([...t.matchAll(/__session/g)].length).toBe(1);
+    // No session-cookie read and no credential-derived identity. (The telemetry proxies' credential
+    // STRIPPING via stripProxyCredentials is a removal, not a read, and is pinned by its own specs.)
+    expect([...t.matchAll(/__session|cookies\s*\.\s*get|headers\s*\.\s*get\(\s*["']authorization/gi)].length).toBe(0);
+    expect(t).not.toMatch(/verifySessionCookie|verifyIdToken|resolveRequestIdentity|requirePrivilegedAccess/);
     expect(t).not.toMatch(/verifySessionCookie|verifyIdToken|resolveRequestIdentity/);
   });
 });

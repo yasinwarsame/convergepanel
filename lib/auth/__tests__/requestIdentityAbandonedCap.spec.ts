@@ -83,10 +83,10 @@ it("at the cap, a bearer request fails fast (no deadline wait) and the verifier 
   expect(JSON.stringify(mockWarn.mock.calls)).not.toContain("fresh");
 });
 
-it("at the cap, a cookie request fails fast and the cookie verifier is NEVER called", async () => {
+it("ZCA L-8: at the cap, a cookie-only request is the anonymous answer — it takes no slot and the cookie verifier is NEVER called", async () => {
   await fillCapWithHungRequests();
   mockVerifySessionCookie.mockResolvedValue({ uid: "would-be-valid", isAdmin: false });
-  expect(await resolveRequestIdentity(req({ cookie: "c" }))).toEqual(UNAVAILABLE);
+  expect(await resolveRequestIdentity(req({ cookie: "c" }))).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
   expect(mockVerifySessionCookie).not.toHaveBeenCalled();
 });
 

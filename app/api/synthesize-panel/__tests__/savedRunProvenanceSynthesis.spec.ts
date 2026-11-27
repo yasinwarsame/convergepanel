@@ -8,11 +8,12 @@ jest.mock("@/lib/env", () => ({
   ANTHROPIC_API_KEY: "test-key",
 }));
 
+// ZCA L-8: identity is bearer-only; these wiring tests authenticate like a real browser (bearer + the same user's cookie).
 jest.mock("@/lib/firebase/auth-helpers", () => ({
   verifySessionCookie: jest.fn().mockResolvedValue({ uid: "test-uid" }),
 }));
 jest.mock("@/lib/firebase/auth", () => ({
-  verifyIdToken: jest.fn(),
+  verifyIdToken: jest.fn().mockResolvedValue({ uid: "test-uid" }),
 }));
 jest.mock("@/lib/security/rateLimit", () => ({
   checkRateLimit: jest.fn().mockResolvedValue({ allowed: true, remaining: 19, resetAt: new Date() }),
@@ -161,7 +162,7 @@ function persistRun(runId: string, subFacts: Record<string, unknown>) {
 function request(runId: string, clientSub: Record<string, unknown> = { modelId: "claude", text: PROSE, status: "substituted" }) {
   return new NextRequest("http://localhost/api/synthesize-panel", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json" },
     body: JSON.stringify({ runId, question: QUESTION, results: [{ modelId: "chatgpt", text: PROSE, status: "ok" }, clientSub] }),
   });
 }

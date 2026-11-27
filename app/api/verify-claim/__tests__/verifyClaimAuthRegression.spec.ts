@@ -65,11 +65,12 @@ describe("POST /api/verify-claim — auth boundary", () => {
     expect(mockCheckRateLimit).not.toHaveBeenCalled();
   });
 
-  it("valid cookie only -> passes auth gate, business logic reached with correct uid", async () => {
+  it("ZCA L-8: valid cookie only -> 401 (the anonymous answer); the cookie is never verified and business logic is never reached", async () => {
     mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
     const res = await POST(buildRequest({ cookie: "__session=valid" }));
-    expect(res.status).toBe(429); // rate-limited by the mock — proves the gate was passed
-    expect(mockCheckRateLimit).toHaveBeenCalledWith(expect.objectContaining({ identifier: "verify-claim:user-a" }));
+    expect(res.status).toBe(401);
+    expect(mockVerifySessionCookie).not.toHaveBeenCalled();
+    expect(mockCheckRateLimit).not.toHaveBeenCalled();
   });
 
   it("valid bearer only -> passes auth gate, business logic reached with correct uid", async () => {

@@ -60,10 +60,9 @@ describe("resolveGovernanceRequestUser — credential truth table (SP-5)", () =>
     expect(authCalls.getUser).not.toHaveBeenCalled();
   });
 
-  it("valid cookie only -> ok with the cookie uid and the live email", async () => {
-    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A) }))).resolves.toEqual({
-      ok: true, uid: A, email: "user@example.com", emailVerified: true,
-    });
+  it("ZCA L-8: valid cookie only -> 401 (the anonymous answer); the cookie is never verified and no record is read", async () => {
+    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A) }))).resolves.toEqual({ ok: false, status: 401 });
+    expect(authCalls.getUser).not.toHaveBeenCalled();
   });
 
   it("valid bearer only -> ok with the bearer uid", async () => {
@@ -156,9 +155,9 @@ describe("outage is 503, never a grant and never a silent 401 (A-2 / SP-2)", () 
     expect(authCalls.getUser).not.toHaveBeenCalled();
   });
 
-  it("verifier outage on the cookie -> 503", async () => {
+  it("verifier outage on the cookie (presented beside a valid bearer) -> 503", async () => {
     record(A);
-    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A, outage()) }))).resolves.toEqual({ ok: false, status: 503 });
+    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A, outage()), bearer: cred("bearer", A) }))).resolves.toEqual({ ok: false, status: 503 });
   });
 
   it("getUser outage -> 503", async () => {
@@ -188,14 +187,14 @@ describe("emailVerified provenance — read from the live Auth record, never man
     ["number 1", { emailVerified: 1 }, false],
   ])("record %s -> emailVerified %s", async (_n, over, expected) => {
     record(A, over);
-    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A) }))).resolves.toEqual({
+    await expect(resolveGovernanceRequestUser(req({ bearer: cred("bearer", A) }))).resolves.toEqual({
       ok: true, uid: A, email: "user@example.com", emailVerified: expected,
     });
   });
 
   it("email and verification come from the SAME single record read", async () => {
     record(A, { email: "other@example.com", emailVerified: false });
-    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A) }))).resolves.toEqual({
+    await expect(resolveGovernanceRequestUser(req({ bearer: cred("bearer", A) }))).resolves.toEqual({
       ok: true, uid: A, email: "other@example.com", emailVerified: false,
     });
     expect(authCalls.getUser.mock.calls).toEqual([[A]]);

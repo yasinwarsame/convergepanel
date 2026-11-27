@@ -103,10 +103,11 @@ describe("session-cookie verification asks Firebase to check revocation", () => 
     expect(verifySessionCookie).toHaveBeenCalledWith("c", true);
   });
 
-  it("the requireAdminPortalAccess cookie fallback passes checkRevoked = true", async () => {
-    tokenError = new Error("not an id token"); // force the cookie branch
-    await requireAdminPortalAccess(cookieReq("http://localhost/api/admin/runs"));
-    expect(verifySessionCookie).toHaveBeenCalledWith("c", true);
+  it("ZCA L-8: requireAdminPortalAccess has NO cookie fallback — a cookie-only request is denied and no verifier is called", async () => {
+    tokenError = new Error("not an id token");
+    await expect(requireAdminPortalAccess(cookieReq("http://localhost/api/admin/runs"))).resolves.toBeNull();
+    expect(verifySessionCookie).not.toHaveBeenCalled();
+    expect(verifyIdToken).not.toHaveBeenCalled();
   });
 
   it("EVERY verifySessionCookie call in a privileged path sets the flag", async () => {
@@ -142,24 +143,23 @@ describe("a revoked session and a disabled user are denied", () => {
     await expect(verifySessionCookieValue("c")).rejects.toThrow(/revoked/i);
   });
 
-  it("an ordinary valid privileged identity still works over the cookie", async () => {
-    tokenError = new Error("not an id token");
+  it("ZCA L-8: an ordinary valid privileged identity works over the BEARER (positive control), never over the cookie", async () => {
     await expect(
-      requireAdminPortalAccess(cookieReq("http://localhost/api/admin/runs"))
+      requireAdminPortalAccess(new NextRequest("http://localhost/api/admin/runs", { headers: { authorization: "Bearer t" } }))
     ).resolves.toEqual({ uid: "u", email: PORTAL });
+    tokenError = new Error("not an id token");
+    await expect(requireAdminPortalAccess(cookieReq("http://localhost/api/admin/runs"))).resolves.toBeNull();
   });
 });
 
-describe("ID-token paths: revocation is NOT checked, by documented design", () => {
-  it("verifyIdToken is called with the token only — no checkRevoked argument", async () => {
+describe("ID-token paths: revocation IS checked since ZCA L-8 (the deliberate update this pin asked for)", () => {
+  it("verifyIdToken is called with checkRevoked = true", async () => {
     await requireAdminPortalAccess(
       new NextRequest("http://localhost/api/admin/runs", { headers: { authorization: "Bearer t" } })
     );
     expect(verifyIdToken).toHaveBeenCalled();
-    // Pins the asymmetry: if someone later enables revocation checking on ID
-    // tokens, this test should be updated deliberately, not silently.
     for (const call of verifyIdToken.mock.calls) {
-      expect(call.length).toBe(1);
+      expect(call[1]).toBe(true);
     }
   });
 

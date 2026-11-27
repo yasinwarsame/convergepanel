@@ -3,8 +3,8 @@
  * Component gate specs moved to the endpoint specs (workspace-ui-gate, user/projects/[projectId] GET,
  * workspace-reviews-target) and components/workspace/__tests__/PersonalWorkspacePage.spec.tsx.
  */
-const mockIdentity = jest.fn();
-jest.mock("@/lib/auth/resolveServerComponentIdentity", () => ({ resolveServerComponentIdentity: (...a: unknown[]) => mockIdentity(...a) }));
+// ZCA L-8 deleted lib/auth/resolveServerComponentIdentity; a page that re-imported it would fail to build, and the
+// source checks below (and the static oracle) forbid the import.
 const mockCookies = jest.fn();
 jest.mock("next/headers", () => ({ cookies: (...a: unknown[]) => mockCookies(...a), headers: (...a: unknown[]) => mockCookies(...a) }));
 jest.mock("@/components/workspace/PersonalWorkspacePage", () => ({ __esModule: true, default: () => null }));
@@ -31,7 +31,6 @@ describe.each(CASES)("$file", ({ file, mod, args, expected }) => {
   });
   it("resolves no identity and reads no cookie", () => {
     load(mod)(args);
-    expect(mockIdentity).not.toHaveBeenCalled();
     expect(mockCookies).not.toHaveBeenCalled();
   });
   it("its source imports no identity, cookie, rollout, workspace or Project module", () => {

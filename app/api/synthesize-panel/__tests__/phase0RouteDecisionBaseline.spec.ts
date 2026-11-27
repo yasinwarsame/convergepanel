@@ -17,8 +17,9 @@ process.env.TZ = "UTC";
 import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 jest.mock("@/lib/logger", () => ({ logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } }));
 jest.mock("@/lib/env", () => ({ OPENAI_API_KEY: "test-key", ANTHROPIC_API_KEY: "test-key" }));
+// ZCA L-8: identity is bearer-only; these wiring tests authenticate like a real browser (bearer + the same user's cookie).
 jest.mock("@/lib/firebase/auth-helpers", () => ({ verifySessionCookie: jest.fn().mockResolvedValue({ uid: "test-uid" }) }));
-jest.mock("@/lib/firebase/auth", () => ({ verifyIdToken: jest.fn() }));
+jest.mock("@/lib/firebase/auth", () => ({ verifyIdToken: jest.fn().mockResolvedValue({ uid: "test-uid" }) }));
 jest.mock("@/lib/security/rateLimit", () => ({ checkRateLimit: jest.fn().mockResolvedValue({ allowed: true, remaining: 19, resetAt: new Date() }) }));
 
 const runDocs = new Map<string, Record<string, unknown>>();
@@ -136,10 +137,10 @@ const DROP = new Set(["requestId", "timestamp", "generatedAt", "synthesizedAt", 
 const strip = (x: any) => JSON.parse(JSON.stringify(x ?? null, (k, v) => (DROP.has(k) ? undefined : v)));
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 function post(runId: string) {
-  return POST(new NextRequest("http://localhost/api/synthesize-panel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runId, question: "client q", results: [{ modelId: "chatgpt", text: "client", status: "ok" }, { modelId: "claude", text: "client2", status: "ok" }] }) }));
+  return POST(new NextRequest("http://localhost/api/synthesize-panel", { method: "POST", headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json" }, body: JSON.stringify({ runId, question: "client q", results: [{ modelId: "chatgpt", text: "client", status: "ok" }, { modelId: "claude", text: "client2", status: "ok" }] }) }));
 }
 function get(runId: string) {
-  return GET(new NextRequest(`http://localhost/api/synthesize-panel?runId=${runId}`, { method: "GET" }));
+  return GET(new NextRequest(`http://localhost/api/synthesize-panel?runId=${runId}`, { headers: { authorization: "Bearer zca-test-bearer" }, method: "GET" }));
 }
 
 it("T-syn-route: every scenario's decision record equals 35933c8 (fresh POST, cached POST seeded with the 35933c8 hash, GET)", async () => {

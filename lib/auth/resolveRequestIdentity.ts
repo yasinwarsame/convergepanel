@@ -39,7 +39,8 @@ import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
 import { verifyIdToken } from "@/lib/firebase/auth";
 import { startVerificationDeadline, type VerificationDeadline, type VerificationOutcome } from "./authVerificationDeadline";
 
-export type RequestIdentitySource = "session_cookie" | "bearer_token" | "matching_cookie_and_bearer";
+/** ZCA L-8: "session_cookie" was removed — a cookie alone never authenticates. */
+export type RequestIdentitySource = "bearer_token" | "matching_cookie_and_bearer";
 
 export type RequestIdentityUnauthenticatedReason =
   | "missing_credentials"
@@ -225,32 +226,31 @@ async function checkBearer(request: NextRequest, deadline: VerificationDeadline)
 }
 
 /**
- * Resolves the authenticated identity for a request, considering BOTH the
- * `__session` cookie and an `Authorization` header when either is
- * present. Strict truth table — no case falls through to "whichever
- * credential happened to validate":
+ * Resolves the authenticated identity for a request.
  *
- * | Cookie present? | Bearer present? | Result |
+ * ZERO COOKIE AUTHORITY (ZCA L-8): only a bearer establishes identity. A request with no
+ * `Authorization` header is `missing_credentials` — exactly what an anonymous request gets — and the
+ * `__session` cookie is NOT EVEN VERIFIED (no live read, no deadline slot). A leftover cookie after a
+ * failed, missing or hung logout `DELETE` therefore authorizes nothing on any route built on this
+ * resolver. When a bearer IS present, a cookie sent alongside it is still checked, strictly, so a
+ * cookie for another account (or an invalid one) refuses the request (owner D-8: mismatch stays
+ * fail-closed; the client recovers by re-minting or signing in again — no route ever falls back to
+ * the cookie).
+ *
+ * | Cookie | Bearer | Result |
  * |---|---|---|
- * | no | no | unauthenticated: missing_credentials |
- * | no | valid | authenticated via bearer_token |
- * | no | invalid/expired/revoked/malformed | unauthenticated (bearer's own reason) |
- * | valid | no | authenticated via session_cookie |
- * | invalid/expired/revoked | no | unauthenticated (cookie's own reason) |
+ * | any (incl. none) | none | unauthenticated: missing_credentials — the cookie is not verified |
+ * | none | valid | authenticated via bearer_token |
+ * | none | invalid/expired/revoked/malformed | unauthenticated (bearer's own reason) |
  * | valid | valid, SAME uid | authenticated via matching_cookie_and_bearer |
  * | valid | valid, DIFFERENT uid | unauthenticated: credential_mismatch |
- * | valid | invalid/expired/revoked/malformed | unauthenticated (bearer's own reason) — no cookie fallback |
+ * | valid | invalid/expired/revoked/malformed | unauthenticated (bearer's own reason) |
  * | invalid/expired/revoked | valid | unauthenticated (cookie's own reason) — no bearer fallback |
  * | invalid/expired/revoked | invalid/expired/revoked | unauthenticated (cookie's own reason) |
  *
- * Both credential checks run independently and concurrently — whenever BOTH
- * are present, BOTH must be inspected before a decision is
- * made; neither is ever skipped merely because the other already failed
- * or succeeded. This is the direct fix for a live-verified gap: a stale
- * cookie for user A alongside an EXPIRED bearer token actually issued for
- * a DIFFERENT user B must not authenticate as A — the expired token is
- * still evidence of a second, unverifiable identity claim, not something
- * to silently discard.
+ * When both are present they are verified independently and concurrently, under ONE per-request
+ * deadline (AUTH_VERIFICATION_DEADLINE_MS) and the shared in-flight cap; neither is skipped because
+ * the other already decided. (History: before L-8 a cookie alone authenticated — `session_cookie`.)
  */
 export async function resolveRequestIdentity(request: NextRequest): Promise<RequestIdentityResult> {
   // Both credentials are ALWAYS evaluated (see above), so they are verified
@@ -265,6 +265,11 @@ export async function resolveRequestIdentity(request: NextRequest): Promise<Requ
   // `auth_unavailable`, and the truth table below decides once; a result that
   // arrives later is never read. The deadline is per request (no shared timer
   // between concurrent requests) and is always cleared.
+  // ZCA L-8: no bearer → anonymous. Decided BEFORE any verification, so a cookie-only request never
+  // reaches the session-cookie verifier, the deadline or the cap.
+  if (!extractBearerToken(request).present) {
+    return { status: "unauthenticated", reason: "missing_credentials" };
+  }
   const deadline = startVerificationDeadline("request_identity");
   let cookie: CredentialCheck;
   let bearer: CredentialCheck;
@@ -276,12 +281,6 @@ export async function resolveRequestIdentity(request: NextRequest): Promise<Requ
 
   if (!cookie.present && !bearer.present) {
     return { status: "unauthenticated", reason: "missing_credentials" };
-  }
-
-  if (cookie.present && !bearer.present) {
-    return cookie.ok
-      ? { status: "authenticated", uid: cookie.uid, source: "session_cookie" }
-      : { status: "unauthenticated", reason: cookie.reason };
   }
 
   if (!cookie.present && bearer.present) {

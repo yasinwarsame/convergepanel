@@ -206,11 +206,13 @@ describe("A5 middleware refuses variants before routing", () => {
     const res = middleware(new NextRequest(`https://convergepanel.com${p}`, { headers: credentialHeaders() }));
     expect(res.status).toBe(404);
   });
-  it("canonical paths continue (with credentials stripped) and /admin gating is unchanged", () => {
+  it("canonical paths continue (with credentials stripped); /admin is no longer cookie-gated (ZCA L-8)", () => {
     const res = middleware(new NextRequest("https://convergepanel.com/ingest/e/", { headers: credentialHeaders() }));
     expect(res.status).toBe(200);
     expect(String(res.headers.get("x-middleware-override-headers"))).not.toMatch(/cookie|authorization/);
-    expect(middleware(new NextRequest("https://convergepanel.com/admin")).status).toBe(307);
+    const admin = middleware(new NextRequest("https://convergepanel.com/admin"));
+    expect(admin.status).toBe(200);
+    expect(admin.headers.get("location")).toBeNull();
   });
 });
 

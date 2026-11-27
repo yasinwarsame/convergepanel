@@ -48,25 +48,17 @@ export function middleware(request: NextRequest) {
   if (isTelemetryProxyPath(request.nextUrl.pathname)) {
     return NextResponse.next({ request: { headers: stripProxyCredentials(request.headers) } });
   }
-  // Gate /admin routes: redirect to login if no session cookie is present.
-  // This prevents the admin page HTML from being served to unauthenticated visitors.
-  // The real auth check (Firebase custom claims) still happens client-side in
-  // app/admin/layout.tsx and server-side in every /api/admin/* route.
-  if (request.nextUrl.pathname.startsWith("/admin")) {
-    const session = request.cookies.get("__session")?.value;
-    if (!session) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("next", request.nextUrl.pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-  }
+  // ZCA L-8: there is no `/admin` cookie gate any more. It redirected only when NO `__session` cookie
+  // was present, i.e. it treated cookie PRESENCE as enough to serve the admin pages. Those pages hold
+  // no data: app/admin/layout.tsx gates on the signed-in Firebase user's claims, and every
+  // /api/admin/* route requires a revocation-checked bearer. Middleware reads no credential.
   return NextResponse.next();
 }
 
 export const config = {
-  // Case-insensitive matchers for the telemetry proxies (review F1); `/admin` gating is unchanged.
+  // Case-insensitive matchers for the telemetry proxies (review F1). (`/admin/:path*` was removed with the
+  // cookie gate in ZCA L-8.)
   matcher: [
-    "/admin/:path*",
     "/:p([iI][nN][gG][eE][sS][tT])",
     "/:p([iI][nN][gG][eE][sS][tT])/:path*",
     "/:p([mM][oO][nN][iI][tT][oO][rR][iI][nN][gG])",

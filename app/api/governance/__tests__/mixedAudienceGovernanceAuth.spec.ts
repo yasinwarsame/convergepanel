@@ -239,10 +239,12 @@ describe("valid privileged (GOVERNANCE_ADMIN) access — on a FREE plan, so only
     expect(dbWrites().some((w) => w.path.startsWith("runs/run-b"))).toBe(true);
   });
 
-  it("the cookie path works for the same admin", async () => {
+  it("ZCA L-8: the same admin's cookie ALONE is refused (401); with the bearer beside it the admin keeps global scope", async () => {
     const gov = signInAs("governance");
-    const res = await QUEUE.GET(get("/api/governance/queue?status=all", { cookie: gov.cookie }));
-    expect((await res.json()).queueScope).toBe("admin_global");
+    const cookieOnly = await QUEUE.GET(get("/api/governance/queue?status=all", { cookie: gov.cookie }));
+    expect(cookieOnly.status).toBe(401);
+    const both = await QUEUE.GET(get("/api/governance/queue?status=all", { bearer: gov.bearer, cookie: gov.cookie }));
+    expect((await both.json()).queueScope).toBe("admin_global");
   });
 
   it.each([
@@ -373,12 +375,13 @@ describe("losing GOVERNANCE_ADMIN ends global scope on the NEXT request, and an 
     expectNothingReached();
   });
 
-  it("revoked: the pre-revocation COOKIE alone (warm cache via that cookie) is 401 on EVERY handler — a previously valid credential cannot recover global scope", async () => {
+  it("revoked: the pre-revocation COOKIE (warm cache via bearer + that cookie) is 401 on EVERY handler, alone or beside the bearer — a previously valid credential cannot recover global scope", async () => {
     const gov = signInAs("governance");
-    await warmGlobal({ cookie: gov.cookie });
+    await warmGlobal({ bearer: gov.bearer, cookie: gov.cookie });
     authState.records.set(GOV_UID, { ...(authState.records.get(GOV_UID) as object), ...revokedRecord });
     resetReached();
     for (const r of ROUTES) await expectAuthDenied(await r.call({ cookie: gov.cookie }), 401);
+    for (const r of ROUTES) await expectAuthDenied(await r.call({ bearer: gov.bearer, cookie: gov.cookie }), 401);
     expectNothingReached();
   });
 

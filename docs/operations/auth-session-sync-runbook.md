@@ -2,6 +2,8 @@
 
 Step 6: Auth Lifecycle Hardening. Fixes the cross-cutting identity desynchronization disclosed during Step 5's security review (`docs/operations/multi-reviewer-governance-runbook.md` §7) and reproduced concretely during that step's own live browser testing.
 
+> **Superseded in part (ZCA L-8, 2026-11-27, unreleased).** On the zero-cookie-authority release candidate the `__session` cookie alone authorizes nothing: every API route is bearer-only, Server Component pages resolve no identity, and `GET /api/auth/session` is removed (L-2). A cookie sent beside a bearer is still verified and must match its uid (mismatch → refused). The stale-cookie failure mode this runbook describes therefore cannot grant access on that candidate; until it is released, Production still behaves as described below.
+
 ## 1. Root cause
 
 Every protected team/governance API route resolves the caller's identity via `getRequestUid()` (`lib/teams/teamApiAuth.ts`). Before this step, that function:

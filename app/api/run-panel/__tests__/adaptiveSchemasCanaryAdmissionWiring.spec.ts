@@ -28,8 +28,9 @@ let authUid = "uid-legacy";
 jest.mock("@/lib/firebase/auth-helpers", () => ({
   verifySessionCookie: jest.fn().mockImplementation(() => Promise.resolve({ uid: authUid })),
 }));
+// ZCA L-8: identity is bearer-only; the bearer resolves to the same (per-test) uid as the cookie.
 jest.mock("@/lib/firebase/auth", () => ({
-  verifyIdToken: jest.fn(),
+  verifyIdToken: jest.fn().mockImplementation(() => Promise.resolve({ uid: authUid })),
 }));
 jest.mock("@/lib/security/rateLimit", () => ({
   checkRateLimit: jest.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: new Date() }),
@@ -105,7 +106,7 @@ import { POST } from "@/app/api/run-panel/route";
 function buildRequest(question: string): NextRequest {
   return new NextRequest("http://localhost/api/run-panel", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", authorization: "Bearer zca-test-bearer" },
     body: JSON.stringify({ question, selectedModels: ["chatgpt", "claude"] }),
   });
 }

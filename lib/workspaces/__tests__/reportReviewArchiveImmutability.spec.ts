@@ -216,7 +216,9 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
       "lib/workspaces/reviewQueue.ts": 14, // B2: +5 reads (governed-stream query field paths; fail-closed both-records check)
       "lib/workspaces/workspaceReviewMutations.ts": 6,
       "lib/workspaces/workspaceReviewPanelMutations.ts": 13,
-      "lib/workspaces/workspaceRunDetail.ts": 2
+      "lib/workspaces/workspaceRunDetail.ts": 2,
+      // ZCA L-3: client-safe run-detail shape; the one occurrence is the import path of governanceRecordParser.
+      "lib/workspaces/workspaceRunDetailTypes.ts": 1
     });
   });
 

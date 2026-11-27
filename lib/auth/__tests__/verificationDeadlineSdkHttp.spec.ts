@@ -167,20 +167,25 @@ it("ANCHOR: a normal record authenticates through the same local edge, far below
   expect(ms).toBeLessThan(DEADLINE);
 });
 
-it("Identity Toolkit HANGS: bearer, cookie, and cookie+bearer — each auth_unavailable at ~10 s (not ~132 s)", async () => {
+it("Identity Toolkit HANGS: bearer and cookie+bearer — each auth_unavailable at ~10 s (not ~132 s); a cookie ALONE is never sent upstream (ZCA L-8)", async () => {
   mockState.mode = "hang";
-  const results = await Promise.all([
+  const [bearerOnly, cookieOnly, both] = await Promise.all([
     timed(() => resolveRequestIdentity(req({ bearer: idToken("h1") }))),
     timed(() => resolveRequestIdentity(req({ cookie: sessionCookie("h2") }))),
     timed(() => resolveRequestIdentity(req({ bearer: idToken("h3"), cookie: sessionCookie("h3") }))),
   ]);
+  const results = [bearerOnly, both];
   for (const { value, ms } of results) {
     expect(value).toEqual(UNAVAILABLE);
     expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
     expect(ms).toBeLessThan(DEADLINE + SLACK);
   }
-  expect(lookupsOf("h1", "h2", "h3")).toBe(4); // the SDK really was waiting on the stub: one hung lookup per presented credential
-  process.stdout.write(`\nBENCH deadline-hang: ${results.map((r) => r.ms).join(",")}ms lookups=${lookupsOf("h1", "h2", "h3")}\n`);
+  // ZCA L-8: the cookie-only request is the anonymous answer at once — no deadline wait, no upstream lookup.
+  expect(cookieOnly.value).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
+  expect(cookieOnly.ms).toBeLessThan(DEADLINE / 2);
+  expect(lookupsOf("h2")).toBe(0);
+  expect(lookupsOf("h1", "h2", "h3")).toBe(3); // the SDK really was waiting on the stub: one hung lookup per verified credential
+  process.stdout.write(`\nBENCH deadline-hang: ${[bearerOnly, cookieOnly, both].map((r) => r.ms).join(",")}ms lookups=${lookupsOf("h1", "h2", "h3")}\n`);
 }, 30_000);
 
 it("503 + Retry-After: 11 (the SDK sleeps past the deadline before retrying) → bounded at ~10 s", async () => {

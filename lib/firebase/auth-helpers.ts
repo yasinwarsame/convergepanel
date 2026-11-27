@@ -40,10 +40,10 @@ export async function verifyAdminToken(
 
     // Try to get token from Authorization header first (Bearer token)
     // Fallback to cookie if header is not present
+    // ZCA L-8: bearer only (it used to fall back to the `__session` cookie). No route imports this legacy
+    // helper (pinned by the authSurface static oracle); it must not become a cookie path if one ever does.
     const authHeader = request.headers.get("authorization");
-    const token =
-      authHeader?.replace("Bearer ", "") ||
-      request.cookies.get("__session")?.value;
+    const token = authHeader?.replace(/^Bearer\s+/i, "").trim() || "";
 
     if (!token) {
       // No token provided
@@ -53,7 +53,7 @@ export async function verifyAdminToken(
 
     // Verify the token using Firebase Admin SDK
     // This ensures the token is valid, not expired, and issued by our Firebase project
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
     
     // Check if user has admin custom claim
     // IMPORTANT: Firebase Admin SDK returns custom claims as top-level properties on the decoded token,
@@ -253,9 +253,10 @@ export async function requireAdminPortalAccess(
   request: NextRequest
 ): Promise<{ uid: string; email: string } | null> {
   if (!adminAuth) return null;
+  // ZCA L-8: bearer only, revocation-checked (it used to fall back to the `__session` cookie and to
+  // verifySessionCookie). No route imports this legacy helper (pinned by the authSurface static oracle).
   const authHeader = request.headers.get("authorization");
-  const raw =
-    authHeader?.replace(/^Bearer\s+/i, "")?.trim() || request.cookies.get("__session")?.value;
+  const raw = authHeader?.replace(/^Bearer\s+/i, "")?.trim();
   if (!raw) return null;
 
   const allow = async (decoded: DecodedIdToken): Promise<{ uid: string; email: string } | null> => {
@@ -280,15 +281,10 @@ export async function requireAdminPortalAccess(
   };
 
   try {
-    const decoded = await adminAuth.verifyIdToken(raw);
+    const decoded = await adminAuth.verifyIdToken(raw, true);
     return await allow(decoded);
   } catch {
-    try {
-      const decoded = await adminAuth.verifySessionCookie(raw, true);
-      return await allow(decoded);
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 

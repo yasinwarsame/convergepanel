@@ -10,8 +10,8 @@
  */
 const mockGetWorkspaceRunDetail = jest.fn();
 jest.mock("@/lib/workspaces/workspaceRunDetail", () => ({ getWorkspaceRunDetail: (...a: unknown[]) => mockGetWorkspaceRunDetail(...a) }));
-const mockResolveServerComponentIdentity = jest.fn();
-jest.mock("@/lib/auth/resolveServerComponentIdentity", () => ({ resolveServerComponentIdentity: (...a: unknown[]) => mockResolveServerComponentIdentity(...a) }));
+// ZCA L-8 deleted lib/auth/resolveServerComponentIdentity; a page that re-imported it would fail to build, and the
+// source checks below (and the static oracle) forbid the import.
 const mockCookies = jest.fn();
 jest.mock("next/headers", () => ({ cookies: (...a: unknown[]) => mockCookies(...a), headers: (...a: unknown[]) => mockCookies(...a) }));
 // On the server there is no Firebase user: the client half renders its neutral loading state.
@@ -28,7 +28,6 @@ const render = (runId: string) => renderToStaticMarkup(WorkspaceRunDetailPage({ 
 describe("/workspace/reviews/[runId] — neutral server render (ZCA L-3)", () => {
   it("resolves no identity, reads no cookie and reads no run", () => {
     render("run-1");
-    expect(mockResolveServerComponentIdentity).not.toHaveBeenCalled();
     expect(mockCookies).not.toHaveBeenCalled();
     expect(mockGetWorkspaceRunDetail).not.toHaveBeenCalled();
   });

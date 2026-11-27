@@ -409,9 +409,9 @@ describe.each(CASES)("$name [$tier]", (c) => {
   });
 
   if (c.tier === "SYSTEM_ADMIN") {
-    it("SYSTEM_ADMIN is bearer-only: the claim holder's session cookie alone → 401", async () => {
+    it("SYSTEM_ADMIN is bearer-only: the claim holder's session cookie alone → 401 (the anonymous answer since ZCA L-8)", async () => {
       const me = signInAs("system");
-      await expectDenied(await seedAndCall({ cookie: me.cookie }), 401, "cookie_not_accepted_for_tier");
+      await expectDenied(await seedAndCall({ cookie: me.cookie }), 401, "missing_credentials");
       expectNoProtectedAccess();
       expect(authCalls.verifySessionCookie).not.toHaveBeenCalled();
     });
@@ -429,23 +429,24 @@ describe.each(CASES)("$name [$tier]", (c) => {
       expect(c.effect()).toBe(true);
     });
   } else {
-    it("a cookie-only session for a holder is accepted for this tier", async () => {
+    it("ZCA L-8: a cookie-only session for a holder is REFUSED for this tier too (401, nothing protected touched, nothing verified)", async () => {
       const me = signInAs(HOLDER[c.tier]);
-      const res = await seedAndCall({ cookie: me.cookie });
-      expect(res.status).toBe(c.okStatus ?? 200);
-      expect(c.effect()).toBe(true);
+      await expectDenied(await seedAndCall({ cookie: me.cookie }), 401, "missing_credentials");
+      expectNoProtectedAccess(me.uid);
+      expect(authCalls.verifySessionCookie).not.toHaveBeenCalled();
+      expect(authCalls.getUser).not.toHaveBeenCalled();
     });
 
     it("a REVOKED session cookie → 401 (revocation is read from the live snapshot, not the SDK flag)", async () => {
       const me = signInAs(HOLDER[c.tier], { record: { tokensValidAfterTime: new Date((AUTH_TIME + 1) * 1000).toUTCString() } });
-      await expectDenied(await seedAndCall({ cookie: me.cookie }), 401, "credential_revoked");
+      await expectDenied(await seedAndCall({ bearer: me.bearer, cookie: me.cookie }), 401, "credential_revoked");
       expectNoProtectedAccess(me.uid);
       expect(authCalls.verifySessionCookie.mock.calls.map((x) => x[1])).toEqual([false]);
     });
 
-    it("a DISABLED holder's session cookie → 401", async () => {
+    it("a DISABLED holder's session cookie (beside the bearer) → 401", async () => {
       const me = signInAs(HOLDER[c.tier], { record: { disabled: true } });
-      await expectDenied(await seedAndCall({ cookie: me.cookie }), 401, "account_disabled");
+      await expectDenied(await seedAndCall({ bearer: me.bearer, cookie: me.cookie }), 401, "account_disabled");
       expectNoProtectedAccess(me.uid);
     });
   }
@@ -557,12 +558,12 @@ describe("GET /api/admin/access reports the LIVE tiers", () => {
   });
 
   it.each(["system", "systemPlusGovernance"] as const)(
-    "%s with a COOKIE-ONLY session → systemAdmin false (SYSTEM_ADMIN routes are bearer-only)",
+    "ZCA L-8: %s with a COOKIE-ONLY session → 401 (the access probe is bearer-only like every privileged route)",
     async (p) => {
       const me = signInAs(p);
       const res = await ACCESS.GET(routeRequest("/api/admin/access", { creds: { cookie: me.cookie } }) as never);
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true, adminPortal: true, systemAdmin: false });
+      expect(res.status).toBe(401);
+      expect(authCalls.verifySessionCookie).not.toHaveBeenCalled();
     }
   );
 

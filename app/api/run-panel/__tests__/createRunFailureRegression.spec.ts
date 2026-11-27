@@ -27,11 +27,12 @@ jest.mock("@/lib/env", () => ({
   ADAPTIVE_SCHEMAS_ENABLED: false,
 }));
 
+// ZCA L-8: identity is bearer-only; these wiring tests authenticate like a real browser (bearer + the same user's cookie).
 jest.mock("@/lib/firebase/auth-helpers", () => ({
   verifySessionCookie: jest.fn().mockResolvedValue({ uid: "test-uid" }),
 }));
 jest.mock("@/lib/firebase/auth", () => ({
-  verifyIdToken: jest.fn(),
+  verifyIdToken: jest.fn().mockResolvedValue({ uid: "test-uid" }),
 }));
 jest.mock("@/lib/security/rateLimit", () => ({
   checkRateLimit: jest.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: new Date() }),
@@ -90,7 +91,7 @@ import { POST } from "@/app/api/run-panel/route";
 function buildRequest(question: string): NextRequest {
   return new NextRequest("http://localhost/api/run-panel", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json" },
     body: JSON.stringify({ question, selectedModels: ["chatgpt", "claude"] }),
   });
 }
@@ -137,7 +138,7 @@ describe("POST /api/run-panel — createRun() best-effort failure (Phase 8C-D.0.
 describe("F1 — distinct model ids (Personal Research)", () => {
   afterEach(() => jest.clearAllMocks());
   const post = (selectedModels: unknown) =>
-    POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: "What is the capital of Kenya?", selectedModels }) }));
+    POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json" }, body: JSON.stringify({ question: "What is the capital of Kenya?", selectedModels }) }));
 
   it("EXPLOIT SHAPE: ['chatgpt','chatgpt'] → 400 not_enough_models before quota, run creation or execution", async () => {
     const res = await post(["chatgpt", "chatgpt"]);
@@ -160,7 +161,7 @@ describe("F2/R1 — the Personal route persists the server-split context", () =>
   afterEach(() => jest.clearAllMocks());
   it("createRun receives the stripped question and the split 'Context:' material; execution input is unchanged", async () => {
     const raw = "What does Clause 7 require?\nContext:\nCLAUSE-7-TEXT: notify within five business days.";
-    await POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: raw, selectedModels: ["chatgpt", "claude"] }) }));
+    await POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json" }, body: JSON.stringify({ question: raw, selectedModels: ["chatgpt", "claude"] }) }));
     expect(mockedCreateRun).toHaveBeenCalledTimes(1);
     expect(mockedCreateRun.mock.calls[0][2]).toBe("What does Clause 7 require?");
     expect(mockedCreateRun.mock.calls[0][6]).toBe("Context:\nCLAUSE-7-TEXT: notify within five business days.");
@@ -169,7 +170,7 @@ describe("F2/R1 — the Personal route persists the server-split context", () =>
     expect(mockedRunPanel.mock.calls[0][3]).toBe("Context:\nCLAUSE-7-TEXT: notify within five business days.");
   });
   it("no context → createRun receives undefined for it", async () => {
-    await POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: "What is the capital of Kenya?", selectedModels: ["chatgpt", "claude"] }) }));
+    await POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json" }, body: JSON.stringify({ question: "What is the capital of Kenya?", selectedModels: ["chatgpt", "claude"] }) }));
     expect(mockedCreateRun.mock.calls[0][6]).toBeUndefined();
   });
 });

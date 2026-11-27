@@ -205,12 +205,18 @@ describe("call contract", () => {
     expect(getUser.mock.calls).toEqual([[UID]]);
   });
 
-  it("verifies a cookie with checkRevoked=false (PORTAL accepts a cookie)", async () => {
-    const d = await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL");
-    expectGranted(d);
-    expect(d.actor.credential).toBe("cookie");
-    expect(verifySessionCookie.mock.calls).toEqual([[COOKIE_A, false]]);
+  it.each(TIERS)("ZCA L-8: a cookie ALONE is the anonymous answer on %s — nothing is verified and no record is read", async (tier) => {
+    expectDenied(await check(req({ cookie: COOKIE_A }), tier), 401, "missing_credentials");
+    expectDenied(await check(req(), tier), 401, "missing_credentials"); // byte-identical reason to no credential at all
+    expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(verifyIdToken).not.toHaveBeenCalled();
+    expect(getUser).not.toHaveBeenCalled();
+  });
+  it("a cookie beside a bearer is still verified with checkRevoked=false (the snapshot decides revocation)", async () => {
+    const d = await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL");
+    expectGranted(d);
+    expect(d.actor.credential).toBe("bearer");
+    expect(verifySessionCookie.mock.calls).toEqual([[COOKIE_A, false]]);
     expect(getUser.mock.calls).toEqual([[UID]]);
   });
 
@@ -343,9 +349,9 @@ describe("revocation against the live tokensValidAfterTime", () => {
       expectDenied(await check(bearer(), "SYSTEM_ADMIN"), 401, "credential_revoked");
     }
   );
-  it("applies to a cookie credential on PORTAL", async () => {
+  it("applies to a cookie credential on PORTAL (presented beside a bearer since ZCA L-8)", async () => {
     mockState.records = [record({ tokensValidAfterTime: at((AUTH_TIME + 60) * 1000) })];
-    expectDenied(await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "credential_revoked");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "credential_revoked");
   });
   it("applies to EVERY presented credential: a fresh bearer does not launder a revoked same-uid cookie", async () => {
     mockState.tokens[TOK_A] = token({ auth_time: AUTH_TIME + 120 });
@@ -425,12 +431,12 @@ describe("credentials: one principal, no fallback (SP-4, SP-5, D5)", () => {
     expect(verifyIdToken).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });
-  it("cookie-only to SYSTEM is 401 cookie_not_accepted_for_tier, before any verification", async () => {
-    expectDenied(await check(req({ cookie: COOKIE_A }), "SYSTEM_ADMIN"), 401, "cookie_not_accepted_for_tier");
+  it.each(TIERS)("ZCA L-8: cookie-only to %s is 401 missing_credentials, before any verification (D5 now applies to every tier)", async (tier) => {
+    expectDenied(await check(req({ cookie: COOKIE_A }), tier), 401, "missing_credentials");
     expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
-    // control: the same cookie reaches PORTAL
-    expectGranted(await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL"));
+    // control: the same holder's bearer is granted
+    expectGranted(await check(bearer(), tier === "GOVERNANCE_ADMIN" ? "ADMIN_PORTAL" : tier));
   });
   it.each(TIERS)("mixed uids (bearer A, cookie B) is 401 credential_mismatch on %s, with no record read", async (tier) => {
     mockState.cookies[COOKIE_B] = token({ uid: OTHER_UID, sub: OTHER_UID });
@@ -513,7 +519,7 @@ describe("failures are 503 and never ok (SP-2)", () => {
   });
   it("verifySessionCookie non-auth error is 503", async () => {
     mockState.cookies[COOKIE_A] = networkError();
-    expectDenied(await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
   });
   it("an availability failure on either slot outranks a credential failure on the other", async () => {
     mockState.tokens[TOK_X] = Object.assign(new Error("expired"), { code: "auth/id-token-expired" });
@@ -798,8 +804,8 @@ describe("structural pre-validation: a crafted credential never reaches the SDK"
   ])("cookie with %s is 401 invalid_credential on PORTAL and GOV; verifySessionCookie is NEVER called", async (_n, mk) => {
     const crafted = mk();
     mockState.cookies[crafted] = token();
-    expectDenied(await check(req({ cookie: crafted }), "ADMIN_PORTAL"), 401, "invalid_credential");
-    expectDenied(await check(req({ cookie: crafted }), "GOVERNANCE_ADMIN"), 401, "invalid_credential");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: crafted }), "ADMIN_PORTAL"), 401, "invalid_credential");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: crafted }), "GOVERNANCE_ADMIN"), 401, "invalid_credential");
     expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });
@@ -844,11 +850,11 @@ describe("after pre-validation: the SDK's verdicts, classified by structure", ()
     ["unknown kid", 'Firebase session cookie has "kid" claim which does not correspond to a known public key. Most likely the session cookie is expired, so get a fresh token from your client app and try again.'],
   ])("cookie: SDK fixed text for %s is 401", async (_n, message) => {
     mockState.cookies[COOKIE_A] = argErr(message);
-    expectDenied(await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
   });
   it("the pinned texts are matched per credential kind: an ID-token-worded message thrown for a COOKIE is not a credential verdict (503)", async () => {
     mockState.cookies[COOKIE_A] = argErr(`Firebase ID token has invalid signature.${SDK_DOCS.bearer}`);
-    expectDenied(await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
   });
   it("the pinned text must be a PREFIX: the same words embedded later in a message are not a verdict", async () => {
     mockState.tokens[TOK_A] = argErr(`Error while making request: Firebase ID token has invalid signature.`);
@@ -877,7 +883,7 @@ describe("after pre-validation: the SDK's verdicts, classified by structure", ()
   });
   it.each(OUTAGES.slice(0, 4))("%s on the cookie is 503 on PORTAL", async (_n, mk) => {
     mockState.cookies[COOKIE_A] = mk() as Error;
-    expectDenied(await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
   });
   it("KEY DEMONSTRATION: the network-shaped key-fetch failure contains no 'Error fetching' text — a message matcher mislabels this outage as 401", () => {
     const err = OUTAGES[1][1]() as Error & { code: string };
@@ -888,7 +894,7 @@ describe("after pre-validation: the SDK's verdicts, classified by structure", ()
     mockState.tokens[TOK_A] = new SdkAuthError(AuthClientErrorCode.ID_TOKEN_EXPIRED, "Firebase ID token has expired. Get a fresh ID token from your client app and try again (auth/id-token-expired).");
     expectDenied(await check(bearer(), "SYSTEM_ADMIN"), 401, "invalid_credential");
     mockState.cookies[COOKIE_A] = new SdkAuthError(AuthClientErrorCode.SESSION_COOKIE_EXPIRED);
-    expectDenied(await check(req({ cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
   });
 });
 
@@ -907,12 +913,16 @@ describe("SP-5 slots: an existing-but-empty header or cookie is a presented cred
     expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });
-  it("an empty __session cookie alone: SYSTEM is cookie_not_accepted_for_tier, PORTAL and GOV are invalid_credential; no Auth call", async () => {
-    expectDenied(await check(req({ cookie: "" }), "SYSTEM_ADMIN"), 401, "cookie_not_accepted_for_tier");
-    expectDenied(await check(req({ cookie: "" }), "ADMIN_PORTAL"), 401, "invalid_credential");
-    expectDenied(await check(req({ cookie: "" }), "GOVERNANCE_ADMIN"), 401, "invalid_credential");
+  it("ZCA L-8: an empty __session cookie alone is the anonymous answer on every tier, with no Auth call", async () => {
+    for (const tier of TIERS) expectDenied(await check(req({ cookie: "" }), tier), 401, "missing_credentials");
     expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(verifyIdToken).not.toHaveBeenCalled();
+    expect(getUser).not.toHaveBeenCalled();
+  });
+  it("beside a valid bearer, an empty __session cookie is still a PRESENTED, invalid credential (SP-5): 401, the empty value never reaches the SDK, no record read", async () => {
+    for (const tier of TIERS) expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: "" }), tier), 401, "invalid_credential");
+    expect(verifySessionCookie).not.toHaveBeenCalled();
+    expect(verifyIdToken).toHaveBeenCalledTimes(TIERS.length); // the bearer itself was verified each time
     expect(getUser).not.toHaveBeenCalled();
   });
   it("control: an unrelated cookie is not a __session slot — the bearer alone is granted", async () => {

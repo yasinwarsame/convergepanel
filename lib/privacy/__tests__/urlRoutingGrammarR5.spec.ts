@@ -14,8 +14,10 @@
  * inline in a route, from that route's exact expression). Synthetic content only.
  */
 jest.mock("@/lib/firebase/admin", () => ({ adminDb: null }));
-const mockedIdentity = jest.fn();
-jest.mock("@/lib/auth/resolveServerComponentIdentity", () => ({ resolveServerComponentIdentity: (...a: unknown[]) => mockedIdentity(...a) }));
+// ZCA L-8: the composer page resolves no identity any more (neutral shell); nothing to mock.
+// The page returns <TeamWorkspacePage …/>; its props (originTarget) are what this spec reads, so the client component
+// itself (and its shells) need not load here.
+jest.mock("@/components/workspace/TeamWorkspacePage", () => ({ __esModule: true, default: () => null }));
 const mockedAccess = jest.fn();
 jest.mock("@/lib/workspaces/resolveWorkspaceAccess", () => ({ resolveWorkspaceAccess: (...a: unknown[]) => mockedAccess(...a) }));
 jest.mock("@/components/workspace/claims/TeamClaimComposerShell", () => ({
@@ -155,7 +157,6 @@ function nextSearchParams(url: string): Record<string, string | string[]> {
 
 beforeEach(() => {
   __resetTabHandoffMemoryForTests();
-  mockedIdentity.mockResolvedValue({ uid: "uid-member" });
   mockedAccess.mockResolvedValue({
     granted: true,
     workspaceType: "team",

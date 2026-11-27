@@ -74,8 +74,7 @@ export type PrivilegedUnauthenticatedReason =
   | "credential_mismatch"
   | "credential_revoked"
   | "account_disabled"
-  | "account_not_found"
-  | "cookie_not_accepted_for_tier";
+  | "account_not_found";
 
 export type PrivilegedUnavailableReason = "auth_unavailable" | "admin_sdk_uninitialized";
 
@@ -218,11 +217,10 @@ type Authenticated = {
  * of EVERY presented credential (A-2), one principal (SP-4), ONE live read
  * (SP-1), account state, revocation of every presented credential against the
  * snapshot, and the held tiers derived from that same snapshot.
- * `bearerOnly` is the SYSTEM_ADMIN transport rule (D5).
+ * Bearer-only for every tier since ZCA L-8 (it was SYSTEM_ADMIN only — D5).
  */
 async function authenticate(
-  request: NextRequest,
-  bearerOnly: boolean
+  request: NextRequest
 ): Promise<{ ok: true; value: Authenticated } | { ok: false; decision: PrivilegedDenial; errorCode?: string }> {
   // Step 1. The Admin SDK must exist, and the project id it was initialised
   // with must be known: pre-validation binds `aud`/`iss` to it, and without it
@@ -243,9 +241,11 @@ async function authenticate(
   const cookieRaw = request.cookies.get(SESSION_COOKIE)?.value;
   const cookiePresent = cookieRaw !== undefined;
 
-  if (!bearerSlot.present && !cookiePresent) return { ok: false, decision: deny401("missing_credentials") };
-  // D5: SYSTEM_ADMIN is bearer-only. A cookie alone never reaches it.
-  if (bearerOnly && !bearerSlot.present) return { ok: false, decision: deny401("cookie_not_accepted_for_tier") };
+  // ZCA L-8: EVERY tier (and authenticatePrivilegedPrincipal, i.e. governance) is bearer-only. With no
+  // bearer the answer is the anonymous one — the cookie is not verified and no live read happens. A
+  // cookie sent WITH a bearer is still verified below, so a mismatched or invalid cookie refuses.
+  // (Before L-8 only SYSTEM_ADMIN was bearer-only — D5, `cookie_not_accepted_for_tier`.)
+  if (!bearerSlot.present) return { ok: false, decision: deny401("missing_credentials") };
 
   // Step 3. Verify EVERY presented credential (structure, then signature /
   // expiry via the SDK — see privilegedCredentialAdapter.ts).
@@ -325,7 +325,7 @@ async function decide(
   tier: PrivilegedTier,
   route: string
 ): Promise<{ decision: PrivilegedDecision; errorCode?: string }> {
-  const authn = await authenticate(request, tier === "SYSTEM_ADMIN");
+  const authn = await authenticate(request);
   if (!authn.ok) return { decision: authn.decision, errorCode: authn.errorCode };
   const { uid, credential, primary, snapshot, heldTiers } = authn.value;
   const systemAdmin = heldTiers.systemAdmin;
@@ -410,7 +410,7 @@ export async function authenticatePrivilegedPrincipal(
   const route = opts?.route ?? "";
   let result: Awaited<ReturnType<typeof authenticate>>;
   try {
-    result = await authenticate(request, false);
+    result = await authenticate(request);
   } catch (err) {
     result = { ok: false, decision: deny503("auth_unavailable"), errorCode: errorCodeOf(err) || "unexpected_error" };
   }

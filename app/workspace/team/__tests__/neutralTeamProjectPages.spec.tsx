@@ -5,8 +5,8 @@
  *   - access:       app/api/workspaces/[workspaceId]/__tests__/route.spec.ts
  *   - client gate, active rule and exact props: components/workspace/__tests__/TeamWorkspaceProjectPages.spec.tsx
  */
-const mockIdentity = jest.fn();
-jest.mock("@/lib/auth/resolveServerComponentIdentity", () => ({ resolveServerComponentIdentity: (...a: unknown[]) => mockIdentity(...a) }));
+// ZCA L-8 deleted lib/auth/resolveServerComponentIdentity; a page that re-imported it would fail to build, and the
+// source checks below (and the static oracle) forbid the import.
 const mockAccess = jest.fn();
 jest.mock("@/lib/workspaces/resolveWorkspaceAccess", () => ({ resolveWorkspaceAccess: (...a: unknown[]) => mockAccess(...a) }));
 const mockGetProject = jest.fn();
@@ -41,7 +41,6 @@ describe.each(CASES)("project page '$sub'", ({ sub, params, expected }) => {
   });
   it("resolves no identity, reads no cookie, workspace or Project", () => {
     load(sub)({ params });
-    expect(mockIdentity).not.toHaveBeenCalled();
     expect(mockCookies).not.toHaveBeenCalled();
     expect(mockAccess).not.toHaveBeenCalled();
     expect(mockGetProject).not.toHaveBeenCalled();

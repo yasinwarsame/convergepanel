@@ -12,11 +12,12 @@ jest.mock("@/lib/env", () => ({
   GEMINI_API_KEY: "test",
 }));
 
+// ZCA L-8: identity is bearer-only; these wiring tests authenticate like a real browser (bearer + the same user's cookie).
 jest.mock("@/lib/firebase/auth-helpers", () => ({
   verifySessionCookie: jest.fn().mockResolvedValue({ uid: "uid-1", isAdmin: false }),
 }));
 jest.mock("@/lib/firebase/auth", () => ({
-  verifyIdToken: jest.fn(),
+  verifyIdToken: jest.fn().mockResolvedValue({ uid: "uid-1" }),
 }));
 jest.mock("@/lib/security/rateLimit", () => ({
   checkRateLimit: jest.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: new Date() }),
@@ -109,7 +110,7 @@ import { POST } from "@/app/api/verify-claim/route";
 function buildRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest("http://localhost/api/verify-claim", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: "__session=valid" },
+    headers: { authorization: "Bearer zca-test-bearer", "Content-Type": "application/json", Cookie: "__session=valid" },
     body: JSON.stringify(body),
   });
 }

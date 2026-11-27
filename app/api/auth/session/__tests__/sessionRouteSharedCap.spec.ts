@@ -63,11 +63,17 @@ async function releaseAll(value: unknown): Promise<void> {
   await jest.advanceTimersByTimeAsync(0);
 }
 
-type Path = "cookie" | "bearer" | "mint";
-const PATHS: Path[] = ["cookie", "bearer", "mint"];
+/**
+ * ZCA L-8: a cookie ALONE is no longer a verification path (it is the anonymous answer, never sent upstream),
+ * so it can neither fill the cap nor be refused by it. The session-cookie VERIFICATION path still exists — a cookie
+ * presented beside a bearer — and is attempted as `cookie+bearer`. Filling is done from the bearer and mint paths.
+ */
+type Path = "cookie+bearer" | "bearer" | "mint";
+const PATHS: Path[] = ["cookie+bearer", "bearer", "mint"];
+const FILL_PATHS: Array<Exclude<Path, "cookie+bearer">> = ["bearer", "mint"];
 
 /** Starts `n` requests on `path` whose Firebase verification hangs; returns their (still pending) results. */
-function startHung(path: Path, n: number): Array<Promise<unknown>> {
+function startHung(path: Exclude<Path, "cookie+bearer">, n: number): Array<Promise<unknown>> {
   if (path === "mint") {
     mockAdminVerifyIdToken.mockImplementation(hang);
     return Array.from({ length: n }, () => mint());
@@ -76,8 +82,7 @@ function startHung(path: Path, n: number): Array<Promise<unknown>> {
     mockBearerVerifyIdToken.mockImplementation(hang);
     return Array.from({ length: n }, (_, i) => resolveRequestIdentity(identityReq({ bearer: `hung-${i}` })));
   }
-  mockVerifySessionCookie.mockImplementation((req: NextRequest) => (hasCookie(req) ? hang() : Promise.resolve(null)));
-  return Array.from({ length: n }, (_, i) => resolveRequestIdentity(identityReq({ cookie: `hung-${i}` })));
+  throw new Error(`unexpected fill path ${path as string}`);
 }
 
 /** Every Firebase mock answers VALID from here on, so any call that is not refused would succeed. */
@@ -121,13 +126,13 @@ async function attempt(path: Path): Promise<"refused" | "admitted"> {
     expect(res.status).toBe(200);
     return "admitted";
   }
-  const r = await resolveRequestIdentity(identityReq(path === "bearer" ? { bearer: "fresh" } : { cookie: "fresh" }));
+  const r = await resolveRequestIdentity(identityReq(path === "bearer" ? { bearer: "fresh" } : { cookie: "fresh", bearer: "fresh" }));
   if (r.status === "unauthenticated") {
     expect(r).toEqual(UNAVAILABLE);
     expect(firebaseCalls()).toBe(before);
     return "refused";
   }
-  expect(r).toEqual({ status: "authenticated", uid: "valid-uid", source: path === "bearer" ? "bearer_token" : "session_cookie" });
+  expect(r).toEqual({ status: "authenticated", uid: "valid-uid", source: path === "bearer" ? "bearer_token" : "matching_cookie_and_bearer" });
   return "admitted";
 }
 
@@ -207,8 +212,8 @@ describe("X7 — the mint's second Firebase call (createSessionCookie) is counte
   });
 });
 
-describe("the cap is ONE bound shared by the session-cookie, bearer and session-mint paths", () => {
-  for (const filler of PATHS) {
+describe("the cap is ONE bound shared by the session-cookie (beside a bearer), bearer and session-mint paths", () => {
+  for (const filler of FILL_PATHS) {
     it(`filling the cap from the ${filler} path refuses all three paths before any Firebase call; recovery resumes them`, async () => {
       const pending = startHung(filler, CAP);
       await jest.advanceTimersByTimeAsync(0);
@@ -218,6 +223,9 @@ describe("the cap is ONE bound shared by the session-cookie, bearer and session-
       for (const p of PATHS) expect(await attempt(p)).toBe("refused");
       expect(firebaseCalls()).toBe(0);
       expect(authVerificationsInFlight()).toBe(CAP);
+      // ZCA L-8: a cookie-only request is the anonymous answer even at the cap — no slot, no Firebase call.
+      expect(await resolveRequestIdentity(identityReq({ cookie: "fresh" }))).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
+      expect(firebaseCalls()).toBe(0);
 
       // Still saturated after the deadline: abandoned calls are NOT released by it.
       await jest.advanceTimersByTimeAsync(DEADLINE);

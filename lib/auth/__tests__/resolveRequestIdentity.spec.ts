@@ -48,29 +48,32 @@ describe("resolveRequestIdentity — single-credential cases", () => {
     expect(mockVerifyIdToken).not.toHaveBeenCalled();
   });
 
-  it("valid cookie only -> authenticated via session_cookie", async () => {
-    mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
-    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=valid" }));
-    expect(result).toEqual({ status: "authenticated", uid: "user-a", source: "session_cookie" });
+  // ZCA L-8: a cookie ALONE never authenticates and is not even verified — every cookie state, with no
+  // bearer, gets exactly the anonymous answer. (These four cases used to authenticate / classify the cookie.)
+  it.each([
+    ["valid", () => mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false })],
+    ["invalid", () => mockVerifySessionCookie.mockRejectedValue(new Error("malformed cookie"))],
+    ["expired", () => mockVerifySessionCookie.mockRejectedValue(firebaseError("auth/session-cookie-expired"))],
+    ["revoked", () => mockVerifySessionCookie.mockRejectedValue(firebaseError("auth/session-cookie-revoked"))],
+  ] as const)("%s cookie only -> missing_credentials (the anonymous answer); no verifier is called", async (_state, arrange) => {
+    arrange();
+    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=x" }));
+    expect(result).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
+    expect(result).toEqual(await resolveRequestIdentity(buildRequest()));
+    expect(mockVerifySessionCookie).not.toHaveBeenCalled();
     expect(mockVerifyIdToken).not.toHaveBeenCalled();
   });
 
-  it("invalid cookie only -> invalid_session_cookie", async () => {
-    mockVerifySessionCookie.mockRejectedValue(new Error("malformed cookie"));
-    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=garbage" }));
-    expect(result).toEqual({ status: "unauthenticated", reason: "invalid_session_cookie" });
-  });
-
-  it("expired cookie only -> expired_session", async () => {
-    mockVerifySessionCookie.mockRejectedValue(firebaseError("auth/session-cookie-expired"));
-    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=expired" }));
-    expect(result).toEqual({ status: "unauthenticated", reason: "expired_session" });
-  });
-
-  it("revoked cookie only -> revoked_session", async () => {
-    mockVerifySessionCookie.mockRejectedValue(firebaseError("auth/session-cookie-revoked"));
-    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=revoked" }));
-    expect(result).toEqual({ status: "unauthenticated", reason: "revoked_session" });
+  // …but the cookie's state is still classified, strictly, whenever a (valid) bearer accompanies it.
+  it.each([
+    ["invalid", () => mockVerifySessionCookie.mockRejectedValue(new Error("malformed cookie")), "invalid_session_cookie"],
+    ["expired", () => mockVerifySessionCookie.mockRejectedValue(firebaseError("auth/session-cookie-expired")), "expired_session"],
+    ["revoked", () => mockVerifySessionCookie.mockRejectedValue(firebaseError("auth/session-cookie-revoked")), "revoked_session"],
+  ] as const)("%s cookie + valid bearer -> the cookie's own reason (no bearer fallback)", async (_state, arrange, reason) => {
+    arrange();
+    mockVerifyIdToken.mockResolvedValue({ uid: "user-a" });
+    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=x", authHeader: "Bearer valid-token" }));
+    expect(result).toEqual({ status: "unauthenticated", reason });
   });
 
   it("valid bearer only -> authenticated via bearer_token", async () => {
@@ -207,7 +210,8 @@ describe("resolveRequestIdentity — dual-credential cases (strict: both must va
 
   it("an unrecognized Firebase verifier error (no code, generic throw) never leaks the raw error", async () => {
     mockVerifySessionCookie.mockRejectedValue(new Error("some internal Firebase Admin SDK detail that must never reach the client"));
-    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=x" }));
+    mockVerifyIdToken.mockResolvedValue({ uid: "user-a" }); // ZCA L-8: the cookie is classified only alongside a bearer
+    const result = await resolveRequestIdentity(buildRequest({ cookie: "__session=x", authHeader: "Bearer valid-token" }));
     expect(result).toEqual({ status: "unauthenticated", reason: "invalid_session_cookie" });
     expect(JSON.stringify(result)).not.toMatch(/internal Firebase Admin SDK detail/);
   });

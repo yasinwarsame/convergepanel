@@ -39,11 +39,7 @@ All API routes set `export const runtime = "nodejs"` (Firebase Admin SDK require
 
 ### Authentication
 
-Two paths accepted in every API route:
-1. Session cookie `__session` → `verifySessionCookie()` from `lib/firebase/auth-helpers.ts`
-2. `Authorization: Bearer <token>` fallback → `verifyIdToken()` from `lib/firebase/auth.ts`
-
-Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Administrator authority has THREE human tiers; the former secret bootstrap mechanism is retired — see
+Bearer only (zero cookie authority, ZCA L-8): every API route authenticates with `Authorization: Bearer <idToken>` → `verifyIdToken(token, true)` via `resolveRequestIdentity` (`lib/auth/resolveRequestIdentity.ts`) or the privileged guard (`lib/admin/privilegedAccess.ts`). The `__session` cookie alone grants NOTHING; a cookie sent beside a bearer must verify and name the same uid or the request is refused. Server Component pages resolve no identity — sensitive pages are neutral shells whose client half calls a bearer-authorized endpoint (`hooks/useAuthorizedResource.ts`). `middleware.ts` reads no credential. Never reintroduce a cookie fallback: `__tests__/authSurface/` fails if any route answers a cookie-only request differently from an anonymous one. Administrator authority has THREE human tiers; the former secret bootstrap mechanism is retired — see
 `docs/operations/admin-authority-tiers.md`. Human tiers: `ADMIN_PORTAL` (verified
 `ADMIN_EMAILS` member or the `admin` claim), `SYSTEM_ADMIN` (the `admin` custom claim
 ONLY — credentials, claim minting, purge, destructive user/billing mutation), and
