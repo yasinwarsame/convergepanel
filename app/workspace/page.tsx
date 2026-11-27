@@ -9,30 +9,17 @@
  * This gate has zero effect on `GET /api/user/workspace` or
  * `GET /api/user/workspace/runs` — both are independent Route Handlers
  * with their own control flow, unaffected by this page's existence.
+ *
+ * ZCA L-6: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie, rollout
+ * admission or workspace data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in the bearer-authorized endpoint named in
+ * `components/workspace/PersonalWorkspacePage.tsx` — every closed gate or denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
-import { PERSONAL_WORKSPACE_UI_ENABLED, PERSONAL_WORKSPACE_UI_CANARY_UIDS } from "@/lib/env";
-import WorkspaceShell from "@/components/workspace/WorkspaceShell";
+import PersonalWorkspacePage from "@/components/workspace/PersonalWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkspacePage() {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const mode = resolvePersonalWorkspaceUiMode({
-    uid: identity.uid,
-    globalEnabled: PERSONAL_WORKSPACE_UI_ENABLED,
-    canaryUidsRaw: PERSONAL_WORKSPACE_UI_CANARY_UIDS,
-  });
-  if (!mode.enabled) {
-    notFound();
-  }
-
-  return <WorkspaceShell />;
+export default function WorkspacePage() {
+  return <PersonalWorkspacePage kind="workspaceHome" />;
 }

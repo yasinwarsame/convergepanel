@@ -175,14 +175,10 @@ describe("Client callers of /api/*", () => {
   });
 });
 
-/** The 25 workspace pages (D-4). The neutral-shell migration (L-3..L-7) must empty this list. */
-const SERVER_COMPONENT_IDENTITY_READERS = [
-  "app/workspace/page.tsx",
-  "app/workspace/projects/[projectId]/page.tsx",
-  "app/workspace/projects/page.tsx",
-  "app/workspace/research/[runId]/page.tsx",
-  "app/workspace/reviews/page.tsx",
-  "app/workspace/team/page.tsx",
+/** Server files in app/ that resolve identity. EMPTY since ZCA L-6: all 25 workspace pages are neutral shells. */
+const SERVER_COMPONENT_IDENTITY_READERS: string[] = [
+  // ZCA L-3..L-6: all 25 workspace pages are neutral shells. Nothing in app/ outside a Route Handler
+  // may resolve identity; adding any entry here is a review event.
 ];
 
 /**

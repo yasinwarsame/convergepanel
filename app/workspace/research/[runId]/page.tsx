@@ -16,32 +16,23 @@
  * eligibility. Gating a saved report on `workspaceUiEnabled` or
  * `projectsUiEnabled` would take someone's own research away from them because a
  * separate UI flag had not reached their account, so those flags are not consulted.
+ *
+ * ZCA L-6: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie, rollout
+ * admission or workspace data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in the bearer-authorized endpoint named in
+ * `components/workspace/PersonalWorkspacePage.tsx` — every closed gate or denial the same 404.
  */
 
 import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import PersonalResearchDetailShell from "@/components/workspace/PersonalResearchDetailShell";
+import PersonalWorkspacePage from "@/components/workspace/PersonalWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function PersonalResearchDetailPage({
-  params,
-}: {
-  params: { runId: string };
-}) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    // Same concealed treatment every other Personal Workspace-scoped page uses
-    // for an unauthenticated request — never a flash-then-hide.
-    notFound();
-  }
-
-  // A blank/whitespace address is not a run. Ownership is NOT decided here: the
-  // id stays opaque and the API authorizes it.
+export default function PersonalResearchDetailPage({ params }: { params: { runId: string } }) {
+  // Identity-free URL check (D-4 §1: stays in the server render).
   const runId = params.runId?.trim() ?? "";
   if (runId.length === 0) {
     notFound();
   }
-
-  return <PersonalResearchDetailShell runId={runId} />;
+  return <PersonalWorkspacePage kind="research" runId={runId} />;
 }

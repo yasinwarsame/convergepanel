@@ -38,49 +38,17 @@
  *
  * This gate has zero effect on any `app/api/user/project*` Route
  * Handler — all are independent, unaffected by this page's existence.
+ *
+ * ZCA L-6: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie, rollout
+ * admission or workspace data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in the bearer-authorized endpoint named in
+ * `components/workspace/PersonalWorkspacePage.tsx` — every closed gate or denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveProjectsUiEligibility } from "@/lib/projects/projectsUiEligibility";
-import { resolvePersonalWorkspaceForOwner } from "@/lib/workspaces/resolvePersonalWorkspaceForOwner";
-import { PROJECTS_UI_ENABLED, PROJECTS_UI_CANARY_UIDS, PROJECTS_ENABLED, PROJECTS_CANARY_UIDS } from "@/lib/env";
-import ProjectsShell from "@/components/projects/ProjectsShell";
+import PersonalWorkspacePage from "@/components/workspace/PersonalWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectsPage() {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const eligible = resolveProjectsUiEligibility({
-    uid: identity.uid,
-    uiGlobalEnabled: PROJECTS_UI_ENABLED,
-    uiCanaryUidsRaw: PROJECTS_UI_CANARY_UIDS,
-    backendGlobalEnabled: PROJECTS_ENABLED,
-    backendCanaryUidsRaw: PROJECTS_CANARY_UIDS,
-  });
-  if (!eligible) {
-    notFound();
-  }
-
-  // Phase 7B.1 — canonical Personal Workspace prerequisite. `identity.uid`
-  // is the server-resolved uid from above, never a client-supplied value
-  // of any kind (no `searchParams`/`params`/request-body uid is ever
-  // read by this page). Only `status: "found"` proceeds — every other
-  // outcome (`not_found`, `malformed`, `wrong_owner`, `wrong_type`,
-  // `workspaces_disabled`, `invalid_uid`, `lookup_failed`) collapses to
-  // the same `notFound()`, including a genuine Firestore/infrastructure
-  // failure (`lookup_failed`) — this page has no distinct error
-  // boundary to surface such a failure through, so it fails closed
-  // exactly like every other ineligible case above, never fabricating a
-  // valid Workspace to paper over an outage.
-  const workspaceResult = await resolvePersonalWorkspaceForOwner(identity.uid);
-  if (workspaceResult.status !== "found") {
-    notFound();
-  }
-
-  return <ProjectsShell />;
+export default function ProjectsPage() {
+  return <PersonalWorkspacePage kind="projects" />;
 }
