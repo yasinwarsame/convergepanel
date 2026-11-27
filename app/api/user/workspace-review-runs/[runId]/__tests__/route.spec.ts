@@ -81,6 +81,14 @@ describe("the former page gate, now on the endpoint", () => {
     expect(mockGetWorkspaceRunDetail).toHaveBeenCalledWith({ runId: "run-1", uid: "u2", approvalAdmitted: false });
   });
 
+  it("canary admission is decided for the BEARER's uid (canary u1, bearer u1 → admitted)", async () => {
+    authed("u1");
+    approvalCanary = "u1";
+    mockGetWorkspaceRunDetail.mockResolvedValue({ status: "not_found" });
+    await call();
+    expect(mockGetWorkspaceRunDetail).toHaveBeenCalledWith({ runId: "run-1", uid: "u1", approvalAdmitted: true });
+  });
+
   it("globally admitted → approvalAdmitted:true for the BEARER's uid", async () => {
     authed("u1");
     approvalGlobal = true;

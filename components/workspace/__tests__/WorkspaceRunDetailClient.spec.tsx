@@ -23,6 +23,8 @@ jest.mock("next/link", () => {
 import { Component, createElement, type ReactNode } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import WorkspaceRunDetailClient from "@/components/workspace/WorkspaceRunDetailClient";
+import { useAuthorizedResource } from "@/hooks/useAuthorizedResource";
+import { parseWorkspaceRunDetailResponse } from "@/lib/workspaces/workspaceRunDetailTypes";
 
 const user = (uid: string): FakeUser => ({ uid, getIdToken: async () => `token-${uid}` });
 const DETAIL = (over: Record<string, unknown> = {}) => ({
@@ -153,9 +155,9 @@ describe("identity rules", () => {
     expect(text()).toContain("authorized-page-unavailable");
   });
 
-  it("a malformed 200 body is not rendered (unavailable)", async () => {
+  it("a malformed 200 body is not rendered (unavailable) — one wrong field in an otherwise complete detail", async () => {
     AUTH.user = user("a");
-    mockAuthedFetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, detail: { workspaceName: 7 } }) });
+    mockAuthedFetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, detail: DETAIL({ workspaceName: 7 }) }) });
     await mount();
     expect(text()).toContain("authorized-page-unavailable");
   });
@@ -192,5 +194,61 @@ describe("content (ported from the former server-page spec)", () => {
     expect(await renderOk()).toContain('"href":"/workspace/reviews?workspace=ws-1"');
     jest.clearAllMocks();
     expect(await renderOk({ workspaceId: "ws/with space" })).toContain(`"href":"/workspace/reviews?workspace=${encodeURIComponent("ws/with space")}"`);
+  });
+});
+
+/**
+ * Render-level probe: records what the hook returned on EVERY render, together with the identity the
+ * page showed at that moment. act() flushes effects, so the final tree alone cannot see the single
+ * render between an identity change and the refetch; this probe can.
+ */
+describe("useAuthorizedResource — every render (probe)", () => {
+  type Seen = { uid: string | null; status: string; name?: string };
+  let seen: Seen[] = [];
+  function Probe() {
+    const r = useAuthorizedResource("/api/user/workspace-review-runs/run-1", parseWorkspaceRunDetailResponse);
+    seen.push({ uid: AUTH.user?.uid ?? null, status: r.status, name: r.status === "ready" ? r.data.workspaceName : undefined });
+    return null;
+  }
+  let probe: TestRenderer.ReactTestRenderer;
+  const mountProbe = async () => { await act(async () => { probe = TestRenderer.create(createElement(Probe)); }); };
+  const rerenderProbe = async () => { await act(async () => { probe.update(createElement(Probe)); }); };
+  beforeEach(() => { seen = []; });
+
+  it("SECURITY: no render ever returns A's data while the page shows B", async () => {
+    AUTH.user = user("a");
+    mockAuthedFetch.mockResolvedValueOnce(ok(DETAIL({ workspaceName: "A SECRET Workspace" })));
+    await mountProbe();
+    expect(seen.some((s) => s.uid === "a" && s.name === "A SECRET Workspace")).toBe(true); // control: A's data did render for A
+    AUTH.user = user("b");
+    mockAuthedFetch.mockReturnValueOnce(new Promise(() => undefined));
+    await rerenderProbe();
+    expect(seen.filter((s) => s.uid === "b" && s.name !== undefined)).toEqual([]);
+  });
+
+  it("SECURITY: the very first render after sign-out is signed_out (never A's data, never a loading state that could carry it)", async () => {
+    AUTH.user = user("a");
+    mockAuthedFetch.mockResolvedValueOnce(ok(DETAIL({ workspaceName: "A SECRET Workspace" })));
+    await mountProbe();
+    const before = seen.length;
+    AUTH.user = null;
+    await rerenderProbe();
+    expect(seen[before]).toEqual({ uid: null, status: "signed_out", name: undefined });
+  });
+
+  it("a stale answer never overwrites a fresher one for the same identity (A → B → A, the first A request answers last)", async () => {
+    AUTH.user = user("a");
+    const first = deferred<unknown>();
+    mockAuthedFetch.mockReturnValueOnce(first.promise);
+    await mountProbe();
+    AUTH.user = user("b");
+    mockAuthedFetch.mockReturnValueOnce(new Promise(() => undefined));
+    await rerenderProbe();
+    AUTH.user = user("a");
+    mockAuthedFetch.mockResolvedValueOnce(ok(DETAIL({ workspaceName: "A fresh" })));
+    await rerenderProbe();
+    await act(async () => { first.resolve(ok(DETAIL({ workspaceName: "A stale" }))); });
+    expect(seen[seen.length - 1]).toEqual({ uid: "a", status: "ready", name: "A fresh" });
+    expect(seen.some((s) => s.name === "A stale")).toBe(false);
   });
 });
