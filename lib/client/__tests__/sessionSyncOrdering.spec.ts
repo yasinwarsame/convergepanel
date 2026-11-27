@@ -14,6 +14,7 @@ import { establishServerSession, clearServerSession } from "@/lib/client/session
 type Call = { method: string };
 let calls: Call[] = [];
 let releaseDelete: (() => void) | null = null;
+let deleteReleasers: Array<() => void> = [];
 let postResponse: () => unknown = () => ok({ authenticated: true, uid: "uid-a" });
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 const g = globalThis as any;
@@ -27,17 +28,24 @@ beforeEach(() => {
   calls = [];
   mockEvents.length = 0;
   releaseDelete = null;
+  deleteReleasers = [];
   postResponse = () => ok({ authenticated: true, uid: "uid-a" });
   g.fetch = jest.fn(async (_url: string, init: { method: string }) => {
     calls.push({ method: init.method });
     if (init.method === "DELETE") {
       await new Promise<void>((r) => {
         releaseDelete = r;
+        deleteReleasers.push(r);
       });
       return ok({ ok: true });
     }
     return postResponse();
   });
+});
+afterEach(async () => {
+  // A failing test must not leave a DELETE pending in the module-level in-flight set for the next test.
+  for (const release of deleteReleasers) release();
+  await settle();
 });
 afterAll(() => {
   g.fetch = SAVED_FETCH;
@@ -65,6 +73,22 @@ describe("R-S0-7 — no mint while a DELETE is in flight", () => {
     await clearing;
     await expect(minting).resolves.toEqual({ ok: false, reason: "network_error" });
     expect(calls.map((c) => c.method)).toEqual(["DELETE"]);
+  });
+
+  it("a clear that starts while the mint is already waiting is waited for too (no mint while ANY DELETE is in flight)", async () => {
+    const first = clearServerSession();
+    const minting = establishServerSession(user, {});
+    await settle();
+    const second = clearServerSession(); // e.g. an explicit logout's DELETE issued while the mint waits
+    await settle();
+    deleteReleasers[0]();
+    await first;
+    await settle();
+    expect(calls.map((c) => c.method)).toEqual(["DELETE", "DELETE"]); // still no POST: the second clear is in flight
+    deleteReleasers[1]();
+    await second;
+    await expect(minting).resolves.toEqual({ ok: true, uid: "uid-a" });
+    expect(calls.map((c) => c.method)).toEqual(["DELETE", "DELETE", "POST"]);
   });
 
   it("control: with no clear in flight the mint is sent immediately", async () => {
