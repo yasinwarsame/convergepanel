@@ -116,7 +116,9 @@ const CLAIM_READ_ALLOW: Record<string, { count: number; category: Category; reas
     count: 1, category: "write-log",
     reason: "logs the claim value this guarded SYSTEM_ADMIN route has just WRITTEN; authorizes nothing",
   },
-  "components/AuthProvider.tsx::AuthProvider::member": {
+  // R-S0-6 (#344) named the token callback `handleTokenEvent` (its one bounded follow-up re-enters it), so this same
+  // single read moved from the `AuthProvider` scope into that named function. Same read, same count, same category.
+  "components/AuthProvider.tsx::handleTokenEvent::member": {
     count: 1, category: "client-ui",
     reason: "browser-side menu affordance; every privileged API re-decides on the server from the live record",
   },
