@@ -181,7 +181,6 @@ const SERVER_COMPONENT_IDENTITY_READERS = [
   "app/workspace/projects/[projectId]/page.tsx",
   "app/workspace/projects/page.tsx",
   "app/workspace/research/[runId]/page.tsx",
-  "app/workspace/reviews/[runId]/page.tsx",
   "app/workspace/reviews/page.tsx",
   "app/workspace/team/[workspaceId]/audit/page.tsx",
   "app/workspace/team/[workspaceId]/claims/[verificationId]/page.tsx",

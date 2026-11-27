@@ -97,6 +97,7 @@ export const ROUTE_MANIFEST: readonly RouteEntry[] = [
   { path: "app/api/user/runs/[runId]/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/user/usage/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/user/verifications/[verificationId]/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
+  { path: "app/api/user/workspace-review-runs/[runId]/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/user/workspace/route.ts", methods: ["GET", "POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/user/workspace/runs/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/verify-claim/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },

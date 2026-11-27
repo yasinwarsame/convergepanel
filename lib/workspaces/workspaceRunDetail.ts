@@ -57,18 +57,8 @@ function createdAtToIso(value: unknown): string | null {
   return null;
 }
 
-export interface WorkspaceRunDetailInfo {
-  runId: string;
-  workspaceId: string;
-  workspaceName: string;
-  projectId: string | null;
-  projectName: string | null;
-  runLabel: string;
-  /** `null` only when the run has no parseable `governanceRecord` yet — never fabricated. */
-  reviewStatus: HumanReviewStatus | null;
-  createdAt: string | null;
-  reviewedAt: string | null;
-}
+export type { WorkspaceRunDetailInfo } from "./workspaceRunDetailTypes";
+import type { WorkspaceRunDetailInfo } from "./workspaceRunDetailTypes";
 
 export type GetWorkspaceRunDetailResult = { status: "ok"; detail: WorkspaceRunDetailInfo } | { status: "not_found" } | { status: "read_failed" };
 
