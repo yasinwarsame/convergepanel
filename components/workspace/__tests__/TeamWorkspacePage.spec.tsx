@@ -164,6 +164,11 @@ describe("exact props per page (what crosses to the shell)", () => {
     expect(await renderWith("researchDetail", ["research.read"], { reportReviewEnabled: true })).toEqual({ shell: "TeamResearchDetailShell", props: { workspaceId: "ws-1", workspaceName: "Acme Research", runId: "run-1", project: null, showMembers: false, showAudit: false, canVerifyClaim: false, canCreateExport: false, reportReviewEnabled: true } });
     const p = (await renderWith("researchDetail", ["research.read", "research.create", "exports.create"])).props;
     expect([p.canVerifyClaim, p.canCreateExport, p.reportReviewEnabled]).toEqual([true, true, false]);
+    // exports.create alone grants export and not claim verification (and vice versa): the two are independent
+    const q = (await renderWith("researchDetail", ["research.read", "exports.create"])).props;
+    expect([q.canVerifyClaim, q.canCreateExport]).toEqual([false, true]);
+    const r = (await renderWith("researchDetail", ["research.read", "research.create"])).props;
+    expect([r.canVerifyClaim, r.canCreateExport]).toEqual([true, false]);
   });
   it("videos: canCreateVideo is research.create", async () => {
     expect(await renderWith("videos", ["research.read", "research.create"])).toEqual({ shell: "TeamWorkspaceVideosShell", props: { workspaceId: "ws-1", workspaceName: "Acme Research", showMembers: false, showAudit: false, canCreateVideo: true } });
