@@ -32,6 +32,9 @@ import TeamResearchDetailShell from "@/components/workspace/projects/TeamResearc
 import TeamWorkspaceVideosShell from "@/components/workspace/videos/TeamWorkspaceVideosShell";
 import TeamVideoComposerShell from "@/components/workspace/videos/TeamVideoComposerShell";
 import TeamVideoDetailShell from "@/components/workspace/videos/TeamVideoDetailShell";
+import TeamProjectDetailShell from "@/components/workspace/projects/TeamProjectDetailShell";
+import TeamResearchComposerShell from "@/components/workspace/projects/TeamResearchComposerShell";
+import { parseTeamProjectResponse, type TeamProjectInfo } from "@/lib/workspaces/teamProjectTypes";
 
 export type TeamPageProps =
   | { kind: "overview"; workspaceId: string }
@@ -44,7 +47,29 @@ export type TeamPageProps =
   | { kind: "researchDetail"; workspaceId: string; runId: string }
   | { kind: "videos"; workspaceId: string }
   | { kind: "videoNew"; workspaceId: string }
-  | { kind: "videoDetail"; workspaceId: string; verificationId: string };
+  | { kind: "videoDetail"; workspaceId: string; verificationId: string }
+  // ZCA L-5 — the seven Project pages (D-4 #15–#21)
+  | { kind: "projectDetail"; workspaceId: string; projectId: string }
+  | { kind: "projectClaimNew"; workspaceId: string; projectId: string }
+  | { kind: "projectClaimDetail"; workspaceId: string; projectId: string; verificationId: string }
+  | { kind: "projectResearchNew"; workspaceId: string; projectId: string }
+  | { kind: "projectResearchDetail"; workspaceId: string; projectId: string; runId: string }
+  | { kind: "projectVideoNew"; workspaceId: string; projectId: string }
+  | { kind: "projectVideoDetail"; workspaceId: string; projectId: string; verificationId: string };
+
+type ProjectPageProps = Extract<TeamPageProps, { projectId: string }>;
+const isProjectPage = (p: TeamPageProps): p is ProjectPageProps => "projectId" in p;
+
+/** Creation pages require an ACTIVE Project (an archived one → the same notFound()), as their Server Components did. */
+export const TEAM_PROJECT_PAGE_REQUIRES_ACTIVE: Readonly<Record<ProjectPageProps["kind"], boolean>> = {
+  projectDetail: false,
+  projectClaimNew: true,
+  projectClaimDetail: false,
+  projectResearchNew: true,
+  projectResearchDetail: false,
+  projectVideoNew: true,
+  projectVideoDetail: false,
+};
 
 /** Each kind's required capabilities — exactly the `notFound()` checks its Server Component made. */
 export const TEAM_PAGE_REQUIRED_CAPABILITIES: Readonly<Record<TeamPageProps["kind"], readonly ClientWorkspaceCapability[]>> = {
@@ -59,6 +84,13 @@ export const TEAM_PAGE_REQUIRED_CAPABILITIES: Readonly<Record<TeamPageProps["kin
   videos: ["research.read"],
   videoNew: ["research.create"],
   videoDetail: ["research.read"],
+  projectDetail: ["projects.read"],
+  projectClaimNew: ["research.create", "research.organize"],
+  projectClaimDetail: ["research.read"],
+  projectResearchNew: ["projects.read", "research.create", "research.organize"],
+  projectResearchDetail: ["research.read"],
+  projectVideoNew: ["research.create", "research.organize"],
+  projectVideoDetail: ["research.read"],
 };
 
 export default function TeamWorkspacePage(props: TeamPageProps) {
@@ -72,6 +104,9 @@ export default function TeamWorkspacePage(props: TeamPageProps) {
 function TeamPageBody({ page, access }: { page: TeamPageProps; access: TeamWorkspaceAccessInfo }) {
   const has = (c: ClientWorkspaceCapability) => access.capabilities.includes(c);
   if (!TEAM_PAGE_REQUIRED_CAPABILITIES[page.kind].every(has)) notFound();
+  // Project pages: the Project is requested only AFTER the access and capability gate passed (the
+  // pages' former order), so a Project is never looked up for a caller the page would refuse.
+  if (isProjectPage(page)) return <TeamProjectPageBody page={page} access={access} />;
   const workspaceId = page.workspaceId;
   const workspaceName = access.workspace.name;
 
@@ -196,6 +231,85 @@ function TeamPageBody({ page, access }: { page: TeamPageProps; access: TeamWorks
           workspaceName={workspaceName}
           verificationId={page.verificationId}
           project={null}
+          showMembers={has("members.read")}
+          showAudit={has("audit.read")}
+        />
+      );
+  }
+}
+
+function TeamProjectPageBody({ page, access }: { page: ProjectPageProps; access: TeamWorkspaceAccessInfo }) {
+  const include = page.kind === "projectDetail" ? "?include=assignees" : "";
+  const resource = useAuthorizedResource<TeamProjectInfo>(
+    page.projectId ? `/api/workspaces/${encodeURIComponent(page.workspaceId)}/projects/${encodeURIComponent(page.projectId)}${include}` : null,
+    parseTeamProjectResponse,
+  );
+  return <AuthorizedPageGate resource={resource}>{(project) => <TeamProjectPageContent page={page} access={access} project={project} />}</AuthorizedPageGate>;
+}
+
+function TeamProjectPageContent({ page, access, project }: { page: ProjectPageProps; access: TeamWorkspaceAccessInfo; project: TeamProjectInfo }) {
+  if (TEAM_PROJECT_PAGE_REQUIRES_ACTIVE[page.kind] && project.status !== "active") notFound();
+  const has = (c: ClientWorkspaceCapability) => access.capabilities.includes(c);
+  const workspaceId = page.workspaceId;
+  const workspaceName = access.workspace.name;
+  const ref = { id: project.id, name: project.name };
+
+  switch (page.kind) {
+    case "projectDetail":
+      return (
+        <TeamProjectDetailShell
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          canReadMembers={has("members.read")}
+          canReadAudit={has("audit.read")}
+          canReadClaims={has("research.read")}
+          canReadVideos={has("research.read")}
+          canCreateClaim={has("research.create") && has("research.organize")}
+          canCreateVideo={has("research.create") && has("research.organize")}
+          canStartResearch={has("research.create") && has("research.organize")}
+          canAssignResearch={has("research.organize")}
+          assignmentUiEnabled={access.projectAssignmentUiEnabled}
+          project={{ id: project.id, name: project.name, status: project.status, assignees: project.assignees ?? [] }}
+        />
+      );
+    case "projectClaimNew":
+      return <TeamClaimComposerShell workspaceId={workspaceId} workspaceName={workspaceName} showMembers={has("members.read")} showAudit={has("audit.read")} project={ref} />;
+    case "projectClaimDetail":
+      return (
+        <TeamClaimDetailShell
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          verificationId={page.verificationId}
+          project={ref}
+          showMembers={has("members.read")}
+          showAudit={has("audit.read")}
+        />
+      );
+    case "projectResearchNew":
+      return <TeamResearchComposerShell workspaceId={workspaceId} workspaceName={workspaceName} canReadMembers={has("members.read")} canReadAudit={has("audit.read")} project={ref} />;
+    case "projectResearchDetail":
+      return (
+        <TeamResearchDetailShell
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          runId={page.runId}
+          project={ref}
+          showMembers={has("members.read")}
+          showAudit={has("audit.read")}
+          canVerifyClaim={has("research.create") && has("research.organize")}
+          canCreateExport={has("exports.create")}
+          reportReviewEnabled={access.reportReviewEnabled}
+        />
+      );
+    case "projectVideoNew":
+      return <TeamVideoComposerShell workspaceId={workspaceId} workspaceName={workspaceName} showMembers={has("members.read")} showAudit={has("audit.read")} project={ref} />;
+    case "projectVideoDetail":
+      return (
+        <TeamVideoDetailShell
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          verificationId={page.verificationId}
+          project={ref}
           showMembers={has("members.read")}
           showAudit={has("audit.read")}
         />

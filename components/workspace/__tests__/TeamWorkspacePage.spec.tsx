@@ -28,7 +28,7 @@ jest.mock("@/components/workspace/videos/TeamVideoDetailShell", () => shell("Tea
 
 import { Component, createElement, type ReactNode } from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import TeamWorkspacePage, { TEAM_PAGE_REQUIRED_CAPABILITIES, type TeamPageProps } from "@/components/workspace/TeamWorkspacePage";
+import TeamWorkspacePage, { TEAM_PAGE_REQUIRED_CAPABILITIES, TEAM_PROJECT_PAGE_REQUIRES_ACTIVE, type TeamPageProps } from "@/components/workspace/TeamWorkspacePage";
 import { CLIENT_WORKSPACE_CAPABILITIES } from "@/lib/workspaces/teamWorkspaceAccessTypes";
 
 const ALL = [...CLIENT_WORKSPACE_CAPABILITIES];
@@ -54,7 +54,9 @@ const isNotFound = () => (caught as { digest?: string } | undefined)?.digest ===
 const lastShell = () => mockShellProps[mockShellProps.length - 1];
 
 const ORIGIN = { runId: "run-9", claimId: "claim-3" };
-const PAGES: Record<TeamPageProps["kind"], TeamPageProps> = {
+/** The 11 non-Project kinds (L-4); the Project kinds are covered by TeamWorkspaceProjectPages.spec.tsx. */
+type PlainKind = Exclude<TeamPageProps["kind"], keyof typeof TEAM_PROJECT_PAGE_REQUIRES_ACTIVE>;
+const PAGES: Record<PlainKind, TeamPageProps> = {
   overview: { kind: "overview", workspaceId: "ws-1" },
   audit: { kind: "audit", workspaceId: "ws-1", showGovernanceSummary: true, showReviewIntegrityMetrics: false },
   claims: { kind: "claims", workspaceId: "ws-1" },
@@ -77,7 +79,7 @@ beforeEach(() => {
 });
 afterEach(() => (console.error as jest.Mock).mockRestore?.());
 
-describe.each(Object.keys(PAGES) as Array<TeamPageProps["kind"]>)("kind %s — gate", (kind) => {
+describe.each(Object.keys(PAGES) as PlainKind[])("kind %s — gate", (kind) => {
   it("loads access for the route's workspace with the bearer helper", async () => {
     mockAuthedFetch.mockResolvedValue(access(ALL));
     await mount(PAGES[kind]);
@@ -113,7 +115,8 @@ describe.each(Object.keys(PAGES) as Array<TeamPageProps["kind"]>)("kind %s — g
 
 describe("required capabilities are exactly the former pages' checks", () => {
   it("pins the table", () => {
-    expect(TEAM_PAGE_REQUIRED_CAPABILITIES).toEqual({
+    const plain = Object.fromEntries(Object.entries(TEAM_PAGE_REQUIRED_CAPABILITIES).filter(([k]) => !(k in TEAM_PROJECT_PAGE_REQUIRES_ACTIVE)));
+    expect(plain).toEqual({
       overview: [],
       audit: ["audit.read"],
       claims: ["research.read"],
@@ -130,8 +133,8 @@ describe("required capabilities are exactly the former pages' checks", () => {
 });
 
 describe("exact props per page (what crosses to the shell)", () => {
-  const MINIMAL: Record<TeamPageProps["kind"], string[]> = { ...TEAM_PAGE_REQUIRED_CAPABILITIES } as never;
-  async function renderWith(kind: TeamPageProps["kind"], caps: readonly string[], over: Record<string, unknown> = {}) {
+  const MINIMAL: Record<PlainKind, readonly string[]> = { ...TEAM_PAGE_REQUIRED_CAPABILITIES };
+  async function renderWith(kind: PlainKind, caps: readonly string[], over: Record<string, unknown> = {}) {
     mockAuthedFetch.mockResolvedValue(access(caps, over));
     await mount(PAGES[kind]);
     return lastShell();

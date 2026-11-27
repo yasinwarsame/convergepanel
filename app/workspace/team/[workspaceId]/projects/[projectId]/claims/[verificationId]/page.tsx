@@ -21,57 +21,19 @@
  *
  * This page never interprets the verification payload, never reads Firestore
  * for the Claim, and never calls a Personal verification endpoint.
+ *
+ * ZCA L-5: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie,
+ * workspace or Project data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access), `TeamWorkspacePage`
+ * (the required capabilities), `GET /api/workspaces/[workspaceId]/projects/[projectId]` (the Project,
+ * looked up only after that gate; another Workspace's Project → the same 404) and, for creation pages,
+ * the active-status rule — every denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import { getProject } from "@/lib/firestore/projects";
-import TeamClaimDetailShell from "@/components/workspace/projects/TeamClaimDetailShell";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamProjectClaimDetailPage({
-  params,
-}: {
-  params: { workspaceId: string; projectId: string; verificationId: string };
-}) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("research.read")) {
-    notFound();
-  }
-
-  const projectResult = await getProject(params.projectId);
-  if (projectResult.status === "firestore_unavailable" || projectResult.status === "read_failed") {
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (projectResult.status !== "found") {
-    notFound();
-  }
-  // Cross-Workspace containment — concealed identically to "doesn't exist".
-  if (projectResult.project.workspaceId !== params.workspaceId) {
-    notFound();
-  }
-
-  return (
-    <TeamClaimDetailShell
-      workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      verificationId={params.verificationId}
-      project={{ id: projectResult.project.id, name: projectResult.project.name }}
-      showMembers={access.capabilities.includes("members.read")}
-      showAudit={access.capabilities.includes("audit.read")}
-    />
-  );
+export default function TeamProjectClaimDetailPage({ params }: { params: { workspaceId: string; projectId: string; verificationId: string } }) {
+  return <TeamWorkspacePage kind="projectClaimDetail" workspaceId={params.workspaceId} projectId={params.projectId} verificationId={params.verificationId} />;
 }

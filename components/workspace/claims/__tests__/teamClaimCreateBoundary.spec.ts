@@ -109,11 +109,13 @@ describe("R4-I3 ordinary-mode boundary (static)", () => {
     expect(shell).not.toContain("router.push(");
   });
 
-  it("the Project creation gate requires both capabilities and an active Project", () => {
+  it("the Project creation gate requires both capabilities and an active Project (TeamWorkspacePage since ZCA L-5)", () => {
     const page = codeOf("app/workspace/team/[workspaceId]/projects/[projectId]/claims/new/page.tsx");
-    expect(page).toContain('access.capabilities.includes("research.create")');
-    expect(page).toContain('access.capabilities.includes("research.organize")');
-    expect(page).toContain('projectResult.project.status !== "active"');
+    expect(page).toMatch(/<TeamWorkspacePage\s+kind="projectClaimNew"/);
+    const team = codeOf("components/workspace/TeamWorkspacePage.tsx");
+    expect(team).toMatch(/\n\s*projectClaimNew: \["research\.create", "research\.organize"\],/);
+    expect(team).toMatch(/\n\s*projectClaimNew: true,/);
+    expect(team).toContain('if (TEAM_PROJECT_PAGE_REQUIRES_ACTIVE[page.kind] && project.status !== "active") notFound();');
   });
 });
 

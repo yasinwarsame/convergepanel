@@ -116,7 +116,7 @@ export const ROUTE_MANIFEST: readonly RouteEntry[] = [
   { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/assignees/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/research/snapshots/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/restore/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
-  { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/route.ts", methods: ["PATCH"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
+  { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/route.ts", methods: ["GET", "PATCH"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/runs/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/verifications/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/projects/[projectId]/video-verifications/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
