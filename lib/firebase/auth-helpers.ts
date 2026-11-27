@@ -38,8 +38,7 @@ export async function verifyAdminToken(
       return null;
     }
 
-    // Try to get token from Authorization header first (Bearer token)
-    // Fallback to cookie if header is not present
+    // Bearer token from the Authorization header — the only credential accepted.
     // ZCA L-8: bearer only (it used to fall back to the `__session` cookie). No route imports this legacy
     // helper (pinned by the authSurface static oracle); it must not become a cookie path if one ever does.
     const authHeader = request.headers.get("authorization");

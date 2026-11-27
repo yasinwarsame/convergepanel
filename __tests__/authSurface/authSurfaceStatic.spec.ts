@@ -118,6 +118,19 @@ describe("Credential → identity derivation is confined to a pinned allow-list"
       "lib/firebase/auth-helpers.ts",
     ]);
   });
+  test("each allowed file reads the __session cookie at exactly ONE pinned site (L-8 mutant H1: a file-level allow-list let a second read in a legacy helper through)", () => {
+    const RAW = /cookies(\(\))?\s*\.\s*get\s*\(\s*(["'`]__session["'`]|SESSION_COOKIE(_NAME)?)\s*\)/g;
+    const sites = (f: string) => code(SOURCES.find((s) => s.path === f)!.text).match(RAW)?.length ?? 0;
+    expect({
+      privileged: sites("lib/admin/privilegedAccess.ts"),
+      resolver: sites("lib/auth/resolveRequestIdentity.ts"),
+      authHelpers: sites("lib/firebase/auth-helpers.ts"),
+    }).toEqual({ privileged: 1, resolver: 1, authHelpers: 1 });
+    // auth-helpers' one read is the body of verifySessionCookie (which only hands it to verifySessionCookieValue).
+    const helpers = code(SOURCES.find((s) => s.path === "lib/firebase/auth-helpers.ts")!.text);
+    const fn = helpers.match(/export async function verifySessionCookie\([\s\S]*?\n\}/)?.[0] ?? "";
+    expect(fn.match(RAW)?.length ?? 0).toBe(1);
+  });
   test("next/headers (the only cookie API a Server Component has)", () => {
     // ZCA L-8: resolveServerComponentIdentity (its only importer) was deleted with the neutral-shell migration.
     expect(filesMatching(/from\s+["']next\/headers["']/)).toEqual([]);
