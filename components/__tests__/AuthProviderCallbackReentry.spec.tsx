@@ -79,7 +79,14 @@ jest.mock("firebase/auth", () => ({
   getIdTokenResult: async () => ({ claims: {} }),
   signOut: (...args: unknown[]) => (mockSignOut as any)(...args),
 }));
-jest.mock("@/lib/firebase/client", () => ({ auth: {} }));
+// R-S0-7: AuthProvider signs out only while Firebase still reports the failed User object, so the double exposes currentUser.
+jest.mock("@/lib/firebase/client", () => ({
+  auth: {
+    get currentUser() {
+      return fb.current;
+    },
+  },
+}));
 jest.mock("@/lib/utils/performance", () => ({ perf: { mark: () => undefined, measure: () => undefined, logMetrics: () => undefined } }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
 jest.mock("posthog-js", () => ({ __esModule: true, default: { reset: () => undefined } }));
