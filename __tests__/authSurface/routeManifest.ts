@@ -103,6 +103,7 @@ export const ROUTE_MANIFEST: readonly RouteEntry[] = [
   { path: "app/api/verify-claim/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/verify-video/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspace-invitations/[invitationId]/accept/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
+  { path: "app/api/workspaces/[workspaceId]/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/audit-events/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/governance-summary/route.ts", methods: ["GET"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },
   { path: "app/api/workspaces/[workspaceId]/invitations/[invitationId]/resend/route.ts", methods: ["POST"], cls: "shared-identity", enforcement: ["resolveRequestIdentity"] },

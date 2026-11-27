@@ -127,10 +127,13 @@ describe("capability derivation, read from the page gates", () => {
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/[^\n]*/g, "");
 
-  it("the Workspace Videos page derives canCreateVideo from research.create ALONE", () => {
-    const line = workspacePage.split("\n").find((l) => l.includes("canCreateVideo="));
+  it("the Workspace Videos page derives canCreateVideo from research.create ALONE (in TeamWorkspacePage since ZCA L-4)", () => {
+    expect(workspacePage).toMatch(/<TeamWorkspacePage\s+kind="videos"/);
+    const teamPage = readFileSync(join(process.cwd(), "components/workspace/TeamWorkspacePage.tsx"), "utf8");
+    const videosCase = teamPage.slice(teamPage.indexOf('case "videos":'), teamPage.indexOf('case "videoNew":'));
+    const line = videosCase.split("\n").find((l) => l.includes("canCreateVideo="));
     expect(line).toBeDefined();
-    expect(line).toContain('access.capabilities.includes("research.create")');
+    expect(line).toContain('has("research.create")');
     expect(line).not.toContain("research.organize");
   });
 

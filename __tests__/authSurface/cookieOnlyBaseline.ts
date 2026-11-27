@@ -45,6 +45,7 @@ export const COOKIE_AUTHORITY_AT_BASELINE: readonly string[] = [
   "GET app/api/user/workspace-review-runs/[runId]/route.ts", // added by ZCA L-3 (resolver-based; cookie-honouring until L-8)
   "GET app/api/user/workspace/route.ts",
   "GET app/api/user/workspace/runs/route.ts",
+  "GET app/api/workspaces/[workspaceId]/route.ts", // added by ZCA L-4 (resolver-based; cookie-honouring until L-8)
   "GET app/api/workspaces/[workspaceId]/audit-events/route.ts",
   "GET app/api/workspaces/[workspaceId]/governance-summary/route.ts",
   "GET app/api/workspaces/[workspaceId]/invitations/route.ts",

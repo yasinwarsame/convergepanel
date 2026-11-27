@@ -39,6 +39,19 @@ const FORBIDDEN = [
 ];
 
 const source = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
+
+/**
+ * ZCA L-4: a migrated page's server render only names its `kind`; its gate is the kind's row in
+ * TEAM_PAGE_REQUIRED_CAPABILITIES and its props are built in TeamWorkspacePage.tsx (read from source).
+ */
+const TEAM_PAGE = "components/workspace/TeamWorkspacePage.tsx";
+const delegatedKind = (rel: string): string | null => source(rel).match(/<TeamWorkspacePage\s+kind="([A-Za-z]+)"/)?.[1] ?? null;
+const kindGuard = (kind: string): string[] => {
+  const table = source(TEAM_PAGE).slice(source(TEAM_PAGE).indexOf("TEAM_PAGE_REQUIRED_CAPABILITIES"));
+  const row = table.match(new RegExp(`\\n\\s*${kind}: \\[([^\\]]*)\\]`));
+  if (!row) throw new Error(`no guard row for kind ${kind}`);
+  return [...row[1].matchAll(/"([a-z.]+)"/g)].map((m) => m[1]);
+};
 const codeOf = (rel: string) =>
   source(rel)
     .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -99,8 +112,11 @@ describe("R4-I2 Personal boundary (static)", () => {
   });
 
   it("the Server Component gate never hands the capability array to the client", () => {
-    const page = codeOf("app/workspace/team/[workspaceId]/claims/page.tsx");
-    expect(page).toContain('access.capabilities.includes("research.read")');
-    expect(page).not.toMatch(/capabilities=\{/);
+    const rel = "app/workspace/team/[workspaceId]/claims/page.tsx";
+    // ZCA L-4: migrated — the gate is the `claims` guard row; TeamWorkspacePage passes no array.
+    expect(delegatedKind(rel)).toBe("claims");
+    expect(kindGuard("claims")).toEqual(["research.read"]);
+    expect(codeOf(rel)).not.toMatch(/capabilities=\{/);
+    expect(codeOf(TEAM_PAGE)).not.toMatch(/capabilities=\{/);
   });
 });

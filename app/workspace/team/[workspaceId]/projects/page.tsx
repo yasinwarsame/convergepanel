@@ -7,48 +7,19 @@
  * defensive, future-proofing check, not a role restriction in practice).
  * This page's own gate is UX only — the Projects list/create APIs
  * independently re-authorize every request.
+ *
+ * ZCA L-4: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie or
+ * workspace data; it names the page kind and passes only URL params (and identity-free values). The
+ * gate above now runs, unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access;
+ * every denial the same 404) and `TeamWorkspacePage` (the required capabilities → the same 404).
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import TeamProjectsShell from "@/components/workspace/projects/TeamProjectsShell";
-import { projectAssignmentUiEnabledFor } from "@/lib/workspaces/projectAssignmentUiAdmission";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamProjectsPage({ params }: { params: { workspaceId: string } }) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    // Distinct from every concealed-denial case below — a transient
-    // Firestore/infra failure must never be indistinguishable from a
-    // genuine "doesn't exist / not yours". See
-    // `app/workspace/projects/[projectId]/page.tsx`'s own doc comment for
-    // the established precedent this mirrors. Caught by the app's
-    // existing global `app/error.tsx` boundary.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("projects.read")) {
-    notFound();
-  }
-
+export default function TeamProjectsPage({ params }: { params: { workspaceId: string } }) {
   return (
-    <TeamProjectsShell
-      workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      canCreateProject={access.capabilities.includes("projects.create")}
-      canManageProjects={access.capabilities.includes("projects.manage")}
-      canReadMembers={access.capabilities.includes("members.read")}
-      canReadAudit={access.capabilities.includes("audit.read")}
-      assignmentUiEnabled={projectAssignmentUiEnabledFor(identity.uid)}
-    />
+    <TeamWorkspacePage kind="projects" workspaceId={params.workspaceId} />
   );
 }

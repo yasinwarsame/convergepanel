@@ -4,44 +4,24 @@
  * server-side via `resolveWorkspaceAccess()` + `audit.read` BEFORE any UI
  * renders, never a client-side flash-then-hide. This page's own gate is
  * UX only — the audit-events API independently re-authorizes every request.
+ *
+ * ZCA L-4: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie or
+ * workspace data; it names the page kind and passes only URL params (and identity-free values). The
+ * gate above now runs, unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access;
+ * every denial the same 404) and `TeamWorkspacePage` (the required capabilities → the same 404).
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import WorkspaceAuditLogShell from "@/components/workspace/WorkspaceAuditLogShell";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
+// Static, identity-free deployment flags (D-4 §1: allowed in the server render).
 import { WORKSPACE_GOVERNANCE_SUMMARY_ENABLED, WORKSPACE_REVIEW_INTEGRITY_METRICS_ENABLED } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkspaceAuditLogPage({ params }: { params: { workspaceId: string } }) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    // Distinct from every concealed-denial case below — a transient
-    // Firestore/infra failure must never be indistinguishable from a
-    // genuine "doesn't exist / not yours". See
-    // `app/workspace/projects/[projectId]/page.tsx`'s own doc comment for
-    // the established precedent this mirrors. Caught by the app's
-    // existing global `app/error.tsx` boundary.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("audit.read")) {
-    notFound();
-  }
-
+export default function WorkspaceAuditLogPage({ params }: { params: { workspaceId: string } }) {
   return (
-    <WorkspaceAuditLogShell
+    <TeamWorkspacePage
+      kind="audit"
       workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      canReadMembers={access.capabilities.includes("members.read")}
       showGovernanceSummary={WORKSPACE_GOVERNANCE_SUMMARY_ENABLED}
       showReviewIntegrityMetrics={WORKSPACE_REVIEW_INTEGRITY_METRICS_ENABLED}
     />

@@ -49,6 +49,19 @@ const FORBIDDEN = [
 const source = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
 /**
+ * ZCA L-4: a migrated page's server render only names its `kind`; its gate is the kind's row in
+ * TEAM_PAGE_REQUIRED_CAPABILITIES and its props are built in TeamWorkspacePage.tsx (read from source).
+ */
+const TEAM_PAGE = "components/workspace/TeamWorkspacePage.tsx";
+const delegatedKind = (rel: string): string | null => source(rel).match(/<TeamWorkspacePage\s+kind="([A-Za-z]+)"/)?.[1] ?? null;
+const kindGuard = (kind: string): string[] => {
+  const table = source(TEAM_PAGE).slice(source(TEAM_PAGE).indexOf("TEAM_PAGE_REQUIRED_CAPABILITIES"));
+  const row = table.match(new RegExp(`\\n\\s*${kind}: \\[([^\\]]*)\\]`));
+  if (!row) throw new Error(`no guard row for kind ${kind}`);
+  return [...row[1].matchAll(/"([a-z.]+)"/g)].map((m) => m[1]);
+};
+
+/**
  * The guard applies to CODE, not prose. These files deliberately document the
  * Personal stack they must never touch ("never calls `/api/user/...`"), and a
  * comment naming a forbidden symbol is the boundary being explained, not
@@ -112,6 +125,13 @@ describe("R4-I1 Personal boundary (static)", () => {
 
   it("the Server Component gates never hand the capability array to the client", () => {
     for (const rel of I1_FILES.filter((f) => f.startsWith("app/"))) {
+      const kind = delegatedKind(rel);
+      if (kind !== null) {
+        // migrated neutral shell: the gate is the kind's guard row; TeamWorkspacePage passes no array
+        expect({ rel, guard: kindGuard(kind) }).toEqual({ rel, guard: ["research.read"] });
+        expect(codeOf(TEAM_PAGE)).not.toMatch(/capabilities=\{/);
+        continue;
+      }
       const text = codeOf(rel);
       expect(text).toContain('access.capabilities.includes("research.read")');
       // Only the single `audit.read` presentation hint crosses the boundary.
