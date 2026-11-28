@@ -12,10 +12,16 @@
  * route's identity layer and the comparison of (1) and (2) would be vacuous.
  *
  * Network edges only are stubbed: the firebase-admin BaseAuth prototype is REAL (so the
- * real `verifySessionCookie` / `verifyIdToken` code paths, including checkRevoked, run);
- * the JWT verifiers decode the synthetic token's payload and count their calls; `getUser`
- * serves account A as a valid, enabled, verified user. Firestore is a recording fake with
- * NO data. Stripe and global fetch refuse, so no route can reach an external service.
+ * real `verifyIdToken` code path, including checkRevoked, runs — and so would the SDK's
+ * session-cookie path, if anything called it); the JWT verifiers decode the synthetic token's
+ * payload, reject a token whose signature segment is `bad-signature` with the SDK's own
+ * fixed text, reject an expired token with `auth/id-token-expired`, and count their calls;
+ * `getUser` serves every account as a valid, enabled, verified user EXCEPT the revoked account
+ * (its `tokensValidAfterTime` postdates the token's `auth_time`) and the disabled account, and
+ * records the uid of every live read. Firestore is a recording fake with NO data. Stripe and
+ * global fetch refuse, so no route can reach an external service.
+ *
+ * ZCA P3 R2: the same harness drives the behavioural differential (differentialOracle.ts).
  */
 import { NextRequest } from "next/server";
 
@@ -24,6 +30,8 @@ export const harness = {
   cookieVerifies: 0,
   idTokenVerifies: 0,
   getUserCalls: 0,
+  /** The uid of every live Auth read, in order (R2 L-3: "uid used and live-read count"). */
+  liveReads: [] as string[],
   externalCalls: [] as string[],
 };
 
@@ -32,37 +40,54 @@ export function resetHarness(): void {
   harness.cookieVerifies = 0;
   harness.idTokenVerifies = 0;
   harness.getUserCalls = 0;
+  harness.liveReads.length = 0;
   harness.externalCalls.length = 0;
 }
 
 const NOW = Math.floor(Date.now() / 1000);
 const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
-function jwt(sub: string, iss: string): string {
+export const BAD_SIGNATURE = "bad-signature";
+export function jwt(sub: string, iss: string, over: Record<string, unknown> = {}, sig = "sig"): string {
   return [
     b64({ alg: "RS256", kid: "k1", typ: "JWT" }),
-    b64({ sub, aud: "test-proj", iss, iat: NOW - 60, exp: NOW + 3000, auth_time: NOW - 600, email: `${sub}@example.test`, email_verified: true }),
-    "sig",
+    b64({ sub, aud: "test-proj", iss, iat: NOW - 60, exp: NOW + 3000, auth_time: NOW - 600, email: `${sub}@example.test`, email_verified: true, ...over }),
+    sig,
   ].join(".");
 }
+export const ID_TOKEN_ISSUER = "https://securetoken.google.com/test-proj";
+export const SESSION_COOKIE_ISSUER = "https://session.firebase.google.com/test-proj";
 export const A_UID = "zca-account-a";
-export const A_COOKIE = jwt(A_UID, "https://session.firebase.google.com/test-proj");
-export const A_BEARER = jwt(A_UID, "https://securetoken.google.com/test-proj");
+export const B_UID = "zca-account-b";
+/** getUser reports tokensValidAfterTime AFTER every token's auth_time for this account. */
+export const REVOKED_UID = "zca-account-revoked";
+/** getUser reports disabled: true for this account. */
+export const DISABLED_UID = "zca-account-disabled";
+export const A_COOKIE = jwt(A_UID, SESSION_COOKIE_ISSUER);
+export const A_BEARER = jwt(A_UID, ID_TOKEN_ISSUER);
 
 /** Factory for `jest.mock("@/lib/firebase/admin", ...)`. */
 export function firebaseAdminMock(): Record<string, unknown> {
   const proto = Object.getPrototypeOf(require("firebase-admin/auth").Auth.prototype);
   const auth = Object.create(proto);
-  const decode = (t: string) => {
-    const part = String(t).split(".")[1];
-    if (!part) throw Object.assign(new Error("Decoding failed."), { code: "auth/argument-error" });
-    const p = JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
+  const decode = (t: string, jwtName: string) => {
+    const parts = String(t).split(".");
+    if (!parts[1]) throw Object.assign(new Error(`Decoding ${jwtName} failed.`), { code: "auth/argument-error" });
+    if (parts[2] === BAD_SIGNATURE) {
+      throw Object.assign(new Error(`${jwtName} has invalid signature. See the documentation for details.`), { code: "auth/argument-error" });
+    }
+    const p = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    if (typeof p.exp === "number" && p.exp <= Math.floor(Date.now() / 1000)) {
+      throw Object.assign(new Error(`${jwtName} has expired.`), { code: "auth/id-token-expired" });
+    }
     return { ...p, uid: p.sub };
   };
-  auth.idTokenVerifier = { verifyJWT: async (t: string) => { harness.idTokenVerifies += 1; return decode(t); } };
-  auth.sessionCookieVerifier = { verifyJWT: async (t: string) => { harness.cookieVerifies += 1; return decode(t); } };
+  auth.idTokenVerifier = { verifyJWT: async (t: string) => { harness.idTokenVerifies += 1; return decode(t, "Firebase ID token"); } };
+  auth.sessionCookieVerifier = { verifyJWT: async (t: string) => { harness.cookieVerifies += 1; return decode(t, "Firebase session cookie"); } };
   auth.getUser = async (uid: string) => {
     harness.getUserCalls += 1;
-    return { uid, disabled: false, email: `${uid}@example.test`, emailVerified: true, customClaims: {}, tokensValidAfterTime: new Date((NOW - 3600) * 1000).toUTCString(), metadata: {}, providerData: [] };
+    harness.liveReads.push(uid);
+    const validAfter = uid === REVOKED_UID ? NOW - 60 : NOW - 3600;
+    return { uid, disabled: uid === DISABLED_UID, email: `${uid}@example.test`, emailVerified: true, customClaims: {}, tokensValidAfterTime: new Date(validAfter * 1000).toUTCString(), metadata: {}, providerData: [] };
   };
   const emptySnap = (path: string) => ({ exists: false, id: path.split("/").pop(), ref: docRef(path), data: () => undefined, get: () => undefined, createTime: undefined, updateTime: undefined });
   const emptyQuery = () => ({ empty: true, size: 0, docs: [] as unknown[], forEach: () => undefined, docChanges: () => [] });
@@ -157,7 +182,7 @@ export function buildRequest(url: string, method: string, credential: Credential
   });
 }
 
-export type Observation = { status: number; body: string; setCookie: string | null; touches: string[]; cookieVerifies: number; idTokenVerifies: number; externalCalls: string[] };
+export type Observation = { status: number; body: string; setCookie: string | null; touches: string[]; cookieVerifies: number; idTokenVerifies: number; liveReads: string[]; externalCalls: string[] };
 
 /** Bounded: a handler that never settles is reported, not waited on forever. */
 export async function observe(call: () => Promise<Response>): Promise<Observation> {
@@ -169,10 +194,10 @@ export async function observe(call: () => Promise<Response>): Promise<Observatio
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 15_000)),
     ]);
   } catch (e) {
-    return { status: -1, body: `threw ${(e as Error)?.name}: ${(e as Error)?.message}`, setCookie: null, touches: [...harness.touches], cookieVerifies: harness.cookieVerifies, idTokenVerifies: harness.idTokenVerifies, externalCalls: [...harness.externalCalls] };
+    return { status: -1, body: `threw ${(e as Error)?.name}: ${(e as Error)?.message}`, setCookie: null, touches: [...harness.touches], cookieVerifies: harness.cookieVerifies, idTokenVerifies: harness.idTokenVerifies, liveReads: [...harness.liveReads], externalCalls: [...harness.externalCalls] };
   }
   if (res === "timeout") {
-    return { status: -2, body: "timeout", setCookie: null, touches: [...harness.touches], cookieVerifies: harness.cookieVerifies, idTokenVerifies: harness.idTokenVerifies, externalCalls: [...harness.externalCalls] };
+    return { status: -2, body: "timeout", setCookie: null, touches: [...harness.touches], cookieVerifies: harness.cookieVerifies, idTokenVerifies: harness.idTokenVerifies, liveReads: [...harness.liveReads], externalCalls: [...harness.externalCalls] };
   }
   const body = await res.text().catch(() => "<unreadable>");
   return {
@@ -183,6 +208,20 @@ export async function observe(call: () => Promise<Response>): Promise<Observatio
     touches: [...harness.touches],
     cookieVerifies: harness.cookieVerifies,
     idTokenVerifies: harness.idTokenVerifies,
+    liveReads: [...harness.liveReads],
     externalCalls: [...harness.externalCalls],
   };
+}
+
+/** R2 L-3: a request with an independently chosen raw Authorization value and raw Cookie header. */
+export function buildDifferentialRequest(url: string, method: string, authorization: string | null, cookie: string | null, body?: unknown): NextRequest {
+  const headers: Record<string, string> = { "content-type": "application/json", "user-agent": "zca-harness", origin: "http://localhost:3000" };
+  if (authorization !== null) headers.authorization = authorization;
+  if (cookie !== null) headers.cookie = cookie;
+  const hasBody = !["GET", "HEAD", "DELETE"].includes(method);
+  return new NextRequest(new URL(url, "http://localhost:3000"), {
+    method,
+    headers,
+    body: hasBody ? JSON.stringify(body ?? {}) : undefined,
+  });
 }

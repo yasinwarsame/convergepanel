@@ -18,8 +18,8 @@ import { BASELINE_COOKIE_AUTHORITY } from "./cookieOnlyBaseline";
 const NO_IDENTITY_CLASSES = new Set(["signature", "telemetry-proxy"]);
 /** Methods of the session route that by contract do not resolve identity from a bearer. */
 const NO_BEARER_IDENTITY = new Set([
-  "POST app/api/auth/session/route.ts", // mints from an ID token in the BODY
-  "DELETE app/api/auth/session/route.ts", // only removes authority
+  // ZCA P3 R2: the POST handshake verifies the bearer header, so it is subject to the sensitivity control now.
+  "DELETE app/api/auth/session/route.ts", // an idempotent expiry; resolves no identity
 ]);
 /**
  * Inputs a route validates BEFORE identity. Without them both sides of the comparison would be
@@ -65,7 +65,7 @@ export function defineCookieOnlyOracle(index: number, count: number): void {
       } catch (e) {
         // A module that cannot load is recorded per route (status -3): its sensitivity test then
         // fails by name instead of the whole shard aborting.
-        const failed: Observation = { status: -3, body: `load failed: ${(e as Error)?.message?.split("\n")[0]}`, setCookie: null, touches: [], cookieVerifies: 0, idTokenVerifies: 0, externalCalls: [] };
+        const failed: Observation = { status: -3, body: `load failed: ${(e as Error)?.message?.split("\n")[0]}`, setCookie: null, touches: [], cookieVerifies: 0, idTokenVerifies: 0, liveReads: [], externalCalls: [] };
         results.set(keyOf(method, entry.path), { none: failed, cookieA: failed, bearerA: failed });
         continue;
       }

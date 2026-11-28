@@ -16,7 +16,8 @@
  *   governance       resolveGovernanceRequestUser (lib/governance/authCheck.ts) -> authenticatePrivilegedPrincipal
  *                    (governance/policy also gates POST with requirePrivilegedAccess("GOVERNANCE_ADMIN"))
  *   privileged       requirePrivilegedAccess(tier) (lib/admin/privilegedAccess.ts); `tiers` per method
- *   session          /api/auth/session (POST mints from an ID token; DELETE clears). GET was removed in ZCA L-2.
+ *   session          /api/auth/session (POST verifies the ID token — a handshake that never mints, ZCA P3 R2; DELETE is an
+ *                    idempotent expiry). GET was removed in ZCA L-2.
  *                    It imports `isVerifierUnavailableCode` from resolveRequestIdentity (outage classification only).
  *   signature        authenticated by a provider signature only; resolves no user identity
  *   telemetry-proxy  first-party analytics proxies; credentials are stripped in middleware; no identity
