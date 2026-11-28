@@ -1,22 +1,25 @@
 /**
- * Auth Lifecycle Hardening, Step 6.14 — POST/DELETE/GET
- * /api/auth/session. This is the only place a client ID token is ever
- * exchanged for the `__session` cookie, and the only place it's cleared.
+ * ZCA P3 R2 — `POST /api/auth/session` is a VERIFICATION HANDSHAKE ("verify, don't mint"); `DELETE` is an
+ * idempotent expiry; there is no `GET`.
+ *
+ * Converted from the Step 6.14 mint spec: the cookie-creation cases were deleted (nothing is minted), the
+ * verification cases were kept, and every response is now asserted to carry ONLY the `__session` expiry.
+ * New: credential precedence (header / body), the origin rule, Content-Type, and a sweep proving that no
+ * request shape ever yields a non-expiry Set-Cookie or touches any Admin Auth member but `verifyIdToken`.
  */
 
 const mockVerifyIdToken = jest.fn();
-const mockCreateSessionCookie = jest.fn();
-const mockVerifySessionCookieOnAdmin = jest.fn();
+let mockAdminAvailable = true;
 
-jest.mock("@/lib/firebase/admin", () => ({
-  get adminAuth() {
-    return {
-      verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
-      createSessionCookie: (...args: unknown[]) => mockCreateSessionCookie(...args),
-      verifySessionCookie: (...args: unknown[]) => mockVerifySessionCookieOnAdmin(...args),
-    };
-  },
-}));
+jest.mock("@/lib/firebase/admin", () => {
+  const h = require("./handshakeHarness");
+  const auth = h.strictAdminAuth((...args: unknown[]) => mockVerifyIdToken(...args));
+  return {
+    get adminAuth() {
+      return mockAdminAvailable ? auth : null;
+    },
+  };
+});
 
 const mockLoggerError = jest.fn();
 jest.mock("@/lib/logger", () => ({
@@ -31,228 +34,387 @@ jest.mock("@/lib/authTelemetry", () => ({
 import { NextRequest } from "next/server";
 import * as sessionRouteModule from "@/app/api/auth/session/route";
 import { POST, DELETE } from "@/app/api/auth/session/route";
+import { expectExpiryOnly, forbiddenAdminAccess, handshakeRequest, setCookiesOf, EXPIRY_SET_COOKIE } from "./handshakeHarness";
 
+/** The legacy shape: body token only (an old open tab). */
 function postRequest(body: unknown): NextRequest {
-  return new NextRequest("http://localhost/api/auth/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return handshakeRequest({ rawBody: JSON.stringify(body) });
 }
+
+const ENV_KEYS = ["VERCEL_URL", "VERCEL_BRANCH_URL"] as const;
+const envSnapshot: Record<string, string | undefined> = {};
+beforeAll(() => {
+  for (const k of ENV_KEYS) envSnapshot[k] = process.env[k];
+});
+afterAll(() => {
+  for (const k of ENV_KEYS) {
+    if (envSnapshot[k] === undefined) delete process.env[k];
+    else process.env[k] = envSnapshot[k];
+  }
+});
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockVerifyIdToken.mockReset();
+  mockAdminAvailable = true;
+  forbiddenAdminAccess.length = 0;
+  for (const k of ENV_KEYS) delete process.env[k];
+});
+afterEach(() => {
+  // No request shape may ever reach any Admin Auth member other than verifyIdToken (no minting).
+  expect(forbiddenAdminAccess).toEqual([]);
 });
 
-describe("POST /api/auth/session", () => {
-  it("rejects a missing idToken", async () => {
-    const res = await POST(postRequest({}));
-    expect(res.status).toBe(400);
-    expect(mockVerifyIdToken).not.toHaveBeenCalled();
-  });
-
-  it("rejects a malformed idToken (non-string)", async () => {
-    const res = await POST(postRequest({ idToken: 12345 }));
-    expect(res.status).toBe(400);
-  });
-
-  it("rejects an invalid/expired token with 401, and never leaks the raw verification error", async () => {
-    mockVerifyIdToken.mockRejectedValue(new Error("Firebase ID token has expired. Get a fresh token and try again."));
-    const res = await POST(postRequest({ idToken: "expired-token" }));
-    expect(res.status).toBe(401);
-    const body = await res.json();
-    expect(body.error).toBe("Invalid or expired token");
-    expect(JSON.stringify(body)).not.toMatch(/expired\. Get a fresh token/);
-  });
-
-  it("on a valid token, creates a session cookie and returns { authenticated: true, uid } — uid is server-derived, never the client's own assertion", async () => {
+describe("POST — verification, never minting", () => {
+  it("header-only (new client): verifies WITH checkRevoked = true and answers { authenticated, uid } — uid is server-derived", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
-    mockCreateSessionCookie.mockResolvedValue("signed-cookie-value");
+    const res = await POST(handshakeRequest({ bearer: "valid-token" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ authenticated: true, uid: "user-1" });
+    expect(mockVerifyIdToken.mock.calls).toEqual([["valid-token", true]]);
+    expectExpiryOnly(res);
+    expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_succeeded", { route: "POST /api/auth/session" });
+  });
+
+  it("body-only (old open tab, rollback shape): the same answer, still no cookie minted", async () => {
+    mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
     const res = await POST(postRequest({ idToken: "valid-token" }));
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ authenticated: true, uid: "user-1" });
+    expect(await res.json()).toEqual({ authenticated: true, uid: "user-1" });
+    expect(mockVerifyIdToken.mock.calls).toEqual([["valid-token", true]]);
+    expectExpiryOnly(res);
   });
 
-  it("sets the cookie with httpOnly/secure/sameSite=lax/path=/ and a 5-day maxAge", async () => {
+  it("header AND body, byte-equal (the current client, R1 L3): verified once", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
-    mockCreateSessionCookie.mockResolvedValue("signed-cookie-value");
-    const res = await POST(postRequest({ idToken: "valid-token" }));
-    const setCookie = res.cookies.get("__session");
-    expect(setCookie).toBeDefined();
-    expect(setCookie?.value).toBe("signed-cookie-value");
-    expect(setCookie?.httpOnly).toBe(true);
-    expect(setCookie?.secure).toBe(true);
-    expect(setCookie?.sameSite).toBe("lax");
-    expect(setCookie?.path).toBe("/");
-    expect(setCookie?.maxAge).toBe(60 * 60 * 24 * 5);
+    const res = await POST(handshakeRequest({ bearer: "same-token", bodyToken: "same-token" }));
+    expect(res.status).toBe(200);
+    expect(mockVerifyIdToken.mock.calls).toEqual([["same-token", true]]);
+    expectExpiryOnly(res);
   });
 
-  it("sets Cache-Control: no-store", async () => {
-    mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
-    mockCreateSessionCookie.mockResolvedValue("signed-cookie-value");
-    const res = await POST(postRequest({ idToken: "valid-token" }));
-    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  it("ignores a client-supplied uid in the body entirely", async () => {
+    mockVerifyIdToken.mockResolvedValue({ uid: "server-verified-uid" });
+    const res = await POST(postRequest({ idToken: "valid-token", uid: "client-asserted-uid" }));
+    expect((await res.json()).uid).toBe("server-verified-uid");
+  });
+});
+
+describe("POST — credential precedence (R1 L2)", () => {
+  it("header and body DIFFER → 401 credential_conflict, nothing verified", async () => {
+    const res = await POST(handshakeRequest({ bearer: "token-a", bodyToken: "token-b" }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Invalid or expired token", code: "credential_conflict" });
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
+    expectExpiryOnly(res);
   });
 
-  it("returns 500 without leaking details when session cookie creation fails", async () => {
-    mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
-    mockCreateSessionCookie.mockRejectedValue(new Error("internal Firebase Admin detail"));
-    const res = await POST(postRequest({ idToken: "valid-token" }));
-    expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(JSON.stringify(body)).not.toMatch(/internal Firebase Admin detail/);
+  it("header and body differ only in case → still a conflict (byte-equal, not case-insensitive)", async () => {
+    const res = await POST(handshakeRequest({ bearer: "Token-A", bodyToken: "token-a" }));
+    expect(res.status).toBe(401);
+    expect((await res.json()).code).toBe("credential_conflict");
   });
 
-  describe("SESSREV: the mint refuses revoked / disabled identities and fails closed on outages", () => {
-    const fbErr = (code: string, message = "firebase detail") => Object.assign(new Error(message), { code });
-
-    function expectNoCookie(res: Response & { cookies?: { get(n: string): unknown } }) {
-      expect(mockCreateSessionCookie).not.toHaveBeenCalled();
-      expect((res as unknown as { cookies: { get(n: string): unknown } }).cookies.get("__session")).toBeUndefined();
-      expect(res.headers.get("set-cookie")).toBeNull();
-      expect(res.headers.get("Cache-Control")).toBe("no-store");
-    }
-
-    it("verifies the ID token WITH checkRevoked = true (the SDK's live disabled + tokensValidAfterTime check)", async () => {
+  it.each([["Basic dXNlcjpwYXNz"], ["Bearer"], ["Bearer "], ["Bearer a b"], [""], ["token-without-scheme"], ["Bearer tok"]])(
+    "a MALFORMED Authorization %p → 401 malformed_authorization, and the valid body token is NOT a fallback",
+    async (authorization) => {
       mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
-      mockCreateSessionCookie.mockResolvedValue("signed-cookie-value");
-      const res = await POST(postRequest({ idToken: "valid-token" }));
-      expect(res.status).toBe(200);
-      expect(mockVerifyIdToken).toHaveBeenCalledTimes(1);
-      expect(mockVerifyIdToken).toHaveBeenCalledWith("valid-token", true);
-      expect(mockCreateSessionCookie).toHaveBeenCalledWith("valid-token", { expiresIn: 60 * 60 * 24 * 5 * 1000 });
-    });
-
-    it("revoked token (auth/id-token-revoked) → 401, no cookie minted, generic body", async () => {
-      mockVerifyIdToken.mockRejectedValue(fbErr("auth/id-token-revoked", "The Firebase ID token has been revoked."));
-      const res = await POST(postRequest({ idToken: "revoked-token" }));
+      const res = await POST(handshakeRequest({ authorization, bodyToken: "valid-token" }));
       expect(res.status).toBe(401);
-      expect(await res.json()).toEqual({ error: "Invalid or expired token" });
-      expectNoCookie(res);
-      expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "revoked_token" });
-    });
+      expect(await res.json()).toEqual({ error: "Invalid or expired token", code: "malformed_authorization" });
+      expect(mockVerifyIdToken).not.toHaveBeenCalled();
+      expectExpiryOnly(res);
+    }
+  );
 
-    it("disabled account (auth/user-disabled) → 401, no cookie minted, account state not disclosed", async () => {
-      mockVerifyIdToken.mockRejectedValue(fbErr("auth/user-disabled", "The user record is disabled."));
-      const res = await POST(postRequest({ idToken: "disabled-user-token" }));
-      expect(res.status).toBe(401);
-      const body = await res.json();
-      expect(body).toEqual({ error: "Invalid or expired token" });
-      expect(JSON.stringify(body)).not.toMatch(/disabled/i);
-      expectNoCookie(res);
-      expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "account_disabled" });
-    });
+  it("the Bearer scheme is case-insensitive", async () => {
+    mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
+    expect((await POST(handshakeRequest({ authorization: "bearer tok" }))).status).toBe(200);
+    expect((await POST(handshakeRequest({ authorization: "BEARER   tok" }))).status).toBe(200);
+  });
 
-    it("deleted account (auth/user-not-found from the checkRevoked lookup) → 401, no cookie", async () => {
-      mockVerifyIdToken.mockRejectedValue(fbErr("auth/user-not-found"));
-      const res = await POST(postRequest({ idToken: "t" }));
-      expect(res.status).toBe(401);
-      expectNoCookie(res);
-    });
+  it("neither header nor body token → 400, nothing verified", async () => {
+    const res = await POST(handshakeRequest({}));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "ID token is required" });
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
+    expectExpiryOnly(res);
+  });
 
-    it.each(["auth/internal-error", "app/internal-error", "app/network-error", "app/network-timeout"])(
-      "transient verifier failure %s → 503 (never 200, never a cookie, never 401)",
-      async (code) => {
-        mockVerifyIdToken.mockRejectedValue(fbErr(code, "upstream detail xyz"));
-        const res = await POST(postRequest({ idToken: "t" }));
-        expect(res.status).toBe(503);
-        const body = await res.json();
-        expect(body).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
-        expect(JSON.stringify(body)).not.toMatch(/upstream detail/);
-        expectNoCookie(res);
-        expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
-        expect(mockLoggerError).toHaveBeenCalledWith(expect.any(String), { errorCode: code });
+  it.each([[{}], [{ idToken: 12345 }], [{ idToken: "" }], [{ idToken: null }], [null], [[1, 2]]])("body %p without a usable token → 400", async (body) => {
+    const res = await POST(postRequest(body));
+    expect(res.status).toBe(400);
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
+    expectExpiryOnly(res);
+  });
+
+  it("a non-JSON body → 400 Invalid request body", async () => {
+    const res = await POST(handshakeRequest({ rawBody: "{not json" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid request body" });
+    expectExpiryOnly(res);
+  });
+
+  it.each([["text/plain"], ["application/x-www-form-urlencoded"], ["multipart/form-data; boundary=x"], [null]])(
+    "a body token with Content-Type %p → 415, nothing verified (a body token requires application/json)",
+    async (contentType) => {
+      const res = await POST(handshakeRequest({ bodyToken: "valid-token", contentType }));
+      expect(res.status).toBe(415);
+      expect(await res.json()).toEqual({ error: "Content-Type must be application/json", code: "unsupported_media_type" });
+      expect(mockVerifyIdToken).not.toHaveBeenCalled();
+      expectExpiryOnly(res);
+    }
+  );
+
+  it("Content-Type application/json with a charset is JSON; a header-only request needs no Content-Type", async () => {
+    mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
+    expect((await POST(handshakeRequest({ bodyToken: "t", contentType: "application/json; charset=utf-8" }))).status).toBe(200);
+    expect((await POST(handshakeRequest({ bearer: "t", contentType: null }))).status).toBe(200);
+  });
+});
+
+describe("POST — the origin rule (R1 L1 + R2 L-2)", () => {
+  async function expectCrossOrigin(req: NextRequest) {
+    const res = await POST(req);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Cross-origin request refused", code: "cross_origin" });
+    expectExpiryOnly(res);
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
+    expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "cross_origin" });
+  }
+  async function expectAllowed(req: NextRequest) {
+    mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expectExpiryOnly(res);
+  }
+
+  it("same origin + Sec-Fetch-Site same-origin → allowed", async () => {
+    await expectAllowed(handshakeRequest({ bearer: "t" }));
+  });
+
+  it("Origin: null (opaque origin) → 403, whatever Sec-Fetch-Site says", async () => {
+    await expectCrossOrigin(handshakeRequest({ bearer: "t", origin: "null" }));
+    mockVerifyIdToken.mockClear();
+    await expectCrossOrigin(handshakeRequest({ bearer: "t", origin: "null", secFetchSite: null }));
+  });
+
+  it.each([["https://evil.example"], ["http://localhost:3001"], ["https://localhost:3000"], ["http://localhost:3000/"], ["HTTP://LOCALHOST:3000"], ["http://localhost:3000.evil.example"]])(
+    "a cross-site / non-exact Origin %p → 403",
+    async (origin) => {
+      await expectCrossOrigin(handshakeRequest({ bearer: "t", origin, secFetchSite: null }));
+    }
+  );
+
+  it.each([["cross-site"], ["same-site"], ["none"], ["bogus"]])("Sec-Fetch-Site %p → 403 even with the exact Origin", async (site) => {
+    await expectCrossOrigin(handshakeRequest({ bearer: "t", secFetchSite: site }));
+  });
+
+  it("missing Origin (defined behaviour): allowed when Sec-Fetch-Site is same-origin or absent; 403 when it says cross-site", async () => {
+    await expectAllowed(handshakeRequest({ bearer: "t", origin: null }));
+    await expectAllowed(handshakeRequest({ bearer: "t", origin: null, secFetchSite: null }));
+    mockVerifyIdToken.mockClear();
+    await expectCrossOrigin(handshakeRequest({ bearer: "t", origin: null, secFetchSite: "cross-site" }));
+  });
+
+  it("the pinned Production aliases are allowed for each other (apex, www, the vercel.app alias)", async () => {
+    const hosts = ["https://convergepanel.com", "https://www.convergepanel.com", "https://convergepanel.vercel.app"];
+    for (const addressed of hosts) {
+      for (const origin of hosts) {
+        await expectAllowed(handshakeRequest({ url: `${addressed}/api/auth/session`, bearer: "t", origin }));
       }
+    }
+  });
+
+  it("an unpinned look-alike of a Production host → 403", async () => {
+    for (const origin of ["https://convergepanel.com.evil.example", "https://evilconvergepanel.com", "https://convergepanel-evil.vercel.app", "http://convergepanel.com"]) {
+      await expectCrossOrigin(handshakeRequest({ url: "https://convergepanel.com/api/auth/session", bearer: "t", origin }));
+      mockVerifyIdToken.mockClear();
+      mockLogAuthSessionEvent.mockClear();
+    }
+  });
+
+  it("Preview: the deployment's own VERCEL_URL and VERCEL_BRANCH_URL origins are allowed ONLY when the platform sets them", async () => {
+    const req = (origin: string) => handshakeRequest({ url: "https://cp-abc123-team.vercel.app/api/auth/session", bearer: "t", origin });
+    await expectCrossOrigin(req("https://cp-git-feature-team.vercel.app"));
+    mockLogAuthSessionEvent.mockClear();
+    process.env.VERCEL_BRANCH_URL = "cp-git-feature-team.vercel.app";
+    await expectAllowed(req("https://cp-git-feature-team.vercel.app"));
+    process.env.VERCEL_URL = "cp-other999-team.vercel.app";
+    await expectAllowed(req("https://cp-other999-team.vercel.app"));
+    // A host value that is not a bare host name is never turned into an allowed origin.
+    process.env.VERCEL_URL = "evil.example/path";
+    delete process.env.VERCEL_BRANCH_URL;
+    mockVerifyIdToken.mockClear();
+    await expectCrossOrigin(req("https://evil.example"));
+  });
+
+  it("spoofed Host / X-Forwarded-Host / X-Forwarded-Proto are NOT an authority source for the allowed set", async () => {
+    await expectCrossOrigin(
+      handshakeRequest({
+        bearer: "t",
+        origin: "https://evil.example",
+        secFetchSite: null,
+        headers: { host: "evil.example", "x-forwarded-host": "evil.example", "x-forwarded-proto": "https", forwarded: "host=evil.example;proto=https" },
+      })
     );
+  });
 
-    it.each([
-      ["no code", new Error("boom")],
-      ["non-string code", Object.assign(new Error("boom"), { code: 503 })],
-      ["a thrown non-Error", "string-rejection"],
-      ["near-miss transient code", fbErr("auth/internal-error ")],
-    ])("an unclassified failure (%s) is a credential failure → 401, no cookie", async (_label, err) => {
-      mockVerifyIdToken.mockRejectedValue(err);
-      const res = await POST(postRequest({ idToken: "t" }));
-      expect(res.status).toBe(401);
-      expectNoCookie(res);
-    });
+  it("the origin check runs BEFORE the body is read and before any verification", async () => {
+    const res = await POST(handshakeRequest({ authorization: "Basic x", rawBody: "{not json", origin: "https://evil.example" }));
+    expect(res.status).toBe(403);
+  });
+});
 
-    it.each([[{}], [{ uid: "" }], [{ uid: 42 }], [null]])("a verified-but-uidless decode (%p) → 401, no cookie", async (decoded) => {
-      mockVerifyIdToken.mockResolvedValue(decoded);
-      const res = await POST(postRequest({ idToken: "t" }));
-      expect(res.status).toBe(401);
-      expectNoCookie(res);
-    });
+describe("POST — SESSREV: refuses revoked / disabled identities and fails closed on outages", () => {
+  const fbErr = (code: string, message = "firebase detail") => Object.assign(new Error(message), { code });
+
+  it("revoked token (auth/id-token-revoked) → 401, generic body", async () => {
+    mockVerifyIdToken.mockRejectedValue(fbErr("auth/id-token-revoked", "The Firebase ID token has been revoked."));
+    const res = await POST(handshakeRequest({ bearer: "revoked-token" }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Invalid or expired token" });
+    expectExpiryOnly(res);
+    expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "revoked_token" });
+  });
+
+  it("disabled account (auth/user-disabled) → 401, account state not disclosed", async () => {
+    mockVerifyIdToken.mockRejectedValue(fbErr("auth/user-disabled", "The user record is disabled."));
+    const res = await POST(handshakeRequest({ bearer: "disabled-user-token" }));
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "Invalid or expired token" });
+    expect(JSON.stringify(body)).not.toMatch(/disabled/i);
+    expectExpiryOnly(res);
+    expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "account_disabled" });
+  });
+
+  it("an invalid/expired token → 401, never leaking the raw verification error", async () => {
+    mockVerifyIdToken.mockRejectedValue(new Error("Firebase ID token has expired. Get a fresh token and try again."));
+    const res = await POST(handshakeRequest({ bearer: "expired-token" }));
+    expect(res.status).toBe(401);
+    expect(JSON.stringify(await res.json())).not.toMatch(/expired\. Get a fresh token/);
+    expectExpiryOnly(res);
+  });
+
+  it("deleted account (auth/user-not-found from the checkRevoked lookup) → 401", async () => {
+    mockVerifyIdToken.mockRejectedValue(fbErr("auth/user-not-found"));
+    const res = await POST(handshakeRequest({ bearer: "t" }));
+    expect(res.status).toBe(401);
+    expectExpiryOnly(res);
+  });
+
+  it.each(["auth/internal-error", "app/internal-error", "app/network-error", "app/network-timeout"])(
+    "transient verifier failure %s → 503 auth_unavailable (never 200, never 401)",
+    async (code) => {
+      mockVerifyIdToken.mockRejectedValue(fbErr(code, "upstream detail xyz"));
+      const res = await POST(handshakeRequest({ bearer: "t" }));
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
+      expect(JSON.stringify(body)).not.toMatch(/upstream detail/);
+      expectExpiryOnly(res);
+      expect(mockLogAuthSessionEvent).toHaveBeenCalledWith("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
+      expect(mockLoggerError).toHaveBeenCalledWith(expect.any(String), { errorCode: code });
+    }
+  );
+
+  it.each([
+    ["no code", new Error("boom")],
+    ["non-string code", Object.assign(new Error("boom"), { code: 503 })],
+    ["a thrown non-Error", "string-rejection"],
+    ["near-miss transient code", fbErr("auth/internal-error ")],
+  ])("an unclassified failure (%s) is a credential failure → 401", async (_label, err) => {
+    mockVerifyIdToken.mockRejectedValue(err);
+    const res = await POST(handshakeRequest({ bearer: "t" }));
+    expect(res.status).toBe(401);
+    expectExpiryOnly(res);
+  });
+
+  it.each([[{}], [{ uid: "" }], [{ uid: 42 }], [null]])("a verified-but-uidless decode (%p) → 401", async (decoded) => {
+    mockVerifyIdToken.mockResolvedValue(decoded);
+    const res = await POST(handshakeRequest({ bearer: "t" }));
+    expect(res.status).toBe(401);
+    expectExpiryOnly(res);
+  });
+
+  it("Admin SDK not initialised → 500, still the expiry and no-store", async () => {
+    mockAdminAvailable = false;
+    const res = await POST(handshakeRequest({ bearer: "t" }));
+    expect(res.status).toBe(500);
+    expectExpiryOnly(res);
   });
 
   it("never logs the ID token or a provider error message (code only), on every failure path", async () => {
     const TOKEN = "eyJhbGciOiJSUzI1NiJ9.SECRET-PAYLOAD.sig";
     const leaky = (code: string) => Object.assign(new Error(`bad token ${TOKEN} for user@example.com`), { code });
-    const paths: Array<() => void> = [
-      () => mockVerifyIdToken.mockRejectedValue(leaky("auth/id-token-revoked")),
-      () => mockVerifyIdToken.mockRejectedValue(leaky("auth/user-disabled")),
-      () => mockVerifyIdToken.mockRejectedValue(leaky("app/network-error")),
-      () => {
-        mockVerifyIdToken.mockResolvedValue({ uid: "user-1" });
-        mockCreateSessionCookie.mockRejectedValue(leaky("auth/invalid-id-token"));
-      },
-    ];
-    for (const arrange of paths) {
+    for (const err of [leaky("auth/id-token-revoked"), leaky("auth/user-disabled"), leaky("app/network-error"), leaky("auth/invalid-id-token")]) {
       jest.clearAllMocks();
-      arrange();
-      await POST(postRequest({ idToken: TOKEN }));
+      mockVerifyIdToken.mockRejectedValue(err);
+      await POST(handshakeRequest({ bearer: TOKEN, bodyToken: TOKEN }));
+      await POST(handshakeRequest({ bearer: TOKEN, bodyToken: `${TOKEN}x` }));
       const logged = JSON.stringify([...mockLoggerError.mock.calls, ...mockLogAuthSessionEvent.mock.calls]);
       expect(logged).not.toContain("SECRET-PAYLOAD");
       expect(logged).not.toContain("user@example.com");
       expect(logged).not.toContain("bad token");
     }
   });
+});
 
-  it("ignores a client-supplied uid in the request body entirely", async () => {
-    mockVerifyIdToken.mockResolvedValue({ uid: "server-verified-uid" });
-    mockCreateSessionCookie.mockResolvedValue("cookie");
-    const res = await POST(postRequest({ idToken: "valid-token", uid: "client-asserted-uid" }));
-    const body = await res.json();
-    expect(body.uid).toBe("server-verified-uid");
+describe("no request shape ever yields a non-expiry Set-Cookie (R2 handshake oracle)", () => {
+  it("a sweep over every arm: exactly the one expiry, every time", async () => {
+    const shapes: Array<[string, () => void, NextRequest]> = [
+      ["valid header", () => mockVerifyIdToken.mockResolvedValue({ uid: "u" }), handshakeRequest({ bearer: "t" })],
+      ["valid body", () => mockVerifyIdToken.mockResolvedValue({ uid: "u" }), handshakeRequest({ bodyToken: "t" })],
+      ["both", () => mockVerifyIdToken.mockResolvedValue({ uid: "u" }), handshakeRequest({ bearer: "t", bodyToken: "t" })],
+      ["conflict", () => undefined, handshakeRequest({ bearer: "a", bodyToken: "b" })],
+      ["malformed", () => undefined, handshakeRequest({ authorization: "Basic x" })],
+      ["none", () => undefined, handshakeRequest({})],
+      ["415", () => undefined, handshakeRequest({ bodyToken: "t", contentType: "text/plain" })],
+      ["403", () => undefined, handshakeRequest({ bearer: "t", origin: "null" })],
+      ["401", () => mockVerifyIdToken.mockRejectedValue(Object.assign(new Error("x"), { code: "auth/id-token-revoked" })), handshakeRequest({ bearer: "t" })],
+      ["503", () => mockVerifyIdToken.mockRejectedValue(Object.assign(new Error("x"), { code: "app/network-error" })), handshakeRequest({ bearer: "t" })],
+      ["with a legacy cookie", () => mockVerifyIdToken.mockResolvedValue({ uid: "u" }), handshakeRequest({ bearer: "t", headers: { cookie: "__session=legacy-minted-value" } })],
+    ];
+    const seen: string[][] = [];
+    for (const [, arrange, req] of shapes) {
+      mockVerifyIdToken.mockReset();
+      arrange();
+      const res = await POST(req);
+      seen.push(setCookiesOf(res));
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+    }
+    expect(seen).toEqual(shapes.map(() => [EXPIRY_SET_COOKIE]));
   });
 });
 
-describe("DELETE /api/auth/session", () => {
-  it("clears the cookie with attributes matching creation exactly", async () => {
+describe("DELETE /api/auth/session — an idempotent expiry (for old tabs; no current client calls it)", () => {
+  it("expires the cookie with attributes matching the retired creation exactly", async () => {
     const res = await DELETE(new NextRequest("http://localhost/api/auth/session", { method: "DELETE" }));
     const cleared = res.cookies.get("__session");
-    expect(cleared).toBeDefined();
     expect(cleared?.value).toBe("");
     expect(cleared?.httpOnly).toBe(true);
     expect(cleared?.secure).toBe(true);
     expect(cleared?.sameSite).toBe("lax");
     expect(cleared?.path).toBe("/");
     expect(cleared?.maxAge).toBe(0);
+    expectExpiryOnly(res);
   });
 
-  it("always returns 200 whether or not a cookie was present — idempotent", async () => {
-    const res1 = await DELETE(new NextRequest("http://localhost/api/auth/session", { method: "DELETE" }));
-    expect(res1.status).toBe(200);
-    const res2 = await DELETE(new NextRequest("http://localhost/api/auth/session", { method: "DELETE", headers: { Cookie: "__session=some-value" } }));
-    expect(res2.status).toBe(200);
-  });
-
-  it("sets Cache-Control: no-store", async () => {
-    const res = await DELETE(new NextRequest("http://localhost/api/auth/session", { method: "DELETE" }));
-    expect(res.headers.get("Cache-Control")).toBe("no-store");
-  });
-
-  it("returns { authenticated: false } and no other fields", async () => {
-    const res = await DELETE(new NextRequest("http://localhost/api/auth/session", { method: "DELETE" }));
-    const body = await res.json();
-    expect(body).toEqual({ authenticated: false });
+  it("always returns 200 { authenticated: false }, whether or not a cookie was present", async () => {
+    for (const headers of [{}, { Cookie: "__session=some-value" }]) {
+      const res = await DELETE(new NextRequest("http://localhost/api/auth/session", { method: "DELETE", headers }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ authenticated: false });
+      expectExpiryOnly(res);
+    }
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
   });
 });
 
-describe("GET /api/auth/session (removed, ZCA L-2)", () => {
-  it("the route exports no GET handler, so a cookie can no longer be asked whose it is", () => {
-    expect(Object.keys(sessionRouteModule).filter((k) => /^(GET|HEAD)$/.test(k))).toEqual([]);
+describe("GET /api/auth/session (removed, ZCA L-2; not restored by R2)", () => {
+  it("the route exports no GET handler (Next.js answers 405)", () => {
+    expect(Object.keys(sessionRouteModule).filter((k) => /^(GET|HEAD|PUT|PATCH|OPTIONS)$/.test(k))).toEqual([]);
     expect(Object.keys(sessionRouteModule).filter((k) => /^(POST|DELETE)$/.test(k)).sort()).toEqual(["DELETE", "POST"]);
   });
 });

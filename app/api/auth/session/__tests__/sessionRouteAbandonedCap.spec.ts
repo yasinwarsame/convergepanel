@@ -1,22 +1,15 @@
 /**
- * R5 C (MINOR-1) — the session mint shares the per-instance cap on ABANDONED
- * verifications with resolveRequestIdentity (the same SDK, the same sockets).
- * At the cap a login fails fast with the route's existing 503 and NO upstream
- * call (neither verifyIdToken nor createSessionCookie) is started; a
- * verification abandoned by the mint counts toward the cap and is released
- * when it settles.
+ * R5 C (MINOR-1) — the session verification handshake shares the per-instance
+ * cap on ABANDONED verifications with resolveRequestIdentity (the same SDK, the
+ * same sockets). At the cap a login fails fast with the route's 503 and NO
+ * upstream call is started; a verification abandoned by the handshake counts
+ * toward the cap and is released when it settles. (ZCA P3 R2: the handshake
+ * makes ONE upstream call; the strict Admin Auth double records any other.)
  */
 
 const mockVerifyIdToken = jest.fn();
-const mockCreateSessionCookie = jest.fn();
 jest.mock("@/lib/firebase/admin", () => ({
-  get adminAuth() {
-    return {
-      verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
-      createSessionCookie: (...args: unknown[]) => mockCreateSessionCookie(...args),
-      verifySessionCookie: jest.fn(),
-    };
-  },
+  adminAuth: require("./handshakeHarness").strictAdminAuth((...args: unknown[]) => mockVerifyIdToken(...args)),
 }));
 const mockLoggerWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: (...a: unknown[]) => mockLoggerWarn(...a), info: jest.fn(), debug: jest.fn() } }));
@@ -24,6 +17,7 @@ jest.mock("@/lib/authTelemetry", () => ({ logAuthSessionEvent: jest.fn() }));
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/auth/session/route";
+import { expectExpiryOnly, forbiddenAdminAccess } from "./handshakeHarness";
 import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
 import { MAX_INFLIGHT_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight, authVerificationRefusalsTotal } from "@/lib/auth/authVerificationDeadline";
 
@@ -38,9 +32,10 @@ beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   mockVerifyIdToken.mockReset();
-  mockCreateSessionCookie.mockReset();
+  forbiddenAdminAccess.length = 0;
 });
 afterEach(async () => {
+  expect(forbiddenAdminAccess).toEqual([]);
   for (const r of releasers.splice(0)) r({ uid: "late" });
   await jest.advanceTimersByTimeAsync(0);
   expect(abandonedAuthVerificationsInFlight()).toBe(0);
@@ -56,28 +51,26 @@ it("logins whose verification hangs are abandoned (counted); at the cap the next
 
   mockVerifyIdToken.mockReset();
   mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
-  mockCreateSessionCookie.mockResolvedValue("cookie");
   mockLoggerWarn.mockReset();
   const refusedBefore = authVerificationRefusalsTotal();
   const res = await post();
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
-  expect(res.headers.get("set-cookie")).toBeNull();
+  expectExpiryOnly(res);
   expect(mockVerifyIdToken).not.toHaveBeenCalled();
-  expect(mockCreateSessionCookie).not.toHaveBeenCalled();
   expect(jest.getTimerCount()).toBe(0);
   // R6: counted (metric) and reported by the rate-limited `saturated` signal — no per-refusal warn.
   expect(authVerificationRefusalsTotal()).toBe(refusedBefore + 1);
   expect(mockLoggerWarn).not.toHaveBeenCalled();
 
-  // The abandoned verifications settle (late VALID) → the count drains and the next login mints normally.
+  // The abandoned verifications settle (late VALID) → the count drains and the next login verifies normally.
   for (const r of releasers.splice(0)) r({ uid: "late" });
   await jest.advanceTimersByTimeAsync(0);
   expect(abandonedAuthVerificationsInFlight()).toBe(0);
-  expect(mockCreateSessionCookie).not.toHaveBeenCalled(); // no late result ever minted
   const ok = await post();
   expect(ok.status).toBe(200);
-  expect(ok.cookies.get("__session")?.value).toBe("cookie");
+  expect(await ok.json()).toEqual({ authenticated: true, uid: "u1" });
+  expectExpiryOnly(ok);
 }, 30_000);
 
 it("R5 review: HARD bound — 300 concurrent logins whose verification hangs INSIDE one window: verifyIdToken starts exactly 256 times; 44 answer 503 at once", async () => {
@@ -92,5 +85,4 @@ it("R5 review: HARD bound — 300 concurrent logins whose verification hangs INS
   for (const r of done) expect(r.status).toBe(503);
   await jest.advanceTimersByTimeAsync(DEADLINE);
   for (const r of await Promise.all(all)) expect(r.status).toBe(503);
-  expect(mockCreateSessionCookie).not.toHaveBeenCalled();
 }, 30_000);

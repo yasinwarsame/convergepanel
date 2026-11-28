@@ -1,24 +1,26 @@
 /**
  * @jest-environment node
  *
- * R5 C (MAJOR-1) — the session mint's 10 s deadline against the REAL
+ * R5 C (MAJOR-1) — the session handshake's 10 s deadline against the REAL
  * firebase-admin 12.7.0 HTTP stack. Nothing inside the SDK is stubbed:
  * `FIREBASE_AUTH_EMULATOR_HOST` points it at a local 127.0.0.1 server that
- * scripts the two upstream calls the mint makes —
- *   - `accounts:lookup` (the `getUser` behind `verifyIdToken(idToken, true)`), and
- *   - `:createSessionCookie`.
- * Modes: "hang" (accept, never answer: unbounded, the SDK makes 5 attempts ×
- * its 25 s timeout ≈ 132 s), "late-valid" (answer VALID 12 s late). Real
- * timers. No real Firebase project, credential or network.
+ * scripts `accounts:lookup` (the `getUser` behind `verifyIdToken(idToken, true)`)
+ * and COUNTS every other upstream request ("other"). ZCA P3 R2: the handshake
+ * mints nothing, so "other" must stay 0 on every path; the two cases about the
+ * retired cookie-minting call were DELETED. Modes: "hang" (accept, never
+ * answer: unbounded, the SDK makes 5 attempts × its 25 s timeout ≈ 132 s),
+ * "late-valid" (answer VALID 12 s late). Real timers. No real Firebase
+ * project, credential or network.
  */
 import http from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 
 type Mode = "ok" | "hang" | "late-valid";
-const mockState: { lookup: Mode; create: Mode; auth: unknown } = { lookup: "ok", create: "ok", auth: null };
+const mockState: { lookup: Mode; auth: unknown } = { lookup: "ok", auth: null };
 /** Upstream hits per (endpoint, uid) — each test uses its own uid, so abandoned retries from an earlier test never count. */
 const hitMap = new Map<string, number>();
-const hitsOf = (uid: string) => ({ lookup: hitMap.get(`lookup:${uid}`) ?? 0, create: hitMap.get(`create:${uid}`) ?? 0 });
+let otherRequests = 0;
+const hitsOf = (uid: string) => ({ lookup: hitMap.get(`lookup:${uid}`) ?? 0, other: otherRequests });
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminAuth() {
@@ -34,6 +36,7 @@ import { NextRequest } from "next/server";
 import { initializeApp, deleteApp, type App } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { POST } from "@/app/api/auth/session/route";
+import { expectExpiryOnly } from "./handshakeHarness";
 
 const DEADLINE = 10_000;
 const SLACK = 3_000;
@@ -57,23 +60,19 @@ beforeAll(async () => {
     req.on("end", () => {
       const url = String(req.url);
       const isLookup = url.includes("accounts:lookup");
-      const isCreate = url.includes(":createSessionCookie");
-      if (!isLookup && !isCreate) return void res.writeHead(404).end();
+      if (!isLookup) {
+        otherRequests += 1; // any non-lookup upstream request (e.g. a cookie mint) — must never happen
+        return void res.writeHead(404).end();
+      }
       let uid = "?";
       try {
-        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        uid = isLookup
-          ? String(body.localId?.[0])
-          : String(JSON.parse(Buffer.from(String(body.idToken).split(".")[1], "base64url").toString("utf8")).sub);
+        uid = String(JSON.parse(Buffer.concat(chunks).toString("utf8")).localId?.[0]);
       } catch {
         /* counted under "?" */
       }
-      const ok = () =>
-        res
-          .writeHead(200, { "content-type": "application/json" })
-          .end(isLookup ? record(uid) : JSON.stringify({ sessionCookie: "minted-session-cookie" }));
-      const mode = isLookup ? mockState.lookup : mockState.create;
-      const key = `${isLookup ? "lookup" : "create"}:${uid}`;
+      const ok = () => res.writeHead(200, { "content-type": "application/json" }).end(record(uid));
+      const mode = mockState.lookup;
+      const key = `lookup:${uid}`;
       hitMap.set(key, (hitMap.get(key) ?? 0) + 1);
       if (mode === "hang") return;
       if (mode === "late-valid") {
@@ -99,19 +98,18 @@ beforeAll(async () => {
     sdkCalls.push(p);
     return p;
   };
+  // The route sees verifyIdToken ONLY (the real SDK method); any other member would be undefined.
   mockState.auth = {
     verifyIdToken: (t: string, c?: boolean) => rec(real.verifyIdToken(t, c)),
-    createSessionCookie: (t: string, o: { expiresIn: number }) => rec(real.createSessionCookie(t, o)),
   };
 });
 
 beforeEach(() => {
   mockState.lookup = "ok";
-  mockState.create = "ok";
 });
 afterEach(() => {
+  expect(otherRequests).toBe(0);
   mockState.lookup = "ok";
-  mockState.create = "ok";
   for (const t of timers) clearTimeout(t);
   timers.clear();
   for (const s of sockets) s.destroy();
@@ -135,48 +133,40 @@ async function timed<T>(start: () => Promise<T>): Promise<{ value: T; ms: number
   return { value, ms: Date.now() - t0 };
 }
 
-it("ANCHOR: through the same local edge a healthy login mints a cookie (lookup + createSessionCookie both reached)", async () => {
+it("ANCHOR: through the same local edge a healthy login is verified (one lookup) and NOTHING is minted", async () => {
   const { value: res, ms } = await timed(() => post("ok-user"));
   expect(res.status).toBe(200);
-  expect(res.cookies.get("__session")?.value).toBe("minted-session-cookie");
-  expect(hitsOf("ok-user")).toEqual({ lookup: 1, create: 1 });
+  expect(await res.json()).toEqual({ authenticated: true, uid: "ok-user" });
+  expectExpiryOnly(res);
+  expect(hitsOf("ok-user")).toEqual({ lookup: 1, other: 0 });
   expect(ms).toBeLessThan(DEADLINE);
 });
 
-it("accounts:lookup HANGS → 503 at ~10 s (not ~132 s), no Set-Cookie, createSessionCookie never reached", async () => {
+it("accounts:lookup HANGS → 503 at ~10 s (not ~132 s), only the expiry Set-Cookie", async () => {
   mockState.lookup = "hang";
   const { value: res, ms } = await timed(() => post("hang-user"));
   expect(res.status).toBe(503);
   expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
-  expect(res.headers.get("set-cookie")).toBeNull();
+  expectExpiryOnly(res);
   expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
-  expect(hitsOf("hang-user")).toEqual({ lookup: 1, create: 0 }); // the SDK really was waiting on the hung lookup
+  expect(hitsOf("hang-user")).toEqual({ lookup: 1, other: 0 }); // the SDK really was waiting on the hung lookup
   process.stdout.write(`\nBENCH session-mint lookup-hang: ${ms}ms openSockets=${sockets.size}\n`);
 }, 30_000);
 
-it("accounts:lookup answers VALID 12 s late → 503 at the deadline; the late valid verification NEVER reaches createSessionCookie", async () => {
+it("accounts:lookup answers VALID 12 s late → 503 at the deadline; the late valid verification is never used", async () => {
   mockState.lookup = "late-valid";
   const before = sdkCalls.length;
   const { value: res, ms } = await timed(() => post("late-user"));
   expect(res.status).toBe(503);
-  expect(res.headers.get("set-cookie")).toBeNull();
+  expectExpiryOnly(res);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
   await new Promise((r) => setTimeout(r, 12_000 - ms + 500));
   // the abandoned SDK verification really completed VALID …
   await expect(sdkCalls[before]).resolves.toMatchObject({ uid: "late-user" });
-  // … and no session cookie was ever requested from upstream.
-  expect(hitsOf("late-user")).toEqual({ lookup: 1, create: 0 });
+  // … and nothing else was ever requested from upstream.
+  expect(hitsOf("late-user")).toEqual({ lookup: 1, other: 0 });
   expect(sdkCalls).toHaveLength(before + 1);
 }, 40_000);
 
-it(":createSessionCookie HANGS after a fast verification → 503 at ~10 s end-to-end, no Set-Cookie", async () => {
-  mockState.create = "hang";
-  const { value: res, ms } = await timed(() => post("create-hang-user"));
-  expect(res.status).toBe(503);
-  expect(await res.json()).toEqual({ error: "Authentication service unavailable", code: "auth_unavailable" });
-  expect(res.headers.get("set-cookie")).toBeNull();
-  expect(hitsOf("create-hang-user")).toEqual({ lookup: 1, create: 1 });
-  expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
-  expect(ms).toBeLessThan(DEADLINE + SLACK);
-}, 30_000);
+// ZCA P3 R2: "the cookie-minting call HANGS after a fast verification" was DELETED with that call.
