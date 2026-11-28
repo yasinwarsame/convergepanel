@@ -35,7 +35,6 @@ jest.mock("@/lib/firebase/client", () => ({
 jest.mock("@/lib/utils/performance", () => ({ perf: { mark: () => undefined, measure: () => undefined, logMetrics: () => undefined } }));
 jest.mock("@/lib/client/sessionSync", () => ({
   establishServerSession: async (user: any) => (mockSyncOk ? { ok: true, uid: user.uid } : { ok: false, reason: "synthetic" }),
-  clearServerSession: async () => true,
 }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
 const mockReset = jest.fn();

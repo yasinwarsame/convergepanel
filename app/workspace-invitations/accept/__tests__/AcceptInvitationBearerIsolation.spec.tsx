@@ -2,15 +2,18 @@
  * Identity-isolation C1 (owner D-3, 2026-11-25) — the invitation-acceptance
  * browser request carries the shown Firebase user's ID token, and a stale shared
  * `__session` cookie for a different account can never accept an invitation
- * as that account.
+ * as that account. ZCA P3 R2: the cookie is not even read by the server any
+ * more, so every cookie in the jar below is decided exactly as no cookie — the
+ * shown user's bearer alone decides (converted from the C1 mismatch-veto cases).
  *
- * End to end below the Firebase verifiers: the real `AcceptInvitationClient`,
+ * End to end below the Firebase verifier: the real `AcceptInvitationClient`,
  * the real `authedFetch`, the real accept Route Handler and the real
- * `resolveRequestIdentity`. Mocked: `useAuth` (the shown user), the two Firebase
- * Admin verifiers (cookie `sess:<uid>` / token `id:<uid>`), and the Firestore
- * acceptance core (records the uid it was called with). `fetch` is an adapter
- * that turns the client's request into a `NextRequest` carrying the cookie jar
- * only when the client asked for same-origin credentials, and calls the route.
+ * `resolveRequestIdentity`. Mocked: `useAuth` (the shown user), the Firebase
+ * ID-token verifier (`id:<uid>`), and the Firestore acceptance core (records the
+ * uid it was called with). There is NO session-cookie verifier double: nothing
+ * verifies the cookie. `fetch` is an adapter that turns the client's request
+ * into a `NextRequest` carrying the cookie jar only when the client asked for
+ * same-origin credentials, and calls the route.
  */
 
 import { createElement } from "react";
@@ -33,8 +36,10 @@ jest.mock("firebase/auth", () => ({ sendEmailVerification: jest.fn(), signOut: (
 jest.mock("@/lib/firebase/client", () => ({ auth: { __fakeAuth: true } }));
 jest.mock("@/lib/telemetry/telemetryFreeDocument", () => ({ isTelemetryFreeDocument: () => true }));
 
-const mockedClearServerSession = jest.fn();
-jest.mock("@/lib/client/sessionSync", () => ({ clearServerSession: (...a: unknown[]) => mockedClearServerSession(...a) }));
+// ZCA P3 R2: there is no session-clearing client function; the component must not import sessionSync at all.
+jest.mock("@/lib/client/sessionSync", () => {
+  throw new Error("AcceptInvitationClient must not import lib/client/sessionSync");
+});
 
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 const mockedIdentityFailure = jest.fn();
@@ -44,16 +49,6 @@ function firebaseError(code: string): Error {
   return Object.assign(new Error(code), { code });
 }
 
-// Cookie verifier double: `sess:<uid>` verifies as <uid>; `revoked:<uid>` is a revoked session; anything else is invalid.
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: async (req: { cookies: { get: (n: string) => { value: string } | undefined } }) => {
-    const v = req.cookies.get("__session")?.value;
-    if (!v) return null;
-    if (v.startsWith("sess:")) return { uid: v.slice(5), isAdmin: false };
-    if (v.startsWith("revoked:")) throw firebaseError("auth/session-cookie-revoked");
-    throw firebaseError("auth/argument-error");
-  },
-}));
 // Bearer verifier double: `id:<uid>` verifies as <uid>; `revoked:<uid>` is a revoked token; anything else is invalid.
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: async (token: string) => {
@@ -118,7 +113,7 @@ function shownUser(uid: string, token: string | (() => Promise<string>) = `id:${
 }
 
 function authenticatedAs(user: unknown, extra: Record<string, unknown> = {}) {
-  return { user, authReady: true, syncState: "authenticated", canMutate: true, beginLogout: jest.fn(), ...extra };
+  return { user, authReady: true, syncState: "authenticated", canMutate: true, beginLogout: jest.fn(), cancelLogout: jest.fn(), ...extra };
 }
 
 async function mount(auth: Record<string, unknown>) {
@@ -187,26 +182,27 @@ describe("C1 — the request carries the shown user's bearer credential", () => 
 });
 
 describe("C1 — stale shared cookie for a different account", () => {
-  it("shown B, cookie A (a late session mint): the route refuses (401 credential_mismatch); the invitation is NOT accepted as A or B", async () => {
+  it("ZCA P3 R2 (inverted from the mismatch veto): shown B, a stale cookie for A in the jar → accepted as B (the bearer), NEVER as A", async () => {
     jar.value = "sess:uid-a";
     const r = await mount(authenticatedAs(shownUser("uid-b")));
     expect(routeCalls).toHaveLength(1);
-    expect(routeCalls[0].status).toBe(401);
-    expect(mockedAccept).not.toHaveBeenCalled();
-    expect(mockedIdentityFailure).toHaveBeenCalledWith(expect.objectContaining({ failureCategory: "credential_mismatch" }));
-    expect(heading(r)).toBe("Session expired");
-    expect(mockedRouterReplace).not.toHaveBeenCalled(); // no automatic loop
+    expect(routeCalls[0].cookie).toBe("__session=sess:uid-a");
+    expect(routeCalls[0].status).toBe(200);
+    expect(mockedAccept).toHaveBeenCalledTimes(1);
+    expect(mockedAccept).toHaveBeenCalledWith(expect.objectContaining({ uid: "uid-b" }));
+    expect(JSON.stringify(mockedAccept.mock.calls)).not.toContain("uid-a");
+    expect(heading(r)).toBe("You've joined the workspace");
   });
 
-  it("'Sign in again' clears the server session and signs out before returning to login; no second POST is issued", async () => {
+  it("'Sign in again' (after a refused bearer) signs out LOCALLY before returning to login — no server clear; no second POST is issued", async () => {
     jar.value = "sess:uid-a";
     const beginLogout = jest.fn();
-    const r = await mount(authenticatedAs(shownUser("uid-b"), { beginLogout }));
-    mockedClearServerSession.mockResolvedValueOnce(true);
+    const r = await mount(authenticatedAs(shownUser("uid-b", "revoked:uid-b"), { beginLogout }));
+    expect(heading(r)).toBe("Session expired");
     mockedSignOut.mockResolvedValueOnce(undefined);
     const button = r.root.findAllByType("button").find((b) => b.props.children === "Sign in again")!;
     await act(async () => { await button.props.onClick(); });
-    const order = [beginLogout.mock.invocationCallOrder[0], mockedClearServerSession.mock.invocationCallOrder[0], mockedSignOut.mock.invocationCallOrder[0]];
+    const order = [beginLogout.mock.invocationCallOrder[0], mockedSignOut.mock.invocationCallOrder[0]];
     expect(order.every((n) => typeof n === "number")).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(String(mockedRouterReplace.mock.calls[0][0])).not.toContain(SENTINEL);
@@ -229,12 +225,12 @@ describe("C1 — stale shared cookie for a different account", () => {
 });
 
 describe("C1 — missing, revoked and invalid credentials", () => {
-  it("revoked session cookie + valid bearer: 401, not accepted", async () => {
+  it("ZCA P3 R2 (inverted): a revoked session cookie + valid bearer → accepted as the bearer's user (the cookie cannot veto)", async () => {
     jar.value = "revoked:uid-b";
     const r = await mount(authenticatedAs(shownUser("uid-b")));
-    expect(routeCalls[0].status).toBe(401);
-    expect(mockedAccept).not.toHaveBeenCalled();
-    expect(heading(r)).toBe("Session expired");
+    expect(routeCalls[0].status).toBe(200);
+    expect(mockedAccept).toHaveBeenCalledWith(expect.objectContaining({ uid: "uid-b" }));
+    expect(heading(r)).toBe("You've joined the workspace");
   });
 
   it("revoked bearer + valid cookie: 401, not accepted (verifier-reported revocation)", async () => {
@@ -245,7 +241,7 @@ describe("C1 — missing, revoked and invalid credentials", () => {
     expect(heading(r)).toBe("Session expired");
   });
 
-  it("invalid bearer + valid cookie: 401, no cookie fallback", async () => {
+  it("invalid bearer + valid cookie: 401 (the cookie is never a fallback)", async () => {
     jar.value = "sess:uid-b";
     await mount(authenticatedAs(shownUser("uid-b", "garbage")));
     expect(routeCalls[0].status).toBe(401);

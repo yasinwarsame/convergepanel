@@ -1,44 +1,34 @@
 "use client";
 
 /**
- * ZCA L-2 — the ONE explicit-logout sequence, shared by every user-initiated sign-out entry point
- * (TopNav and the profile page).
+ * The ONE explicit-logout sequence, shared by every user-initiated sign-out entry point (TopNav and
+ * the profile page). ZCA P3 R2 "verify, don't mint": there is no server session to clear, so logout
+ * is purely local.
  *
- * Order (owner decision 2026-11-27):
  *   1. `beginLogout()` — protected operations are disabled at once (`canMutate` false).
  *   2. Firebase `signOut` — LOCAL: it clears the persisted Firebase user in this browser and notifies
- *      every tab. It needs no network and cannot hang on the server. The AuthProvider's null branch
- *      then aborts any in-flight session mint, clears identity-scoped client data and sends its own
- *      defensive `DELETE`.
- *   3. A bounded, best-effort `DELETE /api/auth/session` to expire the cookie.
- *   4. The outcome is reported as it is: `cleared`, `failed` or `timed_out`.
+ *      every tab. After it there is no token, so every API call is anonymous. The AuthProvider's null
+ *      branch aborts any in-flight handshake and clears identity-scoped client data.
+ *   3. If the local sign-out THREW: `cancelLogout()` (AuthProvider). If Firebase still reports a user,
+ *      the tab is re-verified from scratch (`canMutate` stays false until a fresh server verification
+ *      for that uid) and the logout is NOT reported as completed. If Firebase reports nobody, the tab
+ *      takes the ordinary signed-out transition and the logout is reported as completed.
  *
- * Why local sign-out comes first: under the zero-cookie-authority contract the `__session` cookie
- * authorizes nothing — only a bearer from the Firebase client does — so step 2 is what ends this
- * browser's access, whether or not step 3 ever reaches the server. Doing it first shrinks the window
- * in which closing the tab mid-logout would leave Firebase itself signed in. Step 3 is hygiene: it
- * removes a cookie that no route accepts any more.
- *
- * A failed or timed-out clear is never reported as a clean sign-out. The `DELETE` is not cancelled at
- * the timeout; it stays registered with `sessionSync`, so a later sign-in's mint still waits for it
- * (R-S0-7) and its late answer can never overwrite a newer cookie.
+ * Nothing here sends a request: no client DELETE exists anywhere (R2 MA, invariant 5).
  */
 import { signOut as firebaseSignOut, type Auth } from "firebase/auth";
-import { clearServerSession } from "@/lib/client/sessionSync";
 
-export const LOGOUT_CLEAR_TIMEOUT_MS = 5_000;
+/** Where every completed logout goes. */
+export const LOGIN_HREF_AFTER_LOGOUT = "/login?signedOut=1";
 
-export type LogoutResult =
-  | { signedOut: true; serverCleared: "cleared" | "failed" | "timed_out" }
-  | { signedOut: false };
+export type LogoutResult = { signedOut: true } | { signedOut: false };
 
 export type LogoutDeps = {
   auth: Auth;
   beginLogout: () => void;
-  /** Injection points for tests; production uses Firebase `signOut` and `clearServerSession`. */
+  cancelLogout: () => void;
+  /** Injection point for tests; production uses Firebase `signOut`. */
   signOut?: (auth: Auth) => Promise<void>;
-  clear?: () => Promise<boolean>;
-  timeoutMs?: number;
 };
 
 export async function performLogout(deps: LogoutDeps): Promise<LogoutResult> {
@@ -46,23 +36,10 @@ export async function performLogout(deps: LogoutDeps): Promise<LogoutResult> {
   try {
     await (deps.signOut ?? firebaseSignOut)(deps.auth);
   } catch {
-    // The local sign-out itself failed: this browser may still be signed in. Never claim otherwise.
-    return { signedOut: false };
+    // The local sign-out failed. Hand the tab back to the AuthProvider (re-verify, or the signed-out
+    // transition), and report completion only if Firebase really reports nobody.
+    deps.cancelLogout();
+    return deps.auth.currentUser === null ? { signedOut: true } : { signedOut: false };
   }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<"timed_out">((resolve) => {
-    timer = setTimeout(() => resolve("timed_out"), deps.timeoutMs ?? LOGOUT_CLEAR_TIMEOUT_MS);
-  });
-  const clear = (deps.clear ?? clearServerSession)().then(
-    (ok): "cleared" | "failed" => (ok ? "cleared" : "failed"),
-    (): "failed" => "failed",
-  );
-  const serverCleared = await Promise.race([clear, timeout]);
-  if (timer !== undefined) clearTimeout(timer);
-  return { signedOut: true, serverCleared };
-}
-
-/** Where to go after a logout: an unconfirmed clear is surfaced, never presented as a clean sign-out. */
-export function loginHrefAfterLogout(result: Extract<LogoutResult, { signedOut: true }>): string {
-  return result.serverCleared === "cleared" ? "/login?signedOut=1" : "/login?signedOut=1&sessionClearFailed=1";
+  return { signedOut: true };
 }

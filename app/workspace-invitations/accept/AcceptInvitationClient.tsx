@@ -34,13 +34,11 @@
  * - Identity-isolation C1 (owner D-3, 2026-11-25): the acceptance POST
  *   carries the Firebase ID token (`Authorization: Bearer`, built by
  *   `prepareAuthedHeaders` from `lib/client/authedFetch`) of the user this
- *   page currently shows, alongside the shared `__session` cookie. (The Firebase client session is shared by all
+ *   page currently shows. (The Firebase client session is shared by all
  *   tabs of this origin; the token is not unique to a tab. What it adds is
- *   that the server checks the identity the page renders, not whichever
- *   account last wrote the cookie.)
- *   The server (`resolveRequestIdentity`) then requires both to verify and
- *   name the same uid; a stale cookie for a different account yields a
- *   401 (`credential_mismatch`) and is never accepted as that account.
+ *   that the server checks the identity the page renders.)
+ *   The server (`resolveRequestIdentity`) authenticates that bearer only; no
+ *   cookie is read (ZCA P3 R2).
  *   The identity is read from `authStateRef` (the latest `useAuth()` render)
  *   when the attempt starts — never from a value captured before an awaited
  *   step such as `user.reload()` — and is checked again after the token is
@@ -59,7 +57,6 @@ import { sendEmailVerification, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { prepareAuthedHeaders } from "@/lib/client/authedFetch";
 import { useAuth } from "@/components/AuthProvider";
-import { clearServerSession } from "@/lib/client/sessionSync";
 import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
 import {
   clearInvitationAcceptance,
@@ -103,7 +100,7 @@ const LOGIN_REDIRECT_HREF = `/login?redirect=${encodeURIComponent(INVITATION_ACC
 
 export default function AcceptInvitationClient() {
   const router = useRouter();
-  const { user, authReady, syncState, canMutate, beginLogout } = useAuth();
+  const { user, authReady, syncState, canMutate, beginLogout, cancelLogout } = useAuth();
 
   const [viewState, setViewState] = useState<AcceptanceViewState>("initializing");
   const [alreadyMemberRole, setAlreadyMemberRole] = useState<string | null>(null);
@@ -204,9 +201,7 @@ export default function AcceptInvitationClient() {
       case 401:
         // We only ever POST after syncState === "authenticated" — a 401
         // here means the server session has since gone stale, not that the
-        // caller was never authenticated in the first place. Since C1 it also
-        // covers a cookie that names a different account than the page's
-        // bearer token (`credential_mismatch`); "Sign in again" clears both.
+        // caller was never authenticated in the first place.
         return "session_expired";
       case 403:
         if (body?.errorCode === "email_verification_required") return "needs_verification";
@@ -476,16 +471,19 @@ export default function AcceptInvitationClient() {
     setAccountSwitchError(false);
     beginLogout();
     try {
-      await clearServerSession();
-      if (isInvitationDocumentSuperseded()) return;
       await signOut(auth);
-      if (isInvitationDocumentSuperseded()) return;
-      router.replace(LOGIN_REDIRECT_HREF);
     } catch {
+      // ZCA P3 R2 MB: the local sign-out threw. The AuthProvider must not stay `signing_out`: it re-verifies the
+      // still-present user (or takes the signed-out transition) — also when a later invitation owns the tab, which
+      // shares that provider state.
+      cancelLogout();
       if (isInvitationDocumentSuperseded()) return;
       setAccountSwitchError(true);
+      return;
     }
-  }, [beginLogout, router]);
+    if (isInvitationDocumentSuperseded()) return;
+    router.replace(LOGIN_REDIRECT_HREF);
+  }, [beginLogout, cancelLogout, router]);
 
   // Review R7 F3/F4: rendering follows the document's hand-off state: once superseded, only the loading view.
   if (superseded || isInvitationDocumentSuperseded()) return <p>Loading your invitation…</p>;

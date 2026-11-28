@@ -19,9 +19,9 @@ describe("logAuthSessionClientEvent", () => {
     expect(warnSpy).toHaveBeenCalledWith("[auth-session] session_identity_mismatch", { operation: "session_identity_mismatch", route: "/api/auth/session" });
   });
 
-  it("session_sync_failed and logout_clear_failed are also treated as failures (console.warn, always emitted)", () => {
+  it("session_sync_failed and sync_episode_deadline_exceeded are also treated as failures (console.warn, always emitted)", () => {
     logAuthSessionClientEvent("session_sync_failed", { failureCategory: "network_error" });
-    logAuthSessionClientEvent("logout_clear_failed", { failureCategory: "http_500" });
+    logAuthSessionClientEvent("sync_episode_deadline_exceeded", { operationGeneration: 3 });
     expect(warnSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -33,7 +33,7 @@ describe("logAuthSessionClientEvent", () => {
   });
 
   it("the metadata shape carries no uid/email/token/cookie/claim field", () => {
-    logAuthSessionClientEvent("session_cleared", { route: "/api/auth/session", operationGeneration: 7 });
+    logAuthSessionClientEvent("logout_cancelled", { route: "/api/auth/session", operationGeneration: 7 });
     const lastCall = warnSpy.mock.calls[0] ?? infoSpy.mock.calls[0];
     if (lastCall) {
       const metadata = lastCall[1];

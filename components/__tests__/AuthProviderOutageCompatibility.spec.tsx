@@ -1,18 +1,21 @@
 /**
- * Stage 0 F3 — client availability compatibility of the hardened session mint.
+ * Stage 0 F3 — client availability compatibility of the session verification handshake (ZCA P3 R2).
  *
  * End to end in one process: the REAL `AuthProvider` (its real `onIdTokenChanged` callback, captured from a mocked
  * `firebase/auth`), the REAL `lib/client/sessionSync.ts`, and the REAL `POST`/`DELETE /api/auth/session` route
- * handlers, connected by a `fetch` double that keeps a single shared cookie jar (what every tab of the origin sees).
- * Only firebase-admin (`verifyIdToken` / `createSessionCookie`) and browser storage are doubles. Synthetic data only.
+ * handlers, connected by a `fetch` double that keeps a single shared cookie jar (what every tab of the origin sees)
+ * and sends the browser's same-origin `Origin` / `Sec-Fetch-Site`. Only firebase-admin (`verifyIdToken` ONLY — the
+ * strict double records any other member) and browser storage are doubles. Synthetic data only.
  *
- * Contract demonstrated:
- *  - routine SAME-uid refresh + mint "could not run" (503 auth_unavailable: outage code, deadline or cap) →
- *    keeps `authenticated` and the existing cookie, no Firebase sign-out (no other tab signed out, no lost
- *    /verify input), exactly one mint request (no retry), and the next token event re-attempts normally;
- *  - every other case stays fail closed exactly as before: initial sign-in, cold load, account switch, a
- *    revoked / disabled / invalid answer (401), a 500, a network error — the cookie is cleared and Firebase is
- *    signed out.
+ * Contract demonstrated (converted from the cookie-mint version: "keeps A's cookie" / "cookie cleared" became
+ * "the jar only ever loses a legacy cookie, the client never sends a DELETE"):
+ *  - routine SAME-uid refresh + handshake "could not run" (503 auth_unavailable: outage code or deadline) →
+ *    keeps `authenticated`, no Firebase sign-out (no other tab signed out, no lost /verify input), exactly one
+ *    request (no retry), and the next token event re-attempts normally;
+ *  - every other case stays fail closed: initial sign-in, cold load, account switch, a revoked / disabled /
+ *    invalid answer (401), a network error — Firebase is signed out;
+ *  - R2 L-2: a 403 cross_origin degrades to `session_error` WITHOUT a sign-out and without a loop;
+ *  - every handshake response expires a legacy `__session` cookie (one-way cleanup; invariant 6).
  */
 
 import { createElement } from "react";
@@ -47,17 +50,10 @@ jest.mock("@/lib/client/authSessionTelemetry", () => ({
 }));
 jest.mock("posthog-js", () => ({ __esModule: true, default: { reset: () => undefined } }));
 
-// firebase-admin doubles behind the REAL session route.
+// firebase-admin double behind the REAL session route: verifyIdToken ONLY.
 const mockVerifyIdToken = jest.fn();
-const mockCreateSessionCookie = jest.fn();
 jest.mock("@/lib/firebase/admin", () => ({
-  get adminAuth() {
-    return {
-      verifyIdToken: (...a: unknown[]) => mockVerifyIdToken(...a),
-      createSessionCookie: (...a: unknown[]) => mockCreateSessionCookie(...a),
-      verifySessionCookie: jest.fn(),
-    };
-  },
+  adminAuth: require("@/app/api/auth/session/__tests__/handshakeHarness").strictAdminAuth((...a: unknown[]) => mockVerifyIdToken(...a)),
 }));
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
 jest.mock("@/lib/authTelemetry", () => ({ logAuthSessionEvent: jest.fn() }));
@@ -65,21 +61,22 @@ jest.mock("@/lib/authTelemetry", () => ({ logAuthSessionEvent: jest.fn() }));
 import { NextRequest } from "next/server";
 import { POST, DELETE } from "@/app/api/auth/session/route";
 import { AuthProvider, useAuth } from "@/components/AuthProvider";
+import { forbiddenAdminAccess } from "@/app/api/auth/session/__tests__/handshakeHarness";
 
 const g = globalThis as any;
 const SAVED = { window: g.window, fetch: g.fetch };
 
 // ── the shared browser cookie jar + fetch double wired to the real route ──
 let jar: string | null;
-let deleteFails: boolean;
 let networkDown: boolean;
+/** The page's origin as the browser reports it (R2 L-2: a host the server does not recognise is cross-origin). */
+let pageOrigin: string;
 const calls: string[] = [];
 async function fetchDouble(url: string, init: any = {}) {
   const method = init.method ?? "GET";
   calls.push(method);
   if (networkDown && method === "POST") throw new TypeError("Failed to fetch");
-  if (method === "DELETE" && deleteFails) throw new TypeError("Failed to fetch");
-  const headers: Record<string, string> = { ...(init.headers ?? {}) };
+  const headers: Record<string, string> = { ...(init.headers ?? {}), origin: pageOrigin, "sec-fetch-site": pageOrigin === "http://localhost" ? "same-origin" : "cross-site" };
   if (jar) headers.cookie = `__session=${jar}`;
   const req = new NextRequest(`http://localhost${url}`, { method, headers, body: init.body });
   const res: Response = method === "POST" ? await POST(req) : await DELETE(req);
@@ -96,7 +93,6 @@ const user = (uid: string) => ({ uid, getIdToken: jest.fn(async () => `idtok-${u
 const fbErr = (code: string) => Object.assign(new Error("upstream"), { code });
 function healthy() {
   mockVerifyIdToken.mockImplementation(async (tok: string) => ({ uid: tok.replace("idtok-", "") }));
-  mockCreateSessionCookie.mockImplementation(async (tok: string) => `cookie-${tok.replace("idtok-", "")}`);
 }
 function verifyOutage(code = "auth/internal-error") {
   mockVerifyIdToken.mockRejectedValue(fbErr(code));
@@ -116,8 +112,9 @@ beforeEach(() => {
   mockClientEvents.length = 0;
   calls.length = 0;
   jar = null;
-  deleteFails = false;
   networkDown = false;
+  pageOrigin = "http://localhost";
+  forbiddenAdminAccess.length = 0;
   tokenCallback = undefined;
   local = new FakeStorage();
   session = new FakeStorage();
@@ -129,6 +126,11 @@ beforeEach(() => {
   });
   expect(typeof tokenCallback).toBe("function");
 });
+afterEach(() => {
+  expect(calls).not.toContain("DELETE"); // R2 MA: no client DELETE, in any scenario
+  expect(forbiddenAdminAccess).toEqual([]); // the route never touched anything but verifyIdToken (nothing minted)
+  expect(jar).toBeNull(); // the jar only ever LOSES a cookie: nothing was set
+});
 afterAll(() => {
   g.window = SAVED.window;
   g.fetch = SAVED.fetch;
@@ -139,12 +141,13 @@ async function emit(u: any) {
     await tokenCallback!(u);
   });
 }
-/** Signs A in successfully and confirms the baseline (authenticated, A's cookie). */
+/** Signs A in successfully (a legacy cookie in the jar is retired by the handshake) and confirms the baseline. */
 async function signInA() {
+  jar = "legacy-cookie-from-an-older-build";
   const a = user("uid-a");
   await emit(a);
   expect(latest.syncState).toBe("authenticated");
-  expect(jar).toBe("cookie-uid-a");
+  expect(jar).toBeNull(); // expired by the handshake's one-way cleanup; nothing minted
   calls.length = 0;
   mockClientEvents.length = 0;
   return a;
@@ -155,7 +158,7 @@ function putPendingInput() {
 
 describe("Stage 0 F3 — routine same-uid refresh during a verification outage keeps the confirmed session", () => {
   it.each(["auth/internal-error", "auth/quota-exceeded", "app/network-timeout", "app/unable-to-parse-response"])(
-    "mint verify outage %s: stays authenticated, keeps A's cookie, no sign-out, unsaved input kept, ONE request (no retry)",
+    "handshake verify outage %s: stays authenticated, no sign-out, unsaved input kept, ONE request (no retry)",
     async (code) => {
       const a = await signInA();
       putPendingInput();
@@ -164,7 +167,6 @@ describe("Stage 0 F3 — routine same-uid refresh during a verification outage k
       expect(latest.syncState).toBe("authenticated");
       expect(latest.canMutate).toBe(true);
       expect(latest.user?.uid).toBe("uid-a");
-      expect(jar).toBe("cookie-uid-a"); // not cleared
       expect(calls).toEqual(["POST"]); // no DELETE, no retry
       expect(mockSignOut).not.toHaveBeenCalled(); // so no other tab is signed out either
       expect(session.getItem(PENDING)).toContain("SYNTHETIC_UNSAVED_INPUT");
@@ -172,16 +174,9 @@ describe("Stage 0 F3 — routine same-uid refresh during a verification outage k
     }
   );
 
-  it("createSessionCookie outage on a same-uid refresh is kept the same way", async () => {
-    const a = await signInA();
-    mockCreateSessionCookie.mockRejectedValue(fbErr("app/network-error"));
-    await emit(a);
-    expect(latest.syncState).toBe("authenticated");
-    expect(jar).toBe("cookie-uid-a");
-    expect(mockSignOut).not.toHaveBeenCalled();
-  });
+  // ZCA P3 R2: "the cookie-creation outage on a same-uid refresh is kept the same way" was DELETED with cookie creation.
 
-  it("deadline (10 s cut-off) on a same-uid refresh: kept; the late result never sets a cookie", async () => {
+  it("deadline (10 s cut-off) on a same-uid refresh: kept; the late result is never used", async () => {
     jest.useFakeTimers({ doNotFake: ["performance", "queueMicrotask", "nextTick", "setImmediate"] });
     try {
       const a = await signInA();
@@ -194,20 +189,18 @@ describe("Stage 0 F3 — routine same-uid refresh during a verification outage k
       });
       expect(calls).toEqual(["POST"]); // cut off at the deadline; no retry, no DELETE
       expect(latest.syncState).toBe("authenticated");
-      expect(jar).toBe("cookie-uid-a");
       expect(mockSignOut).not.toHaveBeenCalled();
       release({ uid: "uid-a" }); // late success
       await act(async () => {
         await jest.advanceTimersByTimeAsync(10);
       });
-      expect(mockCreateSessionCookie).toHaveBeenCalledTimes(1); // only the initial sign-in's
-      expect(jar).toBe("cookie-uid-a");
+      expect(calls).toEqual(["POST"]);
     } finally {
       jest.useRealTimers();
     }
   });
 
-  it("no loop: after a kept refresh nothing else is scheduled; the NEXT token event re-mints and refreshes the cookie", async () => {
+  it("no loop: after a kept refresh nothing else is scheduled; the NEXT token event re-verifies", async () => {
     const a = await signInA();
     verifyOutage();
     await emit(a);
@@ -217,10 +210,9 @@ describe("Stage 0 F3 — routine same-uid refresh during a verification outage k
     });
     expect(calls).toEqual(["POST"]); // still exactly one: no timer, no retry, no callback loop
     healthy();
-    mockCreateSessionCookie.mockImplementation(async () => "cookie-uid-a-v2");
     await emit(a);
     expect(latest.syncState).toBe("authenticated");
-    expect(jar).toBe("cookie-uid-a-v2");
+    expect(calls).toEqual(["POST", "POST"]);
   });
 
   it("a revocation found on the NEXT refresh still signs out (keeping is never sticky)", async () => {
@@ -230,7 +222,6 @@ describe("Stage 0 F3 — routine same-uid refresh during a verification outage k
     mockVerifyIdToken.mockRejectedValue(fbErr("auth/id-token-revoked"));
     await emit(a);
     expect(latest.canMutate).toBe(false);
-    expect(jar).toBeNull();
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 });
@@ -240,28 +231,21 @@ describe("Stage 0 F3 — every other case is unchanged and fail closed", () => {
     ["revoked", "auth/id-token-revoked"],
     ["disabled", "auth/user-disabled"],
     ["invalid", "auth/argument-error"],
-  ])("same-uid refresh with a confirmed %s credential → 401: cookie cleared, Firebase signed out", async (_l, code) => {
+  ])("same-uid refresh with a confirmed %s credential → 401: Firebase signed out (no DELETE)", async (_l, code) => {
     const a = await signInA();
     putPendingInput();
     mockVerifyIdToken.mockRejectedValue(fbErr(code));
     await emit(a);
     expect(latest.canMutate).toBe(false);
     expect(latest.syncState).not.toBe("authenticated");
-    expect(jar).toBeNull();
     expect(mockSignOut).toHaveBeenCalledTimes(1);
     await emit(null); // the sign-out's own callback
     expect(session.getItem(PENDING)).toBeNull(); // privacy cleanup on a genuine sign-out still runs
   });
 
-  it("same-uid refresh, cookie creation 500 (non-outage) → fail closed", async () => {
-    const a = await signInA();
-    mockCreateSessionCookie.mockRejectedValue(fbErr("auth/invalid-argument"));
-    await emit(a);
-    expect(jar).toBeNull();
-    expect(mockSignOut).toHaveBeenCalledTimes(1);
-  });
+  // ZCA P3 R2: "cookie creation 500 (non-outage)" was DELETED with cookie creation.
 
-  it("same-uid refresh, network error reaching the mint → fail closed (unchanged)", async () => {
+  it("same-uid refresh, network error reaching the handshake → fail closed (unchanged)", async () => {
     const a = await signInA();
     networkDown = true;
     await emit(a);
@@ -269,7 +253,7 @@ describe("Stage 0 F3 — every other case is unchanged and fail closed", () => {
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("initial sign-in / cold load (first callback) during an outage → not authenticated, cookie cleared, signed out", async () => {
+  it("initial sign-in / cold load (first callback) during an outage → not authenticated, signed out; a legacy cookie is still retired by the 503", async () => {
     jar = "cookie-left-by-another-tab";
     verifyOutage();
     await emit(user("uid-a"));
@@ -278,21 +262,13 @@ describe("Stage 0 F3 — every other case is unchanged and fail closed", () => {
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("initial sign-in during an outage when the cookie DELETE also fails → still signed out (cleanup not guaranteed ⇒ fail closed)", async () => {
-    jar = "cookie-left-by-another-tab";
-    deleteFails = true;
-    verifyOutage();
-    await emit(user("uid-a"));
-    expect(latest.canMutate).toBe(false);
-    expect(mockSignOut).toHaveBeenCalledTimes(1);
-  });
+  // ZCA P3 R2: "… when the cookie DELETE also fails" was DELETED: no client DELETE exists (invariant 5).
 
-  it("direct account switch A → B during an outage → A's cookie is never kept for B; B is not authenticated; signed out", async () => {
+  it("direct account switch A → B during an outage → B is not authenticated; signed out", async () => {
     await signInA();
     verifyOutage();
     await emit(user("uid-b"));
     expect(latest.canMutate).toBe(false);
-    expect(jar).toBeNull(); // A's cookie cleared, not kept
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 
@@ -331,5 +307,38 @@ describe("Stage 0 F3 — every other case is unchanged and fail closed", () => {
     expect(latest.canMutate).toBe(false);
     await emit(null);
     expect(latest.syncState).toBe("signed_out");
+  });
+});
+
+describe("ZCA P3 R2 L-2 — a 403 cross_origin is not a credential verdict", () => {
+  it("initial sign-in on an origin the server refuses → session_error, NOT signed out, one request, no loop", async () => {
+    pageOrigin = "https://unrecognised-host.example";
+    jar = "legacy";
+    const a = user("uid-a");
+    await emit(a);
+    expect(latest.syncState).toBe("session_error");
+    expect(latest.canMutate).toBe(false);
+    expect(latest.isAdmin).toBe(false);
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(calls).toEqual(["POST"]);
+    expect(jar).toBeNull(); // even the 403 retires the legacy cookie
+    // A later token event for the same User object does not restart a handshake (no refresh/sign-out storm).
+    await emit(a);
+    expect(calls).toEqual(["POST"]);
+    expect(mockClientEvents.map((e) => e[0])).toContain("failed_episode_callback_dropped");
+  });
+
+  it("a confirmed tab whose refresh hits a refused origin → session_error, NOT signed out", async () => {
+    const a = await signInA();
+    pageOrigin = "https://unrecognised-host.example";
+    await emit(a);
+    expect(latest.syncState).toBe("session_error");
+    expect(latest.canMutate).toBe(false);
+    expect(mockSignOut).not.toHaveBeenCalled();
+  });
+
+  it("control: the same request from the page's own origin is verified (the 403 above is the origin, not the token)", async () => {
+    await emit(user("uid-a"));
+    expect(latest.syncState).toBe("authenticated");
   });
 });

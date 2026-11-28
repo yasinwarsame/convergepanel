@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "./AuthProvider";
 import { useUserPlan } from "@/hooks/useUserPlan";
-import { performLogout, loginHrefAfterLogout } from "@/lib/client/logout";
+import { performLogout, LOGIN_HREF_AFTER_LOGOUT } from "@/lib/client/logout";
 import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
 import { useWorkspaceList } from "@/hooks/useWorkspaceList";
 import MoreNav, { type MoreNavItem } from "@/components/MoreNav";
@@ -26,7 +26,7 @@ export default function TopNav() {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading, isAdmin, beginLogout } = useAuth();
+  const { user, loading, isAdmin, beginLogout, cancelLogout } = useAuth();
   const { governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled, teamWorkspacesUiEnabled } = useUserPlan();
   const isGovernanceUser = governanceDashboardEligible || userPlan === "full";
   /**
@@ -161,13 +161,11 @@ export default function TopNav() {
   }, [user]);
 
   /**
-   * Explicit logout (ZCA L-2): the shared `performLogout` sequence — disable protected operations,
-   * sign the Firebase client out LOCALLY, then a bounded best-effort clear of the `__session` cookie.
-   * Under the zero-cookie-authority contract the cookie authorizes nothing, so the local sign-out is
-   * what ends this browser's access even if the clear never reaches the server. An unconfirmed clear
-   * is surfaced on the login page (`sessionClearFailed=1`), never presented as a clean sign-out.
-   * (History, Step 6.7: this once called only `signOut`, leaving a cookie that authorized requests for
-   * up to five days; Step 6.7 added the clear, but a failed clear still left that authority behind.)
+   * Explicit logout (ZCA L-2, P3 R2): the shared `performLogout` sequence — disable protected
+   * operations, then sign the Firebase client out LOCALLY. There is no server session to clear: every
+   * API request authenticates with its own bearer, so the local sign-out is what ends this browser's
+   * access. If it throws, `cancelLogout` hands the tab back to the AuthProvider (re-verification) and
+   * the logout is not reported as completed.
    */
   const handleLogout = async () => {
     if (logoutInProgressRef.current) return;
@@ -177,13 +175,13 @@ export default function TopNav() {
     // Phase 11B.5/11B.6 — dismiss both navigation popups too; this only closes UI before the sequence.
     setWorkspaceMenuOpen(false);
     setMoreMenuOpen(false);
-    const result = await performLogout({ auth, beginLogout });
+    const result = await performLogout({ auth, beginLogout, cancelLogout });
     if (!result.signedOut) {
       console.error("[TopNav] Firebase sign-out failed during logout");
       logoutInProgressRef.current = false;
       return;
     }
-    router.replace(loginHrefAfterLogout(result));
+    router.replace(LOGIN_HREF_AFTER_LOGOUT);
     setTimeout(() => {
       logoutInProgressRef.current = false;
     }, 1000);

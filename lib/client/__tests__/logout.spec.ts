@@ -1,16 +1,15 @@
 /**
- * ZCA L-2 — the shared explicit-logout sequence (`lib/client/logout.ts`).
+ * The shared explicit-logout sequence (`lib/client/logout.ts`), ZCA L-2 then P3 R2.
  *
- * Pins: (1) the order beginLogout → LOCAL Firebase signOut → server clear; (2) the outcome is
- * reported as it is (cleared / failed / timed_out), never as a clean sign-out when the clear did
- * not succeed; (3) a failed local sign-out is never reported as signed out and sends no clear;
- * (4) the clear is bounded for reporting, but it is NOT cancelled (it stays in flight, so R-S0-7's
- * mint-after-DELETE ordering keeps holding for it).
+ * Converted from the L-2 spec: the bounded server clear (cleared / failed / timed_out) and the
+ * "session clear failed" login URL flag were DELETED with the client DELETE (there is no server session).
+ * Pins now: (1) beginLogout → LOCAL Firebase signOut, nothing else, no request of any kind;
+ * (2) a THROWING local sign-out calls cancelLogout exactly once and is reported as completed only
+ * when Firebase reports nobody (R2 L-1); (3) a successful sign-out never calls cancelLogout.
  */
-import { performLogout, loginHrefAfterLogout, LOGOUT_CLEAR_TIMEOUT_MS } from "@/lib/client/logout";
+import * as logoutModule from "@/lib/client/logout";
+import { performLogout, LOGIN_HREF_AFTER_LOGOUT } from "@/lib/client/logout";
 import type { Auth } from "firebase/auth";
-
-const auth = { currentUser: { uid: "a" } } as unknown as Auth;
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -19,72 +18,71 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-describe("performLogout", () => {
-  afterEach(() => jest.useRealTimers());
+const SAVED_FETCH = (globalThis as { fetch?: unknown }).fetch;
+let fetchMock: jest.Mock;
+beforeEach(() => {
+  fetchMock = jest.fn();
+  (globalThis as { fetch?: unknown }).fetch = fetchMock;
+});
+afterEach(() => {
+  expect(fetchMock).not.toHaveBeenCalled(); // R2 MA: logout sends no request at all
+});
+afterAll(() => {
+  (globalThis as { fetch?: unknown }).fetch = SAVED_FETCH;
+});
 
-  it("runs beginLogout, then the LOCAL sign-out, then the clear — and the clear only starts after signOut resolved", async () => {
+describe("performLogout", () => {
+  it("runs beginLogout, then the LOCAL sign-out — and nothing after it", async () => {
     const log: string[] = [];
     const signOutGate = deferred<void>();
+    const auth = { currentUser: { uid: "a" } } as unknown as Auth;
     const p = performLogout({
       auth,
       beginLogout: () => log.push("begin"),
+      cancelLogout: () => log.push("cancel"),
       signOut: async () => { log.push("signOut:start"); await signOutGate.promise; log.push("signOut:done"); },
-      clear: async () => { log.push("clear"); return true; },
     });
     await Promise.resolve();
     expect(log).toEqual(["begin", "signOut:start"]);
     signOutGate.resolve();
-    await expect(p).resolves.toEqual({ signedOut: true, serverCleared: "cleared" });
-    expect(log).toEqual(["begin", "signOut:start", "signOut:done", "clear"]);
+    await expect(p).resolves.toEqual({ signedOut: true });
+    expect(log).toEqual(["begin", "signOut:start", "signOut:done"]);
   });
 
-  it.each([
-    ["the clear answers non-2xx (false)", async () => false, "failed"],
-    ["the clear rejects (network)", async () => { throw new TypeError("network"); }, "failed"],
-  ] as const)("reports a failed clear as failed when %s", async (_n, clear, expected) => {
-    const r = await performLogout({ auth, beginLogout: () => undefined, signOut: async () => undefined, clear });
-    expect(r).toEqual({ signedOut: true, serverCleared: expected });
+  it("R2 MB: a THROWING local sign-out with the user still present → cancelLogout exactly once, NOT reported as signed out", async () => {
+    const log: string[] = [];
+    const auth = { currentUser: { uid: "a" } } as unknown as Auth;
+    const result = await performLogout({
+      auth,
+      beginLogout: () => log.push("begin"),
+      cancelLogout: () => log.push("cancel"),
+      signOut: async () => { throw new Error("storage unavailable"); },
+    });
+    expect(result).toEqual({ signedOut: false });
+    expect(log).toEqual(["begin", "cancel"]);
   });
 
-  it("a hung clear is reported as timed_out at the bound — and is left running, not cancelled", async () => {
-    jest.useFakeTimers();
-    const hung = deferred<boolean>();
-    let settled = false;
-    hung.promise.then(() => { settled = true; });
-    const p = performLogout({ auth, beginLogout: () => undefined, signOut: async () => undefined, clear: () => hung.promise });
-    await Promise.resolve();
-    await Promise.resolve();
-    jest.advanceTimersByTime(LOGOUT_CLEAR_TIMEOUT_MS - 1);
-    let early: unknown = "pending";
-    void p.then((v) => { early = v; });
-    await Promise.resolve();
-    expect(early).toBe("pending");
-    jest.advanceTimersByTime(1);
-    await expect(p).resolves.toEqual({ signedOut: true, serverCleared: "timed_out" });
-    expect(settled).toBe(false); // the DELETE is still in flight; nothing aborted it
-    hung.resolve(true);
-    await hung.promise;
-    expect(settled).toBe(true);
+  it("R2 L-1: a THROWING local sign-out after which Firebase reports NOBODY → cancelLogout once, reported as signed out", async () => {
+    const log: string[] = [];
+    const auth = { currentUser: { uid: "a" } } as { currentUser: unknown };
+    const result = await performLogout({
+      auth: auth as unknown as Auth,
+      beginLogout: () => log.push("begin"),
+      cancelLogout: () => log.push("cancel"),
+      signOut: async () => { auth.currentUser = null; throw new Error("partial failure after clearing the user"); },
+    });
+    expect(result).toEqual({ signedOut: true });
+    expect(log).toEqual(["begin", "cancel"]);
   });
 
-  it("a failed LOCAL sign-out is never reported as signed out, and sends no clear", async () => {
-    const clear = jest.fn(async () => true);
-    const r = await performLogout({ auth, beginLogout: () => undefined, signOut: async () => { throw new Error("indexeddb"); }, clear });
-    expect(r).toEqual({ signedOut: false });
-    expect(clear).not.toHaveBeenCalled();
+  it("a successful sign-out never calls cancelLogout", async () => {
+    const cancelLogout = jest.fn();
+    await performLogout({ auth: { currentUser: null } as unknown as Auth, beginLogout: () => undefined, cancelLogout, signOut: async () => undefined });
+    expect(cancelLogout).not.toHaveBeenCalled();
   });
 
-  it("beginLogout runs even when the sign-out then fails (protected operations are disabled first)", async () => {
-    const begin = jest.fn();
-    await performLogout({ auth, beginLogout: begin, signOut: async () => { throw new Error("x"); }, clear: async () => true });
-    expect(begin).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("loginHrefAfterLogout", () => {
-  it("only a confirmed clear goes to the clean signed-out page", () => {
-    expect(loginHrefAfterLogout({ signedOut: true, serverCleared: "cleared" })).toBe("/login?signedOut=1");
-    expect(loginHrefAfterLogout({ signedOut: true, serverCleared: "failed" })).toBe("/login?signedOut=1&sessionClearFailed=1");
-    expect(loginHrefAfterLogout({ signedOut: true, serverCleared: "timed_out" })).toBe("/login?signedOut=1&sessionClearFailed=1");
+  it("the login destination is the plain signed-out URL (no sessionClear* flag exists any more)", () => {
+    expect(LOGIN_HREF_AFTER_LOGOUT).toBe("/login?signedOut=1");
+    expect(Object.keys(logoutModule).sort()).toEqual(["LOGIN_HREF_AFTER_LOGOUT", "performLogout"]);
   });
 });

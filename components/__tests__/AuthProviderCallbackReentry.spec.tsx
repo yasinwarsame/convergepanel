@@ -197,6 +197,8 @@ afterEach(() => {
   act(() => renderer?.unmount());
   renderer = null;
   jest.useRealTimers();
+  // ZCA P3 R2 (R2 MA, invariant 5): the client never sends a DELETE to the session endpoint, in any scenario.
+  expect(server.deletes).toBe(0);
 });
 
 const TEN_MIN = 600_000;
@@ -347,7 +349,7 @@ describe("Stage 0 contract — kept session under realistic callback re-entry", 
     expect(server.posts).toBe(before);
   });
 
-  it("a 401 on the refresh, then a 503 on the forced retry (B2): fails closed — cookie cleared, signed out, chain ends", async () => {
+  it("a 401 on the refresh, then a 503 on the forced retry (B2): fails closed — signed out, chain ends (no DELETE)", async () => {
     const a = await signInThen(0, 0);
     seed("uid-a");
     // First answer 401, every later answer 503.
@@ -365,7 +367,6 @@ describe("Stage 0 contract — kept session under realistic callback re-entry", 
     await run(TEN_MIN);
     expect(mockSignOut).toHaveBeenCalledTimes(1);
     expect(probe.syncState).toBe("signed_out");
-    expect(server.cookieUid).toBeNull();
     expect(intact("uid-a")).toBe(false);
     expect(server.posts).toBeLessThanOrEqual(3); // first + retry (+ at most one echo of the retry's forced refresh)
   });
@@ -410,7 +411,7 @@ describe("Stage 0 contract — kept session under realistic callback re-entry", 
     expect(server.cookieUid).toBe("uid-a");
   });
 
-  it("logout while a deferred refresh is in flight: ends signed_out, cookie cleared, the late 503 never resurrects the session", async () => {
+  it("logout while a deferred refresh is in flight: ends signed_out, the late 503 never resurrects the session (no DELETE)", async () => {
     const a = new FakeUser("uid-a");
     await signIn(a);
     seed("uid-a");
@@ -425,14 +426,13 @@ describe("Stage 0 contract — kept session under realistic callback re-entry", 
     });
     await flush(30_000);
     expect(probe.syncState).toBe("signed_out");
-    expect(server.cookieUid).toBeNull();
     expect(intact("uid-a")).toBe(false); // real sign-out still runs the privacy cleanup
     const before = server.posts;
     await run(120_000);
     expect(server.posts).toBe(before);
   });
 
-  it("account switch A → B while A's deferred refresh is in flight: A's cookie is cleared, B is never kept on an outage", async () => {
+  it("account switch A → B while A's deferred refresh is in flight: B is never kept on an outage (no DELETE)", async () => {
     const a = new FakeUser("uid-a");
     await signIn(a);
     server.mode = "outage";
@@ -444,7 +444,6 @@ describe("Stage 0 contract — kept session under realistic callback re-entry", 
     fb.current = b;
     fb.notify(); // direct switch, no logout
     await flush(60_000);
-    expect(server.cookieUid).not.toBe("uid-a");
     expect(probe.syncState).not.toBe("authenticated");
     expect(mockSignOut).toHaveBeenCalled(); // B's failed first mint fails closed
     const before = server.posts;

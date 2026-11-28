@@ -243,6 +243,8 @@ afterEach(() => {
   act(() => renderer?.unmount());
   renderer = null;
   jest.useRealTimers();
+  // ZCA P3 R2 (R2 MA, invariant 5): the client never sends a DELETE to the session endpoint, in any scenario.
+  expect(server.deletes).toBe(0);
 });
 
 const TEN_MIN = 600_000;
@@ -384,7 +386,7 @@ describe("R-S0-6 — revocation and failures during the initial episode are appl
     await run(60_000);
     expect(mockEvents).toContain("sync_episode_follow_up");
     expect(probe.syncState).toBe("signed_out");
-    expect(server.cookieUid).toBeNull();
+    // ZCA P3 R2: nothing to clear on the server (the afterEach pins that no DELETE was sent).
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 
@@ -502,7 +504,7 @@ describe("R-S0-6 — identity changes are never coalesced and always take preced
     await run(60_000);
     expect(server.okAnswers).toBe(0);
     expect(server.aborted).toBeGreaterThanOrEqual(1);
-    expect(server.cookieUid).toBeNull(); // the cleanup DELETE is not undone by a late Set-Cookie
+    expect(server.cookieUid).toBeNull(); // no late 200 is applied (ZCA P3 R2: and there is no cleanup DELETE)
     expect(mutableSeen).toHaveLength(0);
   });
 

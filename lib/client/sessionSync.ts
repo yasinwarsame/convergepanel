@@ -1,18 +1,15 @@
 /**
- * Auth Lifecycle Hardening, Step 6.4/6.5/6.9 — client-side session-cookie
- * synchronization primitives.
+ * Client side of the session verification handshake (ZCA P3 R2 "verify, don't mint").
  *
- * These are the ONLY functions in the app that call `POST`/`DELETE`/`GET
- * /api/auth/session`. `AuthProvider.tsx`, `app/login/page.tsx`, and
- * `app/signup/page.tsx` all go through this module rather than calling
- * `fetch` directly, so the synchronization contract (always verify the
- * server-returned uid; always fail closed by clearing the session on any
- * mismatch or error; never leave a half-established cookie) is enforced in
- * exactly one place.
+ * `establishServerSession` is the ONLY function in the app that calls `/api/auth/session`, and it only
+ * ever POSTs. The server verifies the ID token (revocation-checked) and answers the uid it verified;
+ * this module checks that uid against the client's. Nothing is minted and nothing needs clearing:
+ * there is no server session state, so there is no client DELETE anywhere (R2 MA). `AuthProvider.tsx`
+ * is the only caller; `syncState === "authenticated"` there means "the server verified, revocation-
+ * checked, a bearer for exactly this uid, in this episode".
  *
- * Deliberately framework-agnostic: `MinimalAuthUser` is a structural subset
- * of Firebase's `User` (just `uid` + `getIdToken`), so these functions are
- * fully unit-testable with a plain mock object — no Firebase SDK, no DOM.
+ * Deliberately framework-agnostic: `MinimalAuthUser` is a structural subset of Firebase's `User`
+ * (just `uid` + `getIdToken`), so it is unit-testable with a plain mock object.
  */
 
 import { logAuthSessionClientEvent } from "./authSessionTelemetry";
@@ -28,10 +25,15 @@ export type SessionSyncOutcome =
   | { ok: true; uid: string }
   | { ok: false; reason: "network_error" | "server_error" | "invalid_response" | "uid_mismatch" }
   /**
+   * R2 L-2: the server answered exactly 403 `{ code: "cross_origin" }` — it refused the request's
+   * origin, which is not a verdict on the credential. The caller degrades to "cannot mutate" WITHOUT
+   * signing Firebase out (no sign-out storm from a host mismatch).
+   */
+  | { ok: false; reason: "cross_origin" }
+  /**
    * Stage 0 F3: returned ONLY when the caller passed `keepSessionOnAuthUnavailable`
-   * and the mint answered exactly 503 `{ code: "auth_unavailable" }` — the server
-   * could not run verification, so it made no verdict and set no cookie. The
-   * existing cookie is left untouched (not cleared) in this one case.
+   * and the handshake answered exactly 503 `{ code: "auth_unavailable" }` — the server
+   * could not run verification, so it made no verdict.
    */
   | { ok: false; reason: "auth_unavailable" };
 
@@ -39,10 +41,10 @@ interface SessionSyncOptions {
   /** Non-sensitive operation-generation number (see `authGeneration.ts`), logged only for correlating client/server telemetry — never an identity value. */
   generation?: number;
   /**
-   * Stage 0 F3. Set by `AuthProvider` ONLY for a same-uid token refresh of a session
+   * Stage 0 F3. Set by `AuthProvider` ONLY for a same-uid token refresh of an identity
    * this tab already confirmed. When true, an exact 503 `auth_unavailable` answer
-   * returns `{ reason: "auth_unavailable" }` WITHOUT clearing the cookie. Every other
-   * failure — and every failure when this is false/absent — still clears it.
+   * returns `{ reason: "auth_unavailable" }` (the caller keeps its confirmed state).
+   * Otherwise that answer is `server_error`.
    */
   keepSessionOnAuthUnavailable?: boolean;
   /**
@@ -59,20 +61,19 @@ interface SessionSyncOptions {
   forceRefresh?: boolean;
   /**
    * R-S0-6. Aborts the POST(s) when `AuthProvider` supersedes or expires the sync episode. An aborted
-   * request's response is never processed by the browser, so a superseded mint can no longer set a cookie after the
-   * abort. Result: `network_error` (the caller has already discarded it as stale).
+   * request's response is never processed. Result: `network_error` (the caller has already discarded it as stale).
    */
   signal?: AbortSignal;
 }
 
-/** Exactly 503 with body `code === "auth_unavailable"`; any read/parse problem → false (fail closed). */
-async function isAuthUnavailableAnswer(res: Response): Promise<boolean> {
-  if (res.status !== 503) return false;
+/** The body's `code` of a failure answer; any read/parse problem → null (fail closed). */
+async function failureCode(res: Response): Promise<string | null> {
   try {
     const body: unknown = await res.json();
-    return typeof body === "object" && body !== null && (body as { code?: unknown }).code === "auth_unavailable";
+    const code = typeof body === "object" && body !== null ? (body as { code?: unknown }).code : undefined;
+    return typeof code === "string" ? code : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -87,32 +88,30 @@ function isValidSessionBody(body: unknown): body is { authenticated: true; uid: 
 }
 
 /**
- * Establishes (or re-establishes) the server `__session` cookie for `user`.
- * The first attempt fetches a FORCE-REFRESHED ID token by default (Step 6.5) so a
- * just-completed sign-in or account switch can never send a stale token;
- * `options.forceRefresh: false` (Stage 0 B1, a same-uid refresh of a confirmed
- * session only) reads the SDK's current token instead. A single, bounded
- * retry (Step 6.5's documented exception to "no infinite retry") covers the
- * one legitimate race this can hit: the token was valid when read but
- * expired in the few hundred milliseconds before the server verified it.
+ * Asks the server to verify `user`'s ID token and confirm its uid (the handshake). The first attempt
+ * fetches a FORCE-REFRESHED ID token by default (Step 6.5) so a just-completed sign-in or account
+ * switch can never send a stale token; `options.forceRefresh: false` (Stage 0 B1, a same-uid refresh
+ * of a confirmed identity only) reads the SDK's current token instead. A single, bounded retry
+ * (Step 6.5's documented exception to "no infinite retry") covers the one legitimate race: the token
+ * was valid when read but expired before the server verified it.
  *
- * On ANY failure — network error, non-2xx, malformed body, or (critically)
- * a server-returned uid that does not match `user.uid` — this function
- * calls `clearServerSession()` itself before returning failure (R-S0-7: unless the sync was superseded), so a
- * caller can never accidentally leave a mismatched or half-established
- * cookie in place just by forgetting to handle the failure branch.
+ * The token is sent in BOTH `Authorization: Bearer` and the JSON body (R1 L3: during the compatibility
+ * window a rollback to 9d5c6938 still accepts the body; the server requires the two to be equal).
+ * Nothing is awaited between reading the token and sending it except the abort check (R2 MA).
+ *
+ * Any failure — network error, non-2xx, malformed body, or a server-returned uid that does not match
+ * `user.uid` — is returned as a failure; the caller (AuthProvider) decides what it means. There is
+ * nothing to clear on the server.
  */
 export async function establishServerSession(user: MinimalAuthUser, options: SessionSyncOptions = {}): Promise<SessionSyncOutcome> {
   logAuthSessionClientEvent("session_sync_started", { route: SESSION_ENDPOINT, operationGeneration: options.generation });
 
   const attempt = async (force: boolean): Promise<Response> => {
     const idToken = await user.getIdToken(force);
-    // R-S0-7: never mint while an earlier DELETE from this tab is still in flight (see `pendingClears`).
-    await settlePendingClears();
     if (options.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
     return fetch(SESSION_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
       credentials: "same-origin",
       cache: "no-store",
       body: JSON.stringify({ idToken }),
@@ -140,8 +139,9 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
   }
 
   if (!res.ok) {
-    if (options.keepSessionOnAuthUnavailable === true && !rejectedFirst && (await isAuthUnavailableAnswer(res))) {
-      // No verdict, no new cookie: keep the existing one (the caller keeps its confirmed state). No retry here.
+    const code = res.status === 503 || res.status === 403 ? await failureCode(res) : null;
+    if (res.status === 503 && code === "auth_unavailable" && options.keepSessionOnAuthUnavailable === true && !rejectedFirst) {
+      // No verdict: the caller keeps its confirmed state. No retry here.
       logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "auth_unavailable_kept", operationGeneration: options.generation });
       return { ok: false, reason: "auth_unavailable" };
     }
@@ -150,7 +150,7 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
       failureCategory: rejectedFirst ? `http_401_then_${res.status}` : `http_${res.status}`,
       operationGeneration: options.generation,
     });
-    await clearUnlessSuperseded(options.signal);
+    if (res.status === 403 && code === "cross_origin") return { ok: false, reason: "cross_origin" };
     return { ok: false, reason: "server_error" };
   }
 
@@ -159,22 +159,18 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
     body = await res.json();
   } catch {
     logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "invalid_response", operationGeneration: options.generation });
-    await clearUnlessSuperseded(options.signal);
     return { ok: false, reason: "invalid_response" };
   }
 
   if (!isValidSessionBody(body)) {
     logAuthSessionClientEvent("session_sync_failed", { route: SESSION_ENDPOINT, failureCategory: "invalid_response", operationGeneration: options.generation });
-    await clearUnlessSuperseded(options.signal);
     return { ok: false, reason: "invalid_response" };
   }
 
   if (body.uid !== user.uid) {
-    // The exact desync this whole step exists to prevent — the server
-    // verified SOME valid token, but not the one belonging to the uid the
-    // client believes is now signed in. Never trust it; never leave it.
+    // The server verified SOME valid token, but not one for the uid the client believes is signed
+    // in. Never trust it.
     logAuthSessionClientEvent("session_identity_mismatch", { route: SESSION_ENDPOINT, operationGeneration: options.generation });
-    await clearUnlessSuperseded(options.signal);
     return { ok: false, reason: "uid_mismatch" };
   }
 
@@ -182,67 +178,11 @@ export async function establishServerSession(user: MinimalAuthUser, options: Ses
   return { ok: true, uid: body.uid };
 }
 
-/**
- * R-S0-7 (owner decision 2026-11-27, review MINOR-1): the DELETEs this tab currently has in flight. A cookie clear and a
- * later mint race at the server and in the cookie jar: if an older clear (an expired episode's cleanup, the defensive
- * clear after a sign-out) is answered AFTER a newer identity's mint, it deletes the newer identity's cookie. So every
- * mint first waits until every DELETE already in flight has settled. The browser applies a response's Set-Cookie before
- * `fetch` resolves, so after the wait the older clear has taken effect and the newer cookie is set after it. A DELETE
- * that hangs delays the mint only until the caller's own deadline (AuthProvider SESSION_SYNC_DEADLINE_MS), which then
- * fails closed — never a mint racing a pending clear.
+/*
+ * ZCA P3 R2: `clearServerSession` (the client DELETE), the R-S0-7 `pendingClears` wait before every
+ * handshake and the failure-path clears were removed. The server holds no session state for this
+ * client, so there is nothing to clear and nothing for a handshake to wait for (invariant 5).
  */
-const pendingClears = new Set<Promise<boolean>>();
-
-async function settlePendingClears(): Promise<void> {
-  while (pendingClears.size > 0) {
-    await Promise.allSettled([...pendingClears]);
-  }
-}
-
-/**
- * R-S0-7: a failure-path clear of a sync that was SUPERSEDED (its signal aborted by AuthProvider) is skipped. A newer
- * identity event owns the cookie now: a newer sign-in mints its own cookie (or clears it on its own failure), and a
- * sign-out runs AuthProvider's own clear. Issuing the stale clear here could land after the newer mint and delete it.
- */
-async function clearUnlessSuperseded(signal: AbortSignal | undefined): Promise<void> {
-  if (signal?.aborted === true) {
-    logAuthSessionClientEvent("stale_cleanup_skipped", { route: SESSION_ENDPOINT });
-    return;
-  }
-  await clearServerSession();
-}
-
-/**
- * Clears the server `__session` cookie. Idempotent — a cookie that is
- * already absent still resolves as success (the DELETE route always
- * returns 2xx). Awaited by every caller (Step 6.7's core requirement):
- * logout, account switching, and every fail-closed path in
- * `establishServerSession` above.
- */
-export async function clearServerSession(): Promise<boolean> {
-  const clear = deleteServerSession();
-  pendingClears.add(clear);
-  try {
-    return await clear;
-  } finally {
-    pendingClears.delete(clear);
-  }
-}
-
-async function deleteServerSession(): Promise<boolean> {
-  try {
-    const res = await fetch(SESSION_ENDPOINT, { method: "DELETE", credentials: "same-origin", cache: "no-store" });
-    if (res.ok) {
-      logAuthSessionClientEvent("session_cleared", { route: SESSION_ENDPOINT });
-      return true;
-    }
-    logAuthSessionClientEvent("logout_clear_failed", { route: SESSION_ENDPOINT, failureCategory: `http_${res.status}` });
-    return false;
-  } catch {
-    logAuthSessionClientEvent("logout_clear_failed", { route: SESSION_ENDPOINT, failureCategory: "network_error" });
-    return false;
-  }
-}
 
 /*
  * ZCA L-2: the cookie-identity status read (`getServerSessionIdentity`) and the Step 6.9

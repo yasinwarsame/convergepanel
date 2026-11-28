@@ -42,10 +42,9 @@ describe("AuthProvider — source-level wiring guarantees", () => {
     expect(source).not.toMatch(/fetch\(\s*["']\/api\/auth\/session["']/);
   });
 
-  it("defensively clears the server session when Firebase reports no user, and again on any sync failure", () => {
-    // Once directly for the signed-out branch, once inside the fail-closed sync-failure branch (via establishServerSession's own internal clearServerSession call — asserted in sessionSync.spec.ts).
-    const clearCalls = source.match(/clearServerSession\(\)/g) ?? [];
-    expect(clearCalls.length).toBeGreaterThanOrEqual(1);
+  it("ZCA P3 R2 (inverted): never clears any server session — no DELETE and no session-clearing import anywhere in the provider", () => {
+    expect(source).not.toMatch(/\bclear\w*ServerSession\b|method:\s*["']DELETE["']/);
+    expect(source).toMatch(/import \{ establishServerSession \} from "@\/lib\/client\/sessionSync";/);
   });
 
   it("signs the Firebase client out on a sync failure or uid mismatch — the previous identity is never retained on the client either", () => {

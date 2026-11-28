@@ -3,39 +3,36 @@
 /**
  * Authentication Provider Component
  *
- * Auth Lifecycle Hardening, Step 6.3/6.6/6.8 — this is now the single owner
- * of the client/server session-synchronization state machine
+ * Auth Lifecycle Hardening, Step 6.3/6.6/6.8 — the single owner of the
+ * client/server session-verification state machine
  * (`lib/client/authSessionStateMachine.ts`), not just a passthrough for
- * Firebase's client auth state. Root cause this exists to fix: previously,
- * `user` became non-null (and the whole app treated the visitor as signed
- * in) the instant Firebase's client SDK resolved a credential — with no
- * awareness of whether the server's `__session` cookie had been
- * established for that SAME identity yet. Since every protected API route
- * resolves identity via the `__session` cookie FIRST and only falls back to
- * a request's Bearer token if no cookie is present (`getRequestUid()`,
- * `lib/teams/teamApiAuth.ts`), a cookie left over from a PREVIOUS session
- * could silently keep authorizing requests as the wrong user for as long as
- * it remained valid — regardless of what the UI displayed.
+ * Firebase's client auth state. `syncState === "authenticated"` means: the
+ * server verified, revocation-checked, a bearer for EXACTLY this uid, in this
+ * episode (the handshake, `POST /api/auth/session`, ZCA P3 R2 "verify, don't
+ * mint"). There is no server session cookie: every API request authenticates
+ * with its own bearer, so nothing here writes or clears server state.
  *
- * This component now:
+ * This component:
  * - Listens to `onIdTokenChanged` (a superset of `onAuthStateChanged`: also
  *   fires on silent token refresh), not `onAuthStateChanged`.
  * - Treats every callback with a DIFFERENT uid than previously tracked
  *   (including the very first callback after mount) as a new identity that
- *   must be synchronized with the server before `syncState` can become
+ *   must be verified by the server before `syncState` can become
  *   `"authenticated"` — this is what makes a direct account switch (no
  *   explicit logout in between) safe, per Step 6.6's fallback path.
  * - Treats a callback with the SAME uid as a routine token refresh, which
- *   keeps `syncState` at `"authenticated"` throughout (no UI flicker) but
- *   still re-syncs the cookie's expiry.
+ *   keeps `syncState` at `"authenticated"` throughout (no UI flicker) and
+ *   re-verifies the new token.
  * - Guards every async result with an operation-generation counter
  *   (`lib/client/authGeneration.ts`) so a stale response — an old login
  *   after a newer one, a refresh after logout, a rapid A→B→A — can never
  *   overwrite state a later operation has already established.
- * - On ANY sync failure or uid mismatch, defensively signs the Firebase
- *   client out too (the server session was already cleared by
- *   `establishServerSession` itself) — the previous identity is never
- *   retained in either place.
+ * - On a verification failure or uid mismatch, defensively signs the Firebase
+ *   client out — the previous identity is never retained. (A 403
+ *   `cross_origin` answer is the exception, R2 L-2: not a credential verdict,
+ *   so it degrades to `session_error` without signing out.)
+ * - `cancelLogout()` (ZCA P3 R2 MB) re-enters verification through the same
+ *   episode machinery when a local `signOut` threw.
  *
  * `user`/`loading`/`authReady`/`isAdmin`/`adminResolved` are kept for
  * backward compatibility with existing consumers that only need to know
@@ -54,7 +51,7 @@ import { auth } from "@/lib/firebase/client";
 import { perf } from "@/lib/utils/performance";
 import { nextSessionSyncState, canPerformProtectedMutation, type SessionSyncState } from "@/lib/client/authSessionStateMachine";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
-import { establishServerSession, clearServerSession } from "@/lib/client/sessionSync";
+import { establishServerSession } from "@/lib/client/sessionSync";
 import { logAuthSessionClientEvent } from "@/lib/client/authSessionTelemetry";
 import { clearLocalPrivateDataOnSignOut, clearOtherAccountsLocalData } from "@/lib/client/localPrivateData";
 import posthog from "posthog-js";
@@ -71,13 +68,25 @@ interface AuthContextType {
   canMutate: boolean;
   /**
    * Step 6.7 — call at the very start of an explicit logout, BEFORE the
-   * async `clearServerSession()`/`signOut()` calls, so protected mutation
-   * UI (gated on `canMutate`) disables immediately rather than only after
-   * those calls resolve. The reactive `onIdTokenChanged(null)` callback
-   * that follows `signOut()` still drives the actual transition to
-   * `signed_out` — this just closes the gap before that fires.
+   * async `signOut()` call, so protected mutation UI (gated on `canMutate`)
+   * disables immediately rather than only after it resolves. The reactive
+   * `onIdTokenChanged(null)` callback that follows `signOut()` still drives
+   * the actual transition to `signed_out` — this just closes the gap before
+   * that fires.
    */
   beginLogout: () => void;
+  /**
+   * ZCA P3 R2 MB / L-1 — call when the local `signOut()` that followed
+   * `beginLogout()` THREW. It never reports the logout as completed:
+   *   - Firebase reports nobody → the signed-out transition (`client_signed_out`,
+   *     React `user` null, `isAdmin` false);
+   *   - Firebase still reports a user → that user is re-verified as a NEW
+   *     identity episode through the ordinary `handleTokenEvent` machinery
+   *     (deadline, abort, own-refresh echo coalescing, generation guard):
+   *     `canMutate` comes back only after a fresh 200 for that uid.
+   * It never runs a handshake of its own.
+   */
+  cancelLogout: () => void;
   /**
    * R5 (PR #329 R4 review MINOR-1): true while `authReady` comes ONLY from the
    * 3 s cold-load timeout — the shell is unblocked as signed out, but Firebase
@@ -96,8 +105,8 @@ const noop = () => {};
  * Worst legitimate case: two attempts (the first plus the bounded 401 retry), each = one forced securetoken refresh
  * (normally < 2 s) + one mint bounded server-side by AUTH_VERIFICATION_DEADLINE_MS (10 s, one end-to-end deadline per
  * mint) + transport / cold start (~2–3 s) ≈ 2 × 15 s = 30 s. Past it the attempt cannot be a legitimate slow success
- * of the reviewed server contract, so it FAILS CLOSED: the POST is aborted, late results are invalidated, the cookie is
- * cleared and Firebase is signed out (the same fail-closed transition as a failed sync, which for a routine refresh's
+ * of the reviewed server contract, so it FAILS CLOSED: the POST is aborted, late results are invalidated and Firebase
+ * is signed out (the same fail-closed transition as a failed sync, which for a routine refresh's
  * network error is already sign-out); the user signs in again explicitly. It never falls back to the pre-R-S0-6
  * callback handling.
  */
@@ -112,6 +121,7 @@ const AuthContext = createContext<AuthContextType>({
   syncState: "signed_out",
   canMutate: false,
   beginLogout: noop,
+  cancelLogout: noop,
   identityProvisional: false,
 });
 
@@ -135,6 +145,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [adminResolved, setAdminResolved] = useState(false);
   const [identityProvisional, setIdentityProvisional] = useState(false);
   const [syncState, dispatchSync] = useReducer(nextSessionSyncState, "signed_out");
+  // ZCA P3 R2 MB: bound by the effect below to its own episode machinery; a no-op before mount and after unmount.
+  const cancelLogoutRef = useRef<() => void>(noop);
 
   useEffect(() => {
     perf.mark('auth_check_start');
@@ -184,7 +196,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     //   coalesced into the episode: no generation bump, no new forced refresh; it queues at most ONE follow-up, an
     //   ordinary non-forced same-uid refresh that runs only after a successful answer.
     // - Anything else (null, another uid, a replaced User object) supersedes the episode immediately, as before, and
-    //   aborts its pending POST, so a superseded answer is never applied and, once aborted, sets no cookie.
+    //   aborts its pending POST, so a superseded answer is never applied.
     // - The episode has a hard client deadline that FAILS CLOSED (see SESSION_SYNC_DEADLINE_MS).
     // - Own refresh echoes (same User object, R-S0-7) are still coalesced first by R-S0-4 (no follow-up: the sync uses
     //   that token).
@@ -243,37 +255,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const expireSyncEpisode = (ep: SyncEpisode) => {
       if (!isMounted || syncEpisode !== ep) return;
       endSyncEpisode();
-      ep.controller.abort(); // before the DELETE below: an aborted POST can no longer set a cookie after it
+      ep.controller.abort(); // the expired episode's POST: its answer is never processed
       const expiryGeneration = generationGuard.next(); // every late result of the expired episode is now stale
-      failedEpisodeUser = ep.user; // synchronously: no callback during the DELETE below may restart this episode
+      failedEpisodeUser = ep.user; // synchronously: no later callback for this User object may restart this episode
       prevUidRef.current = null;
       logAuthSessionClientEvent("sync_episode_deadline_exceeded", { operationGeneration: ep.generation });
       dispatchSync({ type: ep.isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
       setIsAdmin(false);
       setAdminResolved(true);
-      // R-S0-7 (owner decision 2026-11-27, review MINOR-1): every state change above is synchronous, so protected
-      // operations are disabled now. The two destructive steps below act ONLY while the expired identity still owns the
-      // tab: no newer identity event has bumped the generation since the expiry, and Firebase still reports the expired
-      // User object (object identity, never the uid). Ownership is checked synchronously before each step:
-      // - DELETE: issued at once (still synchronous with the expiry). A sign-in that starts while it is pending cannot
-      //   be clobbered by it: `establishServerSession` sends no mint until every DELETE already in flight has settled
-      //   (lib/client/sessionSync.ts), so the newer cookie is always set after this clear, never before it.
-      // - signOut: only if, after the DELETE, the expired identity STILL owns the tab. A newer user (A→B), a new sign-in
-      //   of the same account (a new User object, A→B→A or logout→login) or a logout that happened meanwhile owns state
-      //   now; the expired episode's cleanup never signs it out and never writes React state again.
-      const expiredStillOwnsTab = () => isMounted && generationGuard.isCurrent(expiryGeneration) && auth.currentUser === ep.user;
-      if (!expiredStillOwnsTab()) {
+      // R-S0-7: every state change above is synchronous, so protected operations are disabled now. The sign-out
+      // acts ONLY while the expired identity still owns the tab: no newer identity event has bumped the generation
+      // since the expiry, and Firebase still reports the expired User object (object identity, never the uid). A newer
+      // user (A→B), a new sign-in of the same account (a new User object) or a logout that happened meanwhile owns
+      // state now; the expired episode's cleanup never signs it out. (ZCA P3 R2: there is no server DELETE any more.)
+      if (!(generationGuard.isCurrent(expiryGeneration) && auth.currentUser === ep.user)) {
         logAuthSessionClientEvent("stale_cleanup_skipped", { operationGeneration: ep.generation });
         return;
       }
-      void (async () => {
-        await clearServerSession();
-        if (!expiredStillOwnsTab()) {
-          logAuthSessionClientEvent("stale_cleanup_skipped", { operationGeneration: ep.generation });
-          return;
-        }
-        await signOutIfStillCurrent(ep.user);
-      })();
+      void signOutIfStillCurrent(ep.user);
     };
 
     const timeoutId = setTimeout(() => {
@@ -372,14 +371,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setLoading(false);
         setIsAdmin(false);
         setAdminResolved(true);
-        // Defensive cleanup: whatever caused Firebase to report no user, make
-        // sure the server cookie doesn't outlive it. Safe to call even if
-        // logout already cleared it (idempotent). Guarded so a login that
-        // starts WHILE this is in flight can't have its own sync clobbered.
-        await clearServerSession();
-        if (!generationGuard.isCurrent(myGeneration)) {
-          logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
-        }
+        // ZCA P3 R2: no server cleanup — there is no server session to clear (no client DELETE anywhere).
         return;
       }
 
@@ -427,8 +419,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       };
       syncEpisode = episode;
 
-      // Stage 0 F3: only a same-uid refresh of a session THIS tab already confirmed may
-      // keep its cookie when the mint says "verification could not run" (503 auth_unavailable).
+      // Stage 0 F3: only a same-uid refresh of an identity THIS tab already confirmed may keep its
+      // confirmed state when the handshake says "verification could not run" (503 auth_unavailable).
       // Stage 0 B1 (also closes R-S0-5): the same-uid refresh uses the token this callback was delivered for (no forced
       // refresh), so neither this tab's own sync nor another tab's persisted token can make it mint a new token that
       // re-notifies every tab. New identities still force (Step 6.5); the bounded 401 retry always forces.
@@ -477,17 +469,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
       } else if (!isNewIdentity && outcome.reason === "auth_unavailable") {
         // Stage 0 F3: a routine same-uid refresh hit a verification OUTAGE, not a
-        // credential verdict. Keep the confirmed session (no cookie clear, no
-        // sign-out — so no lost /verify input and no sign-out of every other tab).
+        // credential verdict. Keep the confirmed state (no sign-out — so no lost
+        // /verify input and no sign-out of every other tab).
         // No retry: the next Firebase token event re-attempts. A revoked/disabled/
         // invalid answer (401), any other failure, and every new identity still
         // take the fail-closed branch below.
         dispatchSync({ type: "token_refresh_deferred" });
         logAuthSessionClientEvent("token_refresh_deferred", { operationGeneration: myGeneration });
+      } else if (outcome.reason === "cross_origin") {
+        // R2 L-2: the server refused this page's ORIGIN (a host mismatch), which is not a verdict on the
+        // credential. Degrade to "cannot mutate" WITHOUT signing Firebase out (no sign-out storm across
+        // tabs). This User object cannot restart a handshake until Firebase reports null or another user,
+        // so a refused origin can never drive a refresh loop.
+        prevUidRef.current = null;
+        dispatchSync({ type: isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
+        failedEpisodeUser = nextUser;
+        setIsAdmin(false);
+        setAdminResolved(true);
       } else {
-        // Fail closed: `establishServerSession` already cleared the server
-        // cookie. The previous identity must never be retained on the
-        // client either, so sign Firebase out too — this itself fires
+        // Fail closed. The previous identity must never be retained on the
+        // client, so sign Firebase out — this itself fires
         // another onIdTokenChanged(null) callback that completes the
         // transition to `signed_out`. Queued follow-up work is dropped, and this
         // User object cannot restart a sync until Firebase reports null or another user.
@@ -497,10 +498,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     };
 
+    /**
+     * ZCA P3 R2 MB / L-1: the local `signOut` after `beginLogout()` threw. Re-enter through `handleTokenEvent` —
+     * never a handshake of its own — so the re-verification is an ordinary registered episode (deadline, abort
+     * controller, `ownPendingRefresh` echo coalescing, generation guard):
+     *   - whatever was in flight is about the pre-logout tab: it is superseded and its generation retired FIRST, so
+     *     neither the R-S0-4 echo check nor the R-S0-6 episode coalescing can swallow this re-entry;
+     *   - `failedEpisodeUser` is reset: the explicit user action may re-verify a User object an earlier episode failed;
+     *   - `prevUidRef = null` makes it a NEW identity episode (`client_signed_in` → `syncing_session`, forced token,
+     *     `keepSessionOnAuthUnavailable` false), so only `session_sync_succeeded` for this uid reaches `authenticated`;
+     *   - Firebase reports nobody (L-1) → the ordinary signed-out branch (`client_signed_out`, user null, not admin).
+     */
+    cancelLogoutRef.current = () => {
+      if (!isMounted) return;
+      const current = auth.currentUser;
+      supersedeSyncEpisode();
+      generationGuard.next();
+      failedEpisodeUser = null;
+      prevUidRef.current = null;
+      logAuthSessionClientEvent("logout_cancelled", {});
+      void handleTokenEvent(current);
+    };
+
     const unsubscribe = onIdTokenChanged(auth, handleTokenEvent);
 
     return () => {
       isMounted = false;
+      cancelLogoutRef.current = noop;
       clearTimeout(timeoutId);
       supersedeSyncEpisode();
       unsubscribe();
@@ -508,10 +532,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const beginLogout = () => dispatchSync({ type: "logout_started" });
+  const cancelLogout = () => cancelLogoutRef.current();
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, authReady, isAdmin, adminResolved, syncState, canMutate: canPerformProtectedMutation(syncState), beginLogout, identityProvisional }}
+      value={{ user, loading, authReady, isAdmin, adminResolved, syncState, canMutate: canPerformProtectedMutation(syncState), beginLogout, cancelLogout, identityProvisional }}
     >
       {children}
     </AuthContext.Provider>

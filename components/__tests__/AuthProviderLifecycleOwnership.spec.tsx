@@ -2,20 +2,19 @@
  * R-S0-7 (owner decision 2026-11-27): final auth-lifecycle correction of Stage 0 (#344), review findings MINOR-1,
  * MINOR-2 and MINOR-5.
  *
- * MINOR-1 — stale destructive cleanup. At the R-S0-6 head (b906e2ef) an expired episode ran
- * `clearServerSession()` then `failClosed(ep.user)` → `signOut(auth)` with no ownership re-check: a user who signed in
- * while that DELETE was pending was signed out by it, and the DELETE itself could land after the newer mint and delete
- * the newer cookie. Now the expired identity's DELETE and sign-out run only while it still owns the tab (generation AND
- * Firebase's current User object), every mint waits for DELETEs already in flight, and every fail-closed sign-out
- * requires Firebase to still report the failed User object.
+ * MINOR-1 — stale destructive cleanup. At the R-S0-6 head (b906e2ef) an expired episode ran a server DELETE then
+ * `failClosed(ep.user)` → `signOut(auth)` with no ownership re-check. R-S0-7 made the cleanup run only while the
+ * expired identity still owns the tab (generation AND Firebase's current User object). ZCA P3 R2 removed the DELETE
+ * (no server session exists): the five "while the cleanup DELETE is pending" scenarios were DELETED with that window,
+ * and the remaining tests pin that the expiry's sign-out still requires ownership and that NO request but the POST
+ * handshake is ever sent.
  * MINOR-2 — R-S0-4 echo by uid. A replacement User object with the same uid arriving during this tab's own token refresh
  * was swallowed as an echo; it now supersedes the episode.
  * MINOR-5 — two contract points had no killing test: failedEpisodeUser set synchronously at expiry, and the queued
  * follow-up dropped after an F3 deferral.
  *
- * Same Firebase 12.7.0 behavioural double as AuthProviderInitialEpisode.spec.tsx, plus: Firebase's `currentUser`, a
- * DELETE with latency whose clearing Set-Cookie is applied when its response is processed (like a browser), per-uid
- * revocation, and an ordered request/cookie log. "Firebase reports B before its callback ran" is modelled by setting
+ * Same Firebase 12.7.0 behavioural double as AuthProviderInitialEpisode.spec.tsx, plus: Firebase's `currentUser`,
+ * per-uid revocation, and an ordered request log (a DELETE is still recorded, so its absence is asserted). "Firebase reports B before its callback ran" is modelled by setting
  * `fb.current` without notifying (the real SDK delivers observer callbacks asynchronously after updating currentUser).
  * Real AuthProvider, real sessionSync, real state machine and privacy cleanup. Synthetic data only. Deterministic
  * simulation — not a Production measurement.
@@ -257,6 +256,8 @@ afterEach(() => {
   act(() => renderer?.unmount());
   renderer = null;
   jest.useRealTimers();
+  // ZCA P3 R2 (R2 MA, invariant 5): the client never sends a DELETE to the session endpoint, in any scenario.
+  expect(server.deletes).toBe(0);
 });
 
 const TEN_MIN = 600_000;
@@ -264,30 +265,38 @@ const TEN_MIN = 600_000;
 const DEADLINE = SESSION_SYNC_DEADLINE_MS;
 const idx = (e: string) => server.log.indexOf(e);
 const lastIdx = (e: string) => server.log.lastIndexOf(e);
-/** A sign-in whose mint never answers, run to just past its deadline with the cleanup DELETE still pending. */
-async function expireWithPendingCleanup(deleteLatencyMs: number) {
+/**
+ * A sign-in whose handshake never answers, run to just past its deadline. ZCA P3 R2: there is no cleanup DELETE; the
+ * expiry's fail-closed sign-out is made SLOW here (`signOutLatencyMs`) so a callback can arrive while it is pending.
+ */
+async function expireEpisode(signOutLatencyMs: number) {
   server.mintLatencyByUid = { "uid-a": 3_600_000 };
-  server.deleteLatencyMs = deleteLatencyMs;
+  if (signOutLatencyMs > 0) {
+    mockSignOut.mockImplementationOnce(async () => {
+      await delay(signOutLatencyMs);
+      fb.current = null;
+      fb.notify();
+    });
+  }
   const a = new FakeUser("uid-a");
   startSignIn(a);
   await flush(DEADLINE + 100);
   expect(mockEvents).toContain("sync_episode_deadline_exceeded");
-  expect(server.deletesInFlight).toBe(1); // the expired episode's cleanup DELETE is pending
+  expect(mockSignOut).toHaveBeenCalledTimes(1); // issued at once (no DELETE to wait for)
   expect(probe.canMutate).toBe(false);
   return a;
 }
 
 describe("R-S0-7 MINOR-5 — the two contract points now have killing tests", () => {
-  it("expiry sets failedEpisodeUser synchronously: a same-object callback while the expiry's DELETE is pending is dropped, never a new episode", async () => {
-    const a = await expireWithPendingCleanup(5_000);
-    a.externalChange(); // the failed User object's token changes while its cleanup is still pending
+  it("expiry sets failedEpisodeUser synchronously: a same-object callback while the expiry's sign-out is pending is dropped, never a new episode", async () => {
+    const a = await expireEpisode(5_000);
+    a.externalChange(); // the failed User object's token changes while its sign-out is still pending
     await flush(100);
     expect(mockEvents).toContain("failed_episode_callback_dropped");
     await run(60_000);
     expect(server.posts).toBe(1); // no restart into the failed episode
-    expect(mockSignOut).toHaveBeenCalledTimes(1); // the expired identity is still signed out after its DELETE
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
     expect(probe.syncState).toBe("signed_out");
-    expect(server.cookieUid).toBeNull();
     expect(mutableSeen).toHaveLength(0);
   });
 
@@ -335,111 +344,22 @@ describe("R-S0-7 MINOR-1 — an expired episode's cleanup never signs out or clo
     expect(mutableSeen.every((m) => m.uid === "uid-b")).toBe(true);
   });
 
-  it("A → B while A's cleanup DELETE is pending: B is never signed out, B's mint is sent only after the DELETE settled, the cookie is B's", async () => {
-    await expireWithPendingCleanup(5_000);
-    const b = new FakeUser("uid-b");
-    startSignIn(b);
-    await flush(100);
-    seed("uid-b");
-    expect(server.postsByUid["uid-b"] ?? 0).toBe(0); // B's mint waits for the in-flight DELETE
-    expect(probe.canMutate).toBe(false);
-    await run(60_000);
-    expect(probe.user).toBe(b);
-    expect(probe.syncState).toBe("authenticated");
-    expect(server.cookieUid).toBe("uid-b");
-    expect(mockSignOut).not.toHaveBeenCalled();
-    expect(server.postsDuringDelete).toBe(0);
-    expect(idx("DELETE_done")).toBeLessThan(idx("POST_sent:uid-b"));
-    expect(lastIdx("COOKIE:uid-b")).toBeGreaterThan(lastIdx("DELETE_done"));
-    expect(mockEvents).toContain("stale_cleanup_skipped");
-    expect(intact("uid-b")).toBe(true); // no privacy cleanup against B
-    expect(mutableSeen.every((m) => m.uid === "uid-b")).toBe(true);
-  });
+  // ZCA P3 R2: "A → B", "same uid, new User object", "logout → login (B)", "logout → the same User object restored" and
+  // "A → B → A" WHILE THE CLEANUP DELETE IS PENDING were DELETED: that window no longer exists (no DELETE is sent).
 
-  it("same uid, new User object while the cleanup is pending, and its mint still pending when the DELETE completes: not signed out, authenticated by its own mint", async () => {
-    await expireWithPendingCleanup(3_000);
-    server.mintLatencyByUid = { "uid-a": 8_000 };
-    const a2 = new FakeUser("uid-a"); // a fresh sign-in of the same account (a new User object)
-    startSignIn(a2);
-    await flush(4_000); // the DELETE completed at +3 s; a2's mint (sent after it) is pending
-    expect(server.deletesInFlight).toBe(0);
-    expect(server.postsByUid["uid-a"]).toBe(2);
-    expect(server.inFlight).toBe(1);
-    expect(mockSignOut).not.toHaveBeenCalled();
-    expect(probe.user).toBe(a2);
-    expect(probe.canMutate).toBe(false); // no protected authorization before a2's own 200
-    await run(30_000);
-    expect(probe.user).toBe(a2);
-    expect(probe.syncState).toBe("authenticated");
-    expect(server.cookieUid).toBe("uid-a");
-    expect(server.okAnswers).toBe(1);
-    expect(mockSignOut).not.toHaveBeenCalled();
-  });
-
-  it("logout → login (B) while the cleanup is pending: only the explicit logout signs out; B's mint follows both DELETEs; the cookie is B's", async () => {
-    await expireWithPendingCleanup(5_000);
-    await act(async () => {
-      await mockSignOut(); // explicit logout → null callback → privacy cleanup + its defensive DELETE
-    });
-    await flush(100);
-    expect(probe.syncState).toBe("signed_out");
-    const b = new FakeUser("uid-b");
-    startSignIn(b);
-    await run(60_000);
-    expect(mockSignOut).toHaveBeenCalledTimes(1);
-    expect(probe.user).toBe(b);
-    expect(probe.syncState).toBe("authenticated");
-    expect(server.cookieUid).toBe("uid-b");
-    expect(server.postsDuringDelete).toBe(0);
-    expect(lastIdx("DELETE_done")).toBeLessThan(idx("POST_sent:uid-b"));
-    expect(mutableSeen.every((m) => m.uid === "uid-b")).toBe(true);
-  });
-
-  it("logout → the same User object restored while the cleanup is pending: the stale cleanup is not authoritative because the object matches — the generation moved on", async () => {
-    const a = await expireWithPendingCleanup(5_000);
-    await act(async () => {
-      await mockSignOut();
-    });
-    await flush(100);
-    server.mintLatencyByUid = {};
-    startSignIn(a);
-    await run(60_000);
-    expect(mockSignOut).toHaveBeenCalledTimes(1); // the explicit logout only
-    expect(probe.user).toBe(a);
-    expect(probe.syncState).toBe("authenticated");
-    expect(server.cookieUid).toBe("uid-a");
-  });
-
-  it("A → B → A (new A object) while the cleanup is pending: final A authenticated by its own mint, B never mutable, no sign-out", async () => {
-    await expireWithPendingCleanup(5_000);
-    server.mintLatencyByUid = { "uid-b": 2_000 };
-    startSignIn(new FakeUser("uid-b"));
-    await flush(1_000);
-    const a2 = new FakeUser("uid-a");
-    startSignIn(a2);
-    await run(60_000);
-    expect(probe.user).toBe(a2);
-    expect(probe.syncState).toBe("authenticated");
-    expect(server.cookieUid).toBe("uid-a");
-    expect(mockSignOut).not.toHaveBeenCalled();
-    expect(server.postsDuringDelete).toBe(0);
-    expect(mutableSeen.every((m) => m.uid === "uid-a")).toBe(true);
-  });
-
-  it("control: with no newer identity, the expired identity is still fully cleaned up — DELETE, then sign-out, privacy cleanup, nothing restarts", async () => {
-    await expireWithPendingCleanup(5_000);
+  it("control: with no newer identity, the expired identity is still fully cleaned up — sign-out at once (no DELETE), privacy cleanup, nothing restarts", async () => {
     seed("uid-a");
+    await expireEpisode(0);
     await run(60_000);
     expect(mockSignOut).toHaveBeenCalledTimes(1);
     expect(probe.syncState).toBe("signed_out");
-    expect(server.cookieUid).toBeNull();
     expect(server.posts).toBe(1);
     expect(intact("uid-a")).toBe(false);
   });
 });
 
 describe("R-S0-7 — a token rejection signs out only the identity it was about", () => {
-  it("revoked at sign-in: fail closed — cookie cleared, signed out, privacy cleanup, never authenticated", async () => {
+  it("revoked at sign-in: fail closed — signed out, privacy cleanup, never authenticated (no DELETE)", async () => {
     server.mode = "revoked";
     startSignIn(new FakeUser("uid-a"));
     seed("uid-a");

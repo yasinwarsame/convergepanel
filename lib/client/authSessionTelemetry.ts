@@ -19,8 +19,6 @@ export type AuthSessionClientOperation =
   | "session_sync_succeeded"
   | "session_sync_failed"
   | "session_identity_mismatch"
-  | "session_cleared"
-  | "logout_clear_failed"
   | "stale_auth_operation_discarded"
   | "token_refresh_deferred"
   /** R-S0-4: a same-uid token callback arrived while this tab's own sync refresh was pending and was coalesced into it. */
@@ -33,8 +31,10 @@ export type AuthSessionClientOperation =
   | "sync_episode_deadline_exceeded"
   /** R-S0-6: a callback for a User object whose sync already failed closed was dropped (no automatic restart). */
   | "failed_episode_callback_dropped"
-  /** R-S0-7: a stale operation's destructive cleanup (cookie DELETE / Firebase sign-out) was skipped because a newer identity state owns the tab. */
-  | "stale_cleanup_skipped";
+  /** R-S0-7: a stale operation's destructive cleanup (Firebase sign-out) was skipped because a newer identity state owns the tab. */
+  | "stale_cleanup_skipped"
+  /** ZCA P3 R2 MB: a local sign-out threw; the tab re-enters verification (or the signed-out transition). */
+  | "logout_cancelled";
 
 export type AuthSessionClientTelemetryMetadata = {
   route?: string;
@@ -50,7 +50,6 @@ export function logAuthSessionClientEvent(
   const isFailure =
     operation === "session_sync_failed" ||
     operation === "session_identity_mismatch" ||
-    operation === "logout_clear_failed" ||
     operation === "token_refresh_deferred" ||
     operation === "sync_episode_deadline_exceeded";
   try {

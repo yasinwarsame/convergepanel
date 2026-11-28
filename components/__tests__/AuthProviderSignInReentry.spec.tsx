@@ -211,6 +211,8 @@ afterEach(() => {
   act(() => renderer?.unmount());
   renderer = null;
   jest.useRealTimers();
+  // ZCA P3 R2 (R2 MA, invariant 5): the client never sends a DELETE to the session endpoint, in any scenario.
+  expect(server.deletes).toBe(0);
 });
 
 const TEN_MIN = 600_000;

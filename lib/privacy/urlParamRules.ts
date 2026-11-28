@@ -76,7 +76,6 @@ export const SAFE_QUERY_PARAM_SHAPES: ReadonlyMap<string, RegExp> = new Map([
   ["limit", SMALL_INTEGER],
   ["offset", SMALL_INTEGER],
   ["signedOut", FLAG],
-  ["sessionClearFailed", FLAG],
   ["success", FLAG],
   ["canceled", FLAG],
   ["upgraded", FLAG],

@@ -78,7 +78,7 @@ describe("sanitizeUrl — sensitive params are redacted (value gone, name kept)"
   });
 
   it("keeps every allowlisted param's well-shaped value (control: non-sensitive telemetry still flows)", () => {
-    const sample: Record<string, string> = { tab: "verify", page: "2", limit: "30", offset: "0", signedOut: "1", sessionClearFailed: "1", success: "true", canceled: "true", upgraded: "1" };
+    const sample: Record<string, string> = { tab: "verify", page: "2", limit: "30", offset: "0", signedOut: "1", success: "true", canceled: "true", upgraded: "1" };
     for (const name of SAFE_QUERY_PARAMS) {
       const v = sample[name] ?? (name.startsWith("utm_") ? "spring-2026_news.letter" : "needs_review");
       expect(sanitizeUrl(`/pricing?${name}=${v}`)).toBe(`/pricing?${name}=${v}`);

@@ -34,7 +34,6 @@ let mockOutcome: any = { ok: true };
 const mockEstablish = jest.fn(async (user: any) => (mockOutcome.ok ? { ok: true, uid: user.uid } : mockOutcome));
 jest.mock("@/lib/client/sessionSync", () => ({
   establishServerSession: (...a: any[]) => (mockEstablish as any)(...a),
-  clearServerSession: async () => true,
 }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
 jest.mock("posthog-js", () => ({ __esModule: true, default: { reset: () => undefined } }));

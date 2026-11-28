@@ -28,8 +28,10 @@ jest.mock("firebase/auth", () => ({ sendEmailVerification: (...a: unknown[]) => 
 jest.mock("@/lib/firebase/client", () => ({ auth: { __fakeAuth: true } }));
 const mockTelemetryFree = jest.fn(() => true);
 jest.mock("@/lib/telemetry/telemetryFreeDocument", () => ({ isTelemetryFreeDocument: () => mockTelemetryFree() }));
-const mockedClearServerSession = jest.fn();
-jest.mock("@/lib/client/sessionSync", () => ({ clearServerSession: (...a: unknown[]) => mockedClearServerSession(...a) }));
+// ZCA P3 R2: there is no session-clearing client function; the component must not import sessionSync at all.
+jest.mock("@/lib/client/sessionSync", () => {
+  throw new Error("AcceptInvitationClient must not import lib/client/sessionSync");
+});
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void };
 function deferred<T>(): Deferred<T> {
@@ -98,7 +100,7 @@ function setWindow(hash: string) {
 }
 
 function auth(overrides: Record<string, unknown> = {}) {
-  return { user: { uid: "u1", reload: jest.fn().mockResolvedValue(undefined), getIdToken: jest.fn().mockResolvedValue("id-token-u1") }, authReady: true, syncState: "authenticated", canMutate: true, beginLogout: jest.fn(), ...overrides };
+  return { user: { uid: "u1", reload: jest.fn().mockResolvedValue(undefined), getIdToken: jest.fn().mockResolvedValue("id-token-u1") }, authReady: true, syncState: "authenticated", canMutate: true, beginLogout: jest.fn(), cancelLogout: jest.fn(), ...overrides };
 }
 
 async function mount(doc: ReturnType<typeof loadDocument>, a: ReturnType<typeof auth>) {
@@ -212,7 +214,6 @@ describe("R6 MINOR-3: invitation B stays authoritative when A's in-flight reques
     const r = await mount(doc, auth());
     expect(text(r)).toContain("Different account");
     const signOutDone = deferred<void>();
-    mockedClearServerSession.mockResolvedValueOnce(undefined);
     mockedSignOut.mockReturnValueOnce(signOutDone.promise);
     const button = r.root.findAllByType("button").find((b) => String(b.props.children).includes("Switch"))!;
     let clicked!: Promise<unknown>;
@@ -229,7 +230,7 @@ describe("R6 MINOR-3: invitation B stays authoritative when A's in-flight reques
     expect(mockedRouterReplace).not.toHaveBeenCalled();
   });
 
-  it("Switch account pressed after B took over does nothing: no sign-out (shared auth state the successor relies on), no session clear, no redirect", async () => {
+  it("Switch account pressed after B took over does nothing: no sign-out (shared auth state the successor relies on), no logout begun, no redirect", async () => {
     const doc = loadDocument();
     const w = setWindow(`#invitationId=${ID_A}&token=${SECRET_A}`);
     (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 403, json: async () => ({ errorCode: "invitation_email_mismatch" }) });
@@ -244,7 +245,6 @@ describe("R6 MINOR-3: invitation B stays authoritative when A's in-flight reques
     await doc.TR.act(async () => {
       await onClick();
     });
-    expect(mockedClearServerSession).not.toHaveBeenCalled();
     expect(mockedSignOut).not.toHaveBeenCalled();
     expect(mockedRouterReplace).not.toHaveBeenCalled();
     expect(envelope(w)).toEqual(atHandOff);
@@ -326,19 +326,14 @@ describe("R7 F3: Switch account continuations after B took over (deferred server
     return { doc, w, r, button };
   }
 
+  // ZCA P3 R2: the two "the server session clear settles after B" rows were DELETED with the client clear.
   it.each([
-    ["clearServerSession resolves after B", "clear", "resolve"],
-    ["clearServerSession rejects after B", "clear", "reject"],
-    ["signOut resolves after B", "signOut", "resolve"],
-    ["signOut rejects after B", "signOut", "reject"],
-  ] as const)("%s: no sign-out after the hand-off, no navigation, no error view, B's envelope unchanged", async (_n, where, how) => {
+    ["signOut resolves after B", "resolve"],
+    ["signOut rejects after B", "reject"],
+  ] as const)("%s: no sign-out after the hand-off, no navigation, no error view, B's envelope unchanged", async (_n, how) => {
     const { doc, w, r, button } = await wrongAccountDocument();
     const pending = deferred<void>();
-    if (where === "clear") mockedClearServerSession.mockReturnValueOnce(pending.promise);
-    else {
-      mockedClearServerSession.mockResolvedValueOnce(undefined);
-      mockedSignOut.mockReturnValueOnce(pending.promise);
-    }
+    mockedSignOut.mockReturnValueOnce(pending.promise);
     let clicked!: Promise<unknown>;
     await doc.TR.act(async () => {
       clicked = button.props.onClick();
@@ -353,7 +348,6 @@ describe("R7 F3: Switch account continuations after B took over (deferred server
       await clicked;
     });
     expect(mockedSignOut.mock.calls.length).toBe(signOutsBefore); // nothing new after the hand-off
-    if (where === "clear") expect(mockedSignOut).not.toHaveBeenCalled();
     expect(mockedRouterReplace).not.toHaveBeenCalled();
     expect(text(r)).not.toContain("Couldn");
     expect(r.root.findAllByType("h1")).toHaveLength(0);
@@ -364,8 +358,7 @@ describe("R7 F3: Switch account continuations after B took over (deferred server
   it("control: without a hand-off, the same deferred switch DOES sign out and redirect (assertions can fail)", async () => {
     const { doc, button } = await wrongAccountDocument();
     const pending = deferred<void>();
-    mockedClearServerSession.mockReturnValueOnce(pending.promise);
-    mockedSignOut.mockResolvedValueOnce(undefined);
+    mockedSignOut.mockReturnValueOnce(pending.promise);
     let clicked!: Promise<unknown>;
     await doc.TR.act(async () => {
       clicked = button.props.onClick();
@@ -378,14 +371,17 @@ describe("R7 F3: Switch account continuations after B took over (deferred server
     expect(mockedRouterReplace).toHaveBeenCalledTimes(1);
   });
 
-  it("control: without a hand-off, a sign-out failure DOES show the error", async () => {
+  it("control: without a hand-off, a sign-out failure DOES show the error, and hands the tab back via cancelLogout once (R2 MB)", async () => {
     const { doc, r, button } = await wrongAccountDocument();
-    mockedClearServerSession.mockResolvedValueOnce(undefined);
+    const a = mockedUseAuth.mock.results[mockedUseAuth.mock.results.length - 1].value as { cancelLogout: jest.Mock; beginLogout: jest.Mock };
     mockedSignOut.mockRejectedValueOnce(new Error("x"));
     await doc.TR.act(async () => {
       await button.props.onClick();
     });
     expect(text(r)).toContain("Couldn");
+    expect(a.beginLogout).toHaveBeenCalledTimes(1);
+    expect(a.cancelLogout).toHaveBeenCalledTimes(1);
+    expect(a.beginLogout.mock.invocationCallOrder[0]).toBeLessThan(a.cancelLogout.mock.invocationCallOrder[0]);
   });
 });
 

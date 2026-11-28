@@ -43,7 +43,6 @@ jest.mock("@/lib/firebase/client", () => ({
 jest.mock("@/lib/utils/performance", () => ({ perf: { mark: () => undefined, measure: () => undefined, logMetrics: () => undefined } }));
 jest.mock("@/lib/client/sessionSync", () => ({
   establishServerSession: async (user: any) => ({ ok: true, uid: user.uid }),
-  clearServerSession: async () => true,
 }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
 jest.mock("posthog-js", () => ({ __esModule: true, default: { reset: () => undefined, capture: () => undefined, init: () => undefined } }));

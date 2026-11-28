@@ -1,11 +1,9 @@
 /**
- * Auth Lifecycle Hardening, Step 6.15/6.17 — source-level regression test
- * for `TopNav.tsx`'s logout flow. This is the exact root-cause site for
- * the "logout never clears the server session" half of the desync bug:
- * `handleLogout` previously called ONLY `signOut(auth)` (the Firebase
- * CLIENT SDK), never `DELETE /api/auth/session`, leaving the server
- * `__session` cookie valid for up to its full 5-day lifetime after the UI
- * showed "signed out."
+ * Auth Lifecycle Hardening, Step 6.15/6.17, then ZCA L-2 and P3 R2 — source-level regression test for
+ * `TopNav.tsx`'s logout flow. History: `handleLogout` once called only Firebase `signOut`, leaving a
+ * server cookie that authorized requests for five days; L-2 added a bounded clear; P3 R2 removed the
+ * cookie's authority and the clear entirely, so logout is the shared LOCAL-only sequence, with the
+ * AuthProvider's `cancelLogout` for a throwing sign-out.
  */
 
 import { readFileSync } from "fs";
@@ -13,21 +11,22 @@ import { join } from "path";
 
 const source = readFileSync(join(__dirname, "..", "TopNav.tsx"), "utf8");
 
-describe("TopNav — logout source-level wiring guarantees (ZCA L-2)", () => {
+describe("TopNav — logout source-level wiring guarantees (ZCA L-2, P3 R2)", () => {
   const logout = () => source.slice(source.indexOf("const handleLogout"), source.indexOf("const navLinks"));
 
-  it("delegates to the shared performLogout sequence (no private signOut / clear ordering of its own)", () => {
-    expect(source).toMatch(/import\s*\{\s*performLogout,\s*loginHrefAfterLogout\s*\}\s*from\s*["']@\/lib\/client\/logout["']/);
-    expect(logout()).toMatch(/await performLogout\(\{ auth, beginLogout \}\)/);
+  it("delegates to the shared performLogout sequence with beginLogout AND cancelLogout (no private signOut, no request)", () => {
+    expect(source).toMatch(/import\s*\{\s*performLogout,\s*LOGIN_HREF_AFTER_LOGOUT\s*\}\s*from\s*["']@\/lib\/client\/logout["']/);
+    expect(source).toMatch(/const \{[^}]*\bbeginLogout\b[^}]*\bcancelLogout\b[^}]*\} = useAuth\(\);/);
+    expect(logout()).toMatch(/await performLogout\(\{ auth, beginLogout, cancelLogout \}\)/);
     expect(source).not.toMatch(/\bsignOut\s*\(/);
-    expect(source).not.toMatch(/\bclearServerSession\b/);
+    expect(source).not.toMatch(/\/api\/auth\/session/);
   });
 
-  it("navigates only after a successful LOCAL sign-out, to the outcome-specific login URL", () => {
+  it("navigates only after a completed logout, to the plain signed-out login URL", () => {
     const body = logout();
     const call = body.indexOf("await performLogout(");
     const guard = body.indexOf("if (!result.signedOut)");
-    const nav = body.indexOf("router.replace(loginHrefAfterLogout(result))");
+    const nav = body.indexOf("router.replace(LOGIN_HREF_AFTER_LOGOUT)");
     expect(call).toBeGreaterThan(-1);
     expect(guard).toBeGreaterThan(call);
     expect(nav).toBeGreaterThan(guard);
@@ -135,7 +134,7 @@ describe("TopNav — tablet-width header overflow fix", () => {
     // Exactly the two pre-existing gate sites (desktop dropdown + mobile menu) — this fix must not add a third, different gating mechanism.
     expect(gateOccurrences.length).toBe(2);
     // isAdmin itself still comes from useAuth()'s claim, not a new prop/source.
-    expect(source).toMatch(/const \{ user, loading, isAdmin, beginLogout \} = useAuth\(\);/);
+    expect(source).toMatch(/const \{ user, loading, isAdmin, beginLogout, cancelLogout \} = useAuth\(\);/);
   });
 
   it("gives the mobile/tablet toggle button proper disclosure ARIA wired to real state, not a static string", () => {

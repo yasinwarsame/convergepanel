@@ -13,7 +13,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
 import { useAuth } from "@/components/AuthProvider";
-import { clearServerSession } from "@/lib/client/sessionSync";
 import posthog from "posthog-js";
 import {
   reportEmailVerificationSendOutcome,
@@ -251,9 +250,8 @@ export default function SignupPage() {
     try {
       // Auth Lifecycle Hardening, Step 6.6 — signing up while a DIFFERENT
       // session is already active in this browser is an account switch;
-      // invalidate the old one first (same as app/login/page.tsx).
+      // sign the old one out first (same as app/login/page.tsx).
       if (auth.currentUser) {
-        await clearServerSession();
         await signOut(auth);
       }
 

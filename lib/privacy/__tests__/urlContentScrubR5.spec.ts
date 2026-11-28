@@ -196,7 +196,7 @@ const INVENTORY: Array<[string, string, string, Expect]> = [
   ["R5", "Stripe success_url", `/billing?success=true&session_id=cs_test_a1B2c3D4e5`, { url: `/billing?success=true&session_id=cs_test_a1B2c3D4e5` }],
   ["R5 cancel", "Stripe cancel_url", `/billing?canceled=true`, { url: `/billing?canceled=true` }],
   ["R7", "pricing -> billing", `/billing?plan=lite&interval=year&upgraded=1`, { url: `/billing?plan=lite&interval=year&upgraded=1` }],
-  ["R8", "signed out", `/login?signedOut=1&sessionClearFailed=1`, { url: `/login?signedOut=1&sessionClearFailed=1` }],
+  ["R8", "signed out", `/login?signedOut=1`, { url: `/login?signedOut=1` }],
   ["R9", "origin-linked claim mode (real builders)", VERIFY_CLAIM_HREF, { url: VERIFY_CLAIM_HREF }],
   ["R10", "team claim origin (real builders)", TEAM_CLAIM_HREF, { url: TEAM_CLAIM_HREF }],
   ["R11", "governance deep link", `/?openResearchRun=${RUN_ID}&${UTM}`, { url: `/?openResearchRun=${RUN_ID}&${UTM}` }],

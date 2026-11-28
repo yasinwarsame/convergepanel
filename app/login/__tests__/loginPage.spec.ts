@@ -32,7 +32,7 @@ describe("Login page — source-level wiring guarantees", () => {
     expect(handleSubmitMatch![0]).not.toMatch(/router\.push/);
   });
 
-  it("invalidates an existing session (clearServerSession + signOut) before starting a new sign-in — account-switch handling", () => {
+  it("signs an existing Firebase identity out before starting a new sign-in — account-switch handling (ZCA P3 R2: no server clear)", () => {
     const handleSubmitMatch = source.match(/const handleSubmit = async[\s\S]*?\n  \};/);
     const body = handleSubmitMatch![0];
     const currentUserCheckIndex = body.indexOf("auth.currentUser");
@@ -40,8 +40,8 @@ describe("Login page — source-level wiring guarantees", () => {
     expect(currentUserCheckIndex).toBeGreaterThan(-1);
     expect(signInIndex).toBeGreaterThan(-1);
     expect(currentUserCheckIndex).toBeLessThan(signInIndex);
-    expect(body).toMatch(/await clearServerSession\(\)/);
     expect(body).toMatch(/await signOut\(auth\)/);
+    expect(body).not.toMatch(/\/api\/auth\/session|DELETE/);
   });
 
   it("arms a bounded timeout rather than waiting forever for sync to complete", () => {
@@ -96,7 +96,6 @@ describe("Login page — source-level wiring guarantees", () => {
     it("does not sign the user out or clear the session on provisioning failure — the Firebase Auth session remains valid for a retry", () => {
       const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
       const afterCall = source.slice(workspaceCallIndex, workspaceCallIndex + 1200);
-      expect(afterCall).not.toMatch(/clearServerSession\(\)/);
       expect(afterCall).not.toMatch(/signOut\(auth\)/);
     });
 
@@ -116,21 +115,17 @@ describe("Login page — source-level wiring guarantees", () => {
   });
 });
 
-describe("Login page — failed logout clear is surfaced (ZCA L-2)", () => {
-  it("reads sessionClearFailed only together with signedOut", () => {
-    expect(source).toMatch(/const sessionClearFailed = signedOut && searchParams\.get\("sessionClearFailed"\) === "1";/);
+describe("Login page — ZCA P3 R2: the failed-clear notice and its retry were removed with the client DELETE", () => {
+  it("reads no session-clear flag and renders no failed-clear state or retry", () => {
+    expect(source).not.toMatch(/sessionClear|clearRetry|retrySessionClear|session-clear-failed/);
   });
 
-  it("renders a distinct failed-clear state (never the clean 'You've been signed out.' text alone) with a retry", () => {
-    const block = source.slice(source.indexOf('data-testid="session-clear-failed"') - 400, source.indexOf(") : signedOut ? ("));
-    expect(block).toMatch(/signedOut && sessionClearFailed && clearRetry !== "cleared"/);
-    expect(block).toMatch(/You&apos;re signed out on this device\./);
-    expect(block).toMatch(/couldn&apos;t confirm/);
-    expect(block).toMatch(/onClick=\{retrySessionClear\}/);
-    expect(block).not.toMatch(/You&apos;ve been signed out\./);
+  it("a signed-out return still shows the plain signed-out notice", () => {
+    expect(source).toMatch(/\{signedOut \? \(/);
+    expect(source).toMatch(/You&apos;ve been signed out\./);
   });
 
-  it("the retry uses the shared clear and only a true result counts as cleared", () => {
-    expect(source).toMatch(/setClearRetry\(\(await clearServerSession\(\)\) \? "cleared" : "failed"\);/);
+  it("makes no request to the session endpoint at all (AuthProvider owns the handshake)", () => {
+    expect(source).not.toMatch(/\/api\/auth\/session|from "@\/lib\/client\/sessionSync"/);
   });
 });
