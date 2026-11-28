@@ -87,12 +87,8 @@ describe("Route Handlers: the manifest is exactly the source tree", () => {
 });
 
 describe("Credential → identity derivation is confined to a pinned allow-list", () => {
-  test("session-cookie verification", () => {
-    expect(filesMatching(/\bverifySessionCookie(Value)?\s*\(/)).toEqual([
-      "lib/admin/privilegedAccess.ts",
-      "lib/auth/resolveRequestIdentity.ts",
-      "lib/firebase/auth-helpers.ts",
-    ]);
+  test("session-cookie verification: NONE (ZCA P3 R2 — the cookie is never verified; see cookieRetirementStatic.spec.ts)", () => {
+    expect(filesMatching(/\bverifySessionCookie(Value)?\s*\(/)).toEqual([]);
   });
   test("SDK-level session-cookie and ID-token verification", () => {
     // privilegedAccess.ts: the privileged guard's own verification (checkRevoked false + ONE live snapshot).
@@ -108,28 +104,12 @@ describe("Credential → identity derivation is confined to a pinned allow-list"
       "lib/firebase/auth.ts",
     ]);
   });
-  test("session-cookie creation", () => {
-    expect(filesMatching(/\bcreateSessionCookie\s*\(/)).toEqual(["app/api/auth/session/route.ts"]);
+  test("session-cookie creation: NONE (ZCA P3 R2 — the handshake verifies and never mints)", () => {
+    expect(filesMatching(/\bcreateSessionCookie\s*\(/)).toEqual([]);
   });
-  test("raw reads of the __session cookie from a request", () => {
-    expect(filesMatching(/cookies(\(\))?\s*\.\s*get\s*\(\s*(["'`]__session["'`]|SESSION_COOKIE(_NAME)?)\s*\)/)).toEqual([
-      "lib/admin/privilegedAccess.ts",
-      "lib/auth/resolveRequestIdentity.ts",
-      "lib/firebase/auth-helpers.ts",
-    ]);
-  });
-  test("each allowed file reads the __session cookie at exactly ONE pinned site (L-8 mutant H1: a file-level allow-list let a second read in a legacy helper through)", () => {
-    const RAW = /cookies(\(\))?\s*\.\s*get\s*\(\s*(["'`]__session["'`]|SESSION_COOKIE(_NAME)?)\s*\)/g;
-    const sites = (f: string) => code(SOURCES.find((s) => s.path === f)!.text).match(RAW)?.length ?? 0;
-    expect({
-      privileged: sites("lib/admin/privilegedAccess.ts"),
-      resolver: sites("lib/auth/resolveRequestIdentity.ts"),
-      authHelpers: sites("lib/firebase/auth-helpers.ts"),
-    }).toEqual({ privileged: 1, resolver: 1, authHelpers: 1 });
-    // auth-helpers' one read is the body of verifySessionCookie (which only hands it to verifySessionCookieValue).
-    const helpers = code(SOURCES.find((s) => s.path === "lib/firebase/auth-helpers.ts")!.text);
-    const fn = helpers.match(/export async function verifySessionCookie\([\s\S]*?\n\}/)?.[0] ?? "";
-    expect(fn.match(RAW)?.length ?? 0).toBe(1);
+  test("raw reads of the __session cookie from a request: NONE (ZCA P3 R2; the L-8.1 per-site pins became zero)", () => {
+    expect(filesMatching(/cookies(\(\))?\s*\.\s*get\s*\(\s*(["'`]__session["'`]|SESSION_COOKIE(_NAME)?)\s*\)/)).toEqual([]);
+    expect(filesMatching(/\bcookies\s*\.\s*(get|getAll|has)\s*\(/)).toEqual([]);
   });
   test("next/headers (the only cookie API a Server Component has)", () => {
     // ZCA L-8: resolveServerComponentIdentity (its only importer) was deleted with the neutral-shell migration.
@@ -217,7 +197,8 @@ const RAW_CLIENT_API_FETCHES = [
  * Every raw fetch() call site in client code, by file. Pinned at L-1 from the tree:
  * authedFetch.ts (the bearer-attaching helper), fetchWithTimeout.ts (generic; its /api callers
  * pass prepared bearer headers), sessionSync.ts (the exempt session endpoint: mint / clear / status),
- * and the raw /api calls listed above. (ZCA L-2 removed the third sessionSync call, the GET status read.)
+ * and the raw /api calls listed above. (ZCA L-2 removed the third sessionSync call, the GET status read; ZCA P3 R2
+ * removed the second, the DELETE — sessionSync's one call is the POST handshake.)
  */
 const RAW_CLIENT_FETCH_SITES: Record<string, number> = {
   "app/admin/users/page.tsx": 1,
@@ -226,5 +207,5 @@ const RAW_CLIENT_FETCH_SITES: Record<string, number> = {
   "components/VideoUploader.tsx": 1,
   "lib/client/authedFetch.ts": 1,
   "lib/client/fetchWithTimeout.ts": 1,
-  "lib/client/sessionSync.ts": 2,
+  "lib/client/sessionSync.ts": 1,
 };
