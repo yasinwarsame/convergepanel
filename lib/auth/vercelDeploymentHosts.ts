@@ -15,3 +15,14 @@ export function getVercelDeploymentHosts(): readonly string[] {
     .filter((h): h is string => typeof h === "string" && h.trim() !== "")
     .map((h) => h.trim());
 }
+
+/**
+ * True when this process runs on the Vercel platform (`VERCEL` is set by the platform; same convention as
+ * lib/firebase/operatorGrant.ts). On Vercel, Next.js builds `request.nextUrl` from the `Host` header
+ * (`trustHostHeader`), so the handshake's allowed-origin set must NOT include the addressed origin there:
+ * it would be request-derived, not configuration.
+ */
+export function isVercelPlatform(): boolean {
+  const v = process.env.VERCEL;
+  return typeof v === "string" && v.trim() !== "";
+}

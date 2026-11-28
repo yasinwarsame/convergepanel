@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminAuth as firebaseAdminAuth } from "@/lib/firebase/admin";
 import { logAuthSessionEvent } from "@/lib/authTelemetry";
 import { logger } from "@/lib/logger";
-import { getVercelDeploymentHosts } from "@/lib/auth/vercelDeploymentHosts";
+import { getVercelDeploymentHosts, isVercelPlatform } from "@/lib/auth/vercelDeploymentHosts";
 import { startVerificationDeadline, type VerificationOutcome } from "@/lib/auth/authVerificationDeadline";
 import { isVerifierUnavailableCode } from "@/lib/auth/resolveRequestIdentity";
 
@@ -51,12 +51,14 @@ function errorCodeOf(err: unknown): string {
 }
 
 /**
- * R2 L-2 — the origins a handshake may come from, computed SERVER-SIDE ONLY:
- *   - `request.nextUrl.origin` (the origin this request was addressed to);
+ * R2 L-2 — the origins a handshake may come from, computed from SERVER CONFIGURATION ONLY:
  *   - the pinned Production hosts (apex, www, the Production `vercel.app` alias);
- *   - this deployment's own Vercel system hosts (`VERCEL_URL`, `VERCEL_BRANCH_URL`), so an isolated
- *     Preview works on both its deployment URL and its branch alias.
- * `Host` / `X-Forwarded-Host` / `X-Forwarded-Proto` are never consulted as an independent source.
+ *   - this deployment's own Vercel system hosts (`VERCEL_URL`, `VERCEL_BRANCH_URL`, set by the platform),
+ *     so an isolated Preview works on both its deployment URL and its branch alias;
+ *   - OFF the Vercel platform only (local `next dev` / `next start`, the browser harness):
+ *     `request.nextUrl.origin`. On Vercel that value is built from the `Host` header
+ *     (Next.js `trustHostHeader`), i.e. request-derived, so it is never part of the set there.
+ * `Host` / `X-Forwarded-Host` / `X-Forwarded-Proto` / `Forwarded` are never an authority source on Vercel.
  */
 const PINNED_PRODUCTION_ORIGINS: readonly string[] = Object.freeze([
   "https://convergepanel.com",
@@ -67,7 +69,18 @@ const PINNED_PRODUCTION_ORIGINS: readonly string[] = Object.freeze([
 const HOST_NAME = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/i;
 
 function allowedOrigins(request: NextRequest): ReadonlySet<string> {
-  const allowed = new Set<string>([request.nextUrl.origin, ...PINNED_PRODUCTION_ORIGINS]);
+  const allowed = new Set<string>(PINNED_PRODUCTION_ORIGINS);
+  if (!isVercelPlatform()) {
+    const addressed = request.nextUrl;
+    allowed.add(addressed.origin);
+    // NextURL rewrites a loopback host (127.0.0.1, [::1]) to "localhost"; a page served on the loopback
+    // address sends its literal origin, so the loopback spellings of the same port are equivalent here.
+    if (addressed.hostname === "localhost") {
+      const port = addressed.port ? `:${addressed.port}` : "";
+      allowed.add(`${addressed.protocol}//127.0.0.1${port}`);
+      allowed.add(`${addressed.protocol}//[::1]${port}`);
+    }
+  }
   for (const host of getVercelDeploymentHosts()) {
     if (HOST_NAME.test(host)) allowed.add(new URL(`https://${host}`).origin);
   }

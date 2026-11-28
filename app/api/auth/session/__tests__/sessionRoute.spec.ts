@@ -41,7 +41,7 @@ function postRequest(body: unknown): NextRequest {
   return handshakeRequest({ rawBody: JSON.stringify(body) });
 }
 
-const ENV_KEYS = ["VERCEL_URL", "VERCEL_BRANCH_URL"] as const;
+const ENV_KEYS = ["VERCEL", "VERCEL_URL", "VERCEL_BRANCH_URL"] as const;
 const envSnapshot: Record<string, string | undefined> = {};
 beforeAll(() => {
   for (const k of ENV_KEYS) envSnapshot[k] = process.env[k];
@@ -258,6 +258,30 @@ describe("POST — the origin rule (R1 L1 + R2 L-2)", () => {
         headers: { host: "evil.example", "x-forwarded-host": "evil.example", "x-forwarded-proto": "https", forwarded: "host=evil.example;proto=https" },
       })
     );
+  });
+
+  it("ON VERCEL the addressed origin (request.nextUrl, built from the Host header) is NOT in the allowed set", async () => {
+    // On Vercel, Next.js derives request.nextUrl from Host (trustHostHeader). Simulate a request whose
+    // Host — and therefore nextUrl — is attacker-chosen, with a matching Origin.
+    process.env.VERCEL = "1";
+    await expectCrossOrigin(handshakeRequest({ url: "https://evil.example/api/auth/session", bearer: "t", origin: "https://evil.example" }));
+    mockVerifyIdToken.mockClear();
+    mockLogAuthSessionEvent.mockClear();
+    // Same-origin for a configured host still works on Vercel.
+    await expectAllowed(handshakeRequest({ url: "https://convergepanel.com/api/auth/session", bearer: "t" }));
+    process.env.VERCEL_URL = "cp-abc123-team.vercel.app";
+    await expectAllowed(handshakeRequest({ url: "https://cp-abc123-team.vercel.app/api/auth/session", bearer: "t" }));
+  });
+
+  it("OFF Vercel (local dev / harness) the addressed origin is allowed — and only it", async () => {
+    await expectAllowed(handshakeRequest({ url: "http://127.0.0.1:4100/api/auth/session", bearer: "t" }));
+    mockVerifyIdToken.mockClear();
+    await expectCrossOrigin(handshakeRequest({ url: "http://127.0.0.1:4100/api/auth/session", bearer: "t", origin: "http://127.0.0.1:4101" }));
+    mockVerifyIdToken.mockClear();
+    mockLogAuthSessionEvent.mockClear();
+    // On Vercel the loopback equivalence never applies.
+    process.env.VERCEL = "1";
+    await expectCrossOrigin(handshakeRequest({ url: "http://127.0.0.1:4100/api/auth/session", bearer: "t" }));
   });
 
   it("the origin check runs BEFORE the body is read and before any verification", async () => {
