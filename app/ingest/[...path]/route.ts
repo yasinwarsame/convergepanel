@@ -10,6 +10,7 @@ import {
   upstreamRequestHeaders,
   upstreamUrlFor,
 } from "@/lib/telemetry/analyticsProxy";
+import { serverAnalyticsEnabled } from "@/lib/telemetry/analyticsEnablement";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +43,8 @@ async function readCapped(request: Request, cap: number): Promise<Uint8Array | n
 }
 
 async function proxy(request: Request): Promise<Response> {
-  if (analyticsProxyDisabled()) return new Response(null, { status: 404 });
+  // ZCA R2 Phase B: outside Vercel Production the proxy never contacts PostHog.
+  if (analyticsProxyDisabled() || !serverAnalyticsEnabled()) return new Response(null, { status: 404 });
   let url: URL;
   try {
     url = new URL(request.url);

@@ -43,10 +43,12 @@ beforeEach(() => {
   jest.clearAllMocks();
   capturedInitConfig = undefined;
   process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test_key";
+  process.env.NEXT_PUBLIC_VERCEL_ENV = "production"; // ZCA R2 Phase B: analytics runs only in Vercel Production
 });
 
 afterAll(() => {
   process.env.NEXT_PUBLIC_POSTHOG_KEY = ORIGINAL_ENV;
+  delete process.env.NEXT_PUBLIC_VERCEL_ENV;
 });
 
 function render() {

@@ -6,6 +6,7 @@ import { PostHogProvider as PHProvider } from "posthog-js/react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, Suspense } from "react";
 import { isTelemetryFreeDocument } from "@/lib/telemetry/telemetryFreeDocument";
+import { clientAnalyticsEnabled } from "@/lib/telemetry/analyticsEnablement";
 import { sanitizeUrl, sanitizeUrlsInText, scrubUrlFields } from "@/lib/privacy/sanitizeUrl";
 import { redactExceptionValue } from "@/lib/privacy/exceptionText";
 import { scrubUrlBeforeTelemetry } from "@/lib/privacy/preTelemetryUrlScrub";
@@ -112,6 +113,8 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
     const host =
       process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
     if (!key) return;
+    // ZCA R2 Phase B: never initialize outside Vercel Production, whatever key is configured.
+    if (!clientAnalyticsEnabled()) return;
     // PR #329 R4 (review MAJOR-1): posthog.init records location.href and
     // document.referrer into `$initial_person_info` and sends them with the
     // `/flags` request — both bypass `before_send`. The URL is made clean HERE,

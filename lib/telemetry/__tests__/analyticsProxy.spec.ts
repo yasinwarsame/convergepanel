@@ -143,9 +143,11 @@ describe("A4 route handler", () => {
       return new Response('{"status":1}', { status: 200, headers: { "content-type": "application/json", "set-cookie": "x=y" } });
     }) as any;
     delete process.env.CP_ANALYTICS_PROXY_DISABLED;
+    process.env.VERCEL_ENV = "production"; // ZCA R2 Phase B: the proxy runs only in Vercel Production
   });
   afterAll(() => {
     global.fetch = realFetch;
+    delete process.env.VERCEL_ENV;
   });
   const handler = () => require("../../../app/ingest/[...path]/route");
 
