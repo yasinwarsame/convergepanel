@@ -4,10 +4,10 @@
  *
  * WHY A LIVE RECORD AND NOT THE TOKEN.
  *
- * Session cookies are minted by `createSessionCookie` with a FIVE DAY life and
- * bake `email_verified` in at mint time; nothing re-mints them when a user
- * verifies. Deriving allowlist authority from that claim would therefore be
- * wrong in both directions:
+ * A presented credential bakes `email_verified` in at issue time (an ID token for
+ * up to an hour; the retired five-day session cookie, which no route accepts any
+ * more, for days), and nothing re-issues it when a user verifies. Deriving
+ * allowlist authority from that claim would therefore be wrong in both directions:
  *
  *   - a legitimate administrator who verifies mid-session would be denied for
  *     up to five days (an availability defect), and

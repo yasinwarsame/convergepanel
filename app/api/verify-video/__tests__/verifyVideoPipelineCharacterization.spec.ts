@@ -19,13 +19,10 @@
 // ============================================================
 // Auth (mirrors verifyVideoAuthRegression.spec.ts's own proven pattern —
 // the Personal route calls resolveRequestIdentity(), which itself calls
-// verifySessionCookie()/verifyIdToken() under the hood).
+// verifyIdToken() under the hood; bearer only).
 // ============================================================
 const mockVerifySessionCookie = jest.fn();
 const mockVerifyIdToken = jest.fn();
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: (...args: unknown[]) => mockVerifySessionCookie(...args),
-}));
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
 }));
@@ -200,7 +197,8 @@ function validBody(overrides: Record<string, unknown> = {}) {
 function buildRequest(body: unknown, opts: { rawText?: string; contentType?: string } = {}): NextRequest {
   return new NextRequest("http://localhost/api/verify-video", {
     method: "POST",
-    headers: { "Content-Type": opts.contentType ?? "application/json", Cookie: "__session=valid" },
+    // ZCA L-8: identity is bearer-only; the browser sends the bearer and the same user's cookie.
+    headers: { "Content-Type": opts.contentType ?? "application/json", Cookie: "__session=valid", authorization: "Bearer valid-token" },
     body: opts.rawText !== undefined ? opts.rawText : JSON.stringify(body),
   });
 }
@@ -238,7 +236,7 @@ function resetToDefaults() {
   jest.clearAllMocks();
 
   mockVerifySessionCookie.mockResolvedValue({ uid: UID, isAdmin: false });
-  mockVerifyIdToken.mockResolvedValue(null);
+  mockVerifyIdToken.mockResolvedValue({ uid: UID });
 
   mockCheckRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: new Date() });
 

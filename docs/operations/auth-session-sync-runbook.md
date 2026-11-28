@@ -2,6 +2,8 @@
 
 Step 6: Auth Lifecycle Hardening. Fixes the cross-cutting identity desynchronization disclosed during Step 5's security review (`docs/operations/multi-reviewer-governance-runbook.md` §7) and reproduced concretely during that step's own live browser testing.
 
+> **Superseded in part (ZCA L-8, 2026-11-27, unreleased).** On the zero-cookie-authority release candidate the `__session` cookie alone authorizes nothing: every API route is bearer-only, Server Component pages resolve no identity, and `GET /api/auth/session` is removed (L-2). A cookie sent beside a bearer is still verified and must match its uid (mismatch → refused). The stale-cookie failure mode this runbook describes therefore cannot grant access on that candidate; until it is released, Production still behaves as described below.
+
 ## 1. Root cause
 
 Every protected team/governance API route resolves the caller's identity via `getRequestUid()` (`lib/teams/teamApiAuth.ts`). Before this step, that function:
@@ -57,7 +59,7 @@ Both now: (1) invalidate any existing DIFFERENT session (`clearServerSession()` 
 
 ### Client: `components/TopNav.tsx`
 
-Logout now: calls `beginLogout()` immediately (disables protected mutation UI app-wide before any async work starts) → awaits `clearServerSession()` → awaits `signOut(auth)` → only THEN navigates to a "signed out" page. If the server clear fails, the Firebase client is still signed out (so the UI hides protected content), but the redirect carries a `sessionClearFailed=1` marker instead of the normal clean-logout state, rather than silently claiming a fully clean sign-out while the server cookie might still be valid.
+Logout (ZCA L-2, `lib/client/logout.ts`, shared by TopNav and the profile page): calls `beginLogout()` immediately (disables protected mutation UI app-wide) → awaits Firebase `signOut(auth)`, which is LOCAL (no network; every tab is notified, and the AuthProvider's null branch aborts any in-flight mint and sends its own defensive `DELETE`) → a best-effort `clearServerSession()` bounded at 5 s for reporting (the request itself is not cancelled) → navigates. A failed or timed-out clear navigates to `/login?signedOut=1&sessionClearFailed=1`, which shows a distinct "signed out on this device; server session not confirmed cleared" state with a retry. Local sign-out comes first because, under the zero-cookie-authority contract, the cookie authorizes nothing: the local sign-out is what ends the browser's access. (Before L-2 the order was clear → signOut, and the profile page called only `signOut`.)
 
 ### Client: governance mutation UI
 
@@ -88,7 +90,7 @@ Two real, non-production seeded identities (`gov-e2e-owner@example.com`, `gov-e2
 
 - **Login**: fresh sign-in and a persisted-session restore (new tab, already-signed-in Firebase client state) both correctly resolved to `syncState === "authenticated"` with server/client uid agreement confirmed via `GET /api/auth/session`.
 - **Direct account switch**: submitting the login form while a DIFFERENT user was already signed in correctly invalidated the old session first, established the new one, and the server uid matched the newly-displayed identity — confirmed via direct API check, not just visual inspection.
-- **Logout**: server session confirmed cleared (`GET /api/auth/session` → `{authenticated: false}`) and a protected endpoint confirmed to return `401` immediately afterward.
+- **Logout** (historical verification; `GET /api/auth/session` was removed in ZCA L-2): server session confirmed cleared (`GET /api/auth/session` → `{authenticated: false}`) and a protected endpoint confirmed to return `401` immediately afterward.
 - **Multi-tab, direction 1**: a tab left open with an active session, when logout happens via a DIFFERENT means (another tab), reactively transitioned to a signed-out state with no manual reload — Firebase's shared cross-tab persistence propagating `onIdTokenChanged(null)`.
 - **Multi-tab, direction 2**: an account switch performed in one tab reactively updated a SECOND, already-open tab's displayed name, governance capability flags (Owner Override section correctly disappearing for the new, non-owner identity), and vote attribution (correctly re-labeled to the new identity) — with no reload.
 - **Governance regression**: the owner-only Override section was confirmed visible only to the owner identity and correctly absent once the tab's identity reactively switched to a non-owner reviewer; the reviewer's own vote row correctly updated its "You" attribution to match.
@@ -100,7 +102,7 @@ Two real, non-production seeded identities (`gov-e2e-owner@example.com`, `gov-e2
 
 **Recommended deployment sequence**: deploy this step's changes as a standard code release — no environment variable, no Firestore migration, no schema change. `GET /api/auth/session` is a new, additive route; existing `POST`/`DELETE` callers (there are none left after this step's own login/signup/TopNav updates) would still receive compatible responses.
 
-**Recommended rollback sequence**: revert this step's commits. No data migration to reverse — every change is code-only (route handlers, React components/hooks, new pure modules). Existing `__session` cookies created by the OLD `POST` handler remain valid under the NEW `POST`/`GET`/`DELETE` handlers and vice versa (the cookie's own contents — a Firebase-signed session JWT — are unchanged in format).
+**Recommended rollback sequence** — SUPERSEDED (ZCA P3 R2, 2026-11-28; the original advice below is retained struck through for the record). ~~Revert this step's commits … existing `__session` cookies remain valid under the new handlers and vice versa.~~ That advice is now unsafe: it would restore cookie AUTHORITY. Current rule: **`9d5c6938` is the earliest security-compatible rollback baseline** (bearer-only everywhere, ZCA L-8; it still mints a cookie that no route accepts). Rolling back to anything OLDER than `9d5c6938` restores cookie authority and needs **explicit owner authorization**; roll forward instead (D-Z3). A rollback from the P3 R2 build to `9d5c6938` is compatible: new clients send the token in both the `Authorization` header and the body, and `9d5c6938` reads the body.
 
 **Recommended next phase**: centralize the still-duplicated cookie/bearer resolution pattern (§5's disclosed finding) into one shared helper, then migrate the 14 other route files onto it — including the protected verification paths, which would need to go through whatever review process governs changes to those paths specifically, not bundled into an auth-lifecycle step.
 
@@ -187,3 +189,13 @@ Step 8 (see `docs/operations/multi-reviewer-governance-runbook.md` §11) was a R
 - Five distinct real Firebase identities (owner, admin, and three reviewer accounts) were logged into sequentially across two browser tabs sharing one cookie jar, exactly the kind of account-switch sequence Step 6 was built to make safe. Every switch correctly replaced the prior identity with no residual access from the previous session — confirmed by each subsequent page load showing only the newly-logged-in identity's own name and permissions (e.g. a non-owner admin correctly never saw the Owner Override control after switching from the owner).
 - The team/governance route family's identity resolution (`getRequestUid()` → `resolveRequestIdentity()`) was exercised through real create/vote/finalize/override/cancel calls throughout Step 8.6/8.7, all succeeding with the correct uid attributed to each action (visible in the resulting immutable decision records' `reviewerId`/`actorUserId` fields) and none logged with any credential material — consistent with §"No sensitive logging" above.
 - No new gap was found. This section exists to record that the hardened resolver was load-bearing under real (rehearsal) multi-user traffic, not merely under mocked unit tests, reinforcing this runbook's own "live verification is not optional" principle one step further down the release pipeline.
+
+---
+
+## ZCA P3 R2 — "verify, don't mint" (2026-11-28)
+
+- **Server.** `resolveRequestIdentity` and the privileged guard are bearer-only and never read or verify the `__session` cookie (no veto either). `POST /api/auth/session` verifies the ID token (header and/or body, origin-checked) and mints nothing; every response expires a legacy `__session` cookie. `DELETE` remains as an idempotent expiry for old tabs. See `docs/technical-documentation.md` ("ZCA P3 R2").
+- **Client.** No client DELETE exists; the handshake never waits on one. Logout is local (`beginLogout()` → Firebase `signOut`); a throwing sign-out calls `AuthProvider.cancelLogout()`, which re-verifies the still-present user as a new episode (or takes the signed-out transition when Firebase reports nobody). A 403 `cross_origin` handshake answer is `session_error` without a sign-out.
+- **Diagnosis.** A tab stuck at `session_error` with a signed-in Firebase user and telemetry `session_sync_failed` / `http_403`: the page's host is not in the allowed origin set (Production apex, www, `convergepanel.vercel.app`, the deployment's `VERCEL_URL` / `VERCEL_BRANCH_URL`). Add the host to the pinned set in `app/api/auth/session/route.ts` through review; never derive it from `Host` / `X-Forwarded-Host`.
+- **Rollback.** `9d5c6938` is the earliest security-compatible baseline; anything older restores cookie authority (owner authorization required).
+

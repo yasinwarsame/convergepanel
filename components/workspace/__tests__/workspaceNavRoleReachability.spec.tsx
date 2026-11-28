@@ -26,8 +26,22 @@ function pageFileFor(href: string): string {
   return rest ? join(TEAM_APP, rest, "page.tsx") : join(TEAM_APP, "page.tsx");
 }
 
+/**
+ * ZCA L-4: a migrated page's server render only names its `kind`; its capability guard is the kind's
+ * row in TEAM_PAGE_REQUIRED_CAPABILITIES (components/workspace/TeamWorkspacePage.tsx), read here from
+ * SOURCE so this test cannot silently pass on a page whose guard it no longer sees.
+ */
+const TEAM_PAGE_SRC = readFileSync(join(ROOT, "components", "workspace", "TeamWorkspacePage.tsx"), "utf8");
+function kindGuard(kind: string): string[] {
+  const table = TEAM_PAGE_SRC.slice(TEAM_PAGE_SRC.indexOf("TEAM_PAGE_REQUIRED_CAPABILITIES"));
+  const row = table.match(new RegExp(`\\n\\s*${kind}: \\[([^\\]]*)\\]`));
+  if (!row) throw new Error(`no guard row for kind ${kind}`);
+  return [...row[1].matchAll(/"([a-z.]+)"/g)].map((m) => m[1]);
+}
 function requiredCapabilities(pageFile: string): string[] {
   const src = readFileSync(pageFile, "utf8");
+  const delegated = src.match(/<TeamWorkspacePage\s+kind="([A-Za-z]+)"/);
+  if (delegated) return kindGuard(delegated[1]);
   return [...src.matchAll(/if \(!access\.capabilities\.includes\("([a-z.]+)"\)\)\s*\{?\s*notFound\(\)/g)].map((m) => m[1]);
 }
 
@@ -48,6 +62,8 @@ describe("the guard extraction is not vacuous", () => {
     expect(requiredCapabilities(pageFileFor(`${BASE}/members`))).toContain("members.read");
     expect(requiredCapabilities(pageFileFor(`${BASE}/audit`))).toContain("audit.read");
     expect(requiredCapabilities(pageFileFor(`${BASE}/projects`))).toContain("projects.read");
+    // and the delegated lookup itself is exercised (these pages are migrated neutral shells)
+    expect(readFileSync(pageFileFor(`${BASE}/members`), "utf8")).toMatch(/<TeamWorkspacePage\s+kind="members"/);
   });
 });
 
@@ -87,17 +103,19 @@ describe("wiring — every Team page derives the Members flag from its own membe
   });
 
   it("each page that passes an audit flag also passes a members flag from members.read", () => {
-    for (const file of pages) {
+    // ZCA L-4: the migrated pages' flags are derived in TeamWorkspacePage.tsx (`has("…")`).
+    for (const file of [...pages, "components/workspace/TeamWorkspacePage.tsx"]) {
       const src = readFileSync(join(ROOT, file), "utf8");
-      const auditFlags = (src.match(/(showAudit|canReadAudit)=\{access\.capabilities\.includes\("audit\.read"\)\}/g) ?? []).length;
-      const memberFlags = (src.match(/(showMembers|canReadMembers)=\{access\.capabilities\.includes\("members\.read"\)\}/g) ?? []).length;
+      const auditFlags = (src.match(/(showAudit|canReadAudit)=\{(access\.capabilities\.includes|has)\("audit\.read"\)\}/g) ?? []).length;
+      const memberFlags = (src.match(/(showMembers|canReadMembers)=\{(access\.capabilities\.includes|has)\("members\.read"\)\}/g) ?? []).length;
       // The audit page always shows Audit, so it carries a Members flag with no audit flag.
       expect({ file, ok: memberFlags >= auditFlags }).toEqual({ file, ok: true });
     }
   });
 
-  it("the Audit Log page passes its own members.read flag", () => {
-    const src = readFileSync(join(TEAM_APP, "audit", "page.tsx"), "utf8");
-    expect(src).toContain('canReadMembers={access.capabilities.includes("members.read")}');
+  it("the Audit Log page passes its own members.read flag (derived in TeamWorkspacePage since ZCA L-4)", () => {
+    expect(readFileSync(join(TEAM_APP, "audit", "page.tsx"), "utf8")).toMatch(/<TeamWorkspacePage\s+kind="audit"/);
+    const auditCase = TEAM_PAGE_SRC.slice(TEAM_PAGE_SRC.indexOf('case "audit":'), TEAM_PAGE_SRC.indexOf('case "claims":'));
+    expect(auditCase).toContain('canReadMembers={has("members.read")}');
   });
 });

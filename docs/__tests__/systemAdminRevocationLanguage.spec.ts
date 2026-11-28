@@ -167,7 +167,7 @@ describe("the assumption and the enforcement caveat are stated", () => {
       "It is not proof\n  that sessions were revoked",
       "this tool does not observe\n  request-time enforcement",
       "`lib/admin/privilegedAccess.ts`",
-      "`verifySessionCookie(raw, true)`",
+      "`verifyIdToken(token, true)`",
       "**Fast operator clock: recovery.**",
     ]) {
       expect({ needle, present: doc.includes(needle) }).toEqual({ needle, present: true });

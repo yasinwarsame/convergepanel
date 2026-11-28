@@ -17,56 +17,34 @@
  *
  * Authorization is never derived from a creator, an artifact owner or a role
  * string, and the capability set itself never crosses to the client.
+ *
+ * ZCA L-4: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie or
+ * workspace data; it names the page kind and passes only URL params (and identity-free values). The
+ * gate above now runs, unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access;
+ * every denial the same 404) and `TeamWorkspacePage` (the required capabilities → the same 404).
  */
 
 import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import TeamClaimComposerShell from "@/components/workspace/claims/TeamClaimComposerShell";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
 import { parseTeamClaimOriginQuery } from "@/lib/workspaces/teamClaimOriginHandoff";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamUnfiledClaimCreatePage({
+export default function TeamUnfiledClaimCreatePage({
   params,
   searchParams,
 }: {
   params: { workspaceId: string };
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  // R4-I4 — classify the handoff BEFORE any access work, so a malformed
-  // research link can never be quietly downgraded into an unrelated free-text
-  // claim form. The source run is deliberately NOT read here: the POST owns
-  // resolving the claim, its current Project and the origin snapshot.
+  // R4-I4 — classify the handoff BEFORE any access work, so a malformed research link can never be
+  // quietly downgraded into an unrelated free-text claim form. Identity-free (the query string only),
+  // so it stays in the server render (D-4 §1). The source run is deliberately NOT read here.
   const origin = parseTeamClaimOriginQuery(searchParams);
   if (origin.kind === "invalid") {
     notFound();
   }
-
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("research.create")) {
-    notFound();
-  }
-
   return (
-    <TeamClaimComposerShell
-      workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      showMembers={access.capabilities.includes("members.read")}
-      showAudit={access.capabilities.includes("audit.read")}
-      project={null}
-      originTarget={origin.kind === "origin" ? origin.target : null}
-    />
+    <TeamWorkspacePage kind="claimNew" workspaceId={params.workspaceId} originTarget={origin.kind === "origin" ? origin.target : null} />
   );
 }

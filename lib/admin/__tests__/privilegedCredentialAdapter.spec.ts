@@ -63,8 +63,11 @@ type Verifier = { verifyJWT(token: string, isEmulator?: boolean): Promise<unknow
 
 const tokenVerifier = require(join(SDK_LIB, "auth", "token-verifier.js")) as {
   createIdTokenVerifier(app: unknown): Verifier;
-  createSessionCookieVerifier(app: unknown): Verifier;
 };
+
+/** ZCA P3 R2: the adapter has ONE kind (bearer). The retired session-cookie issuer / jwtName, for negative cases only. */
+const SESSION_ISSUER_PREFIX = "https://session.firebase.google.com/";
+const SESSION_JWT_NAME = "Firebase session cookie";
 
 const PROJECT_ID = "test-project-invented";
 const NOW = 1_800_000_000;
@@ -76,7 +79,7 @@ function claims(kind: CredentialKind, over: Record<string, unknown> = {}): Recor
 function mint(kind: CredentialKind, over: Record<string, unknown> = {}, header: unknown = HEADER, sig = "c2lnbmF0dXJl"): string {
   return `${b64(header)}.${b64(claims(kind, over))}.${sig}`;
 }
-const GOOD: Record<CredentialKind, string> = { bearer: mint("bearer"), cookie: mint("cookie") };
+const GOOD: Record<CredentialKind, string> = { bearer: mint("bearer") };
 
 /** An agent that can never connect: the real SDK's key fetch fails offline and immediately (ECONNREFUSED is not retried). */
 function refusingAgent(): Agent {
@@ -88,7 +91,8 @@ function refusingAgent(): Agent {
 }
 function realVerifier(kind: CredentialKind): Verifier {
   const app = { options: { projectId: PROJECT_ID, httpAgent: refusingAgent() } };
-  return kind === "bearer" ? tokenVerifier.createIdTokenVerifier(app) : tokenVerifier.createSessionCookieVerifier(app);
+  expect(kind).toBe("bearer");
+  return tokenVerifier.createIdTokenVerifier(app);
 }
 async function realReject(kind: CredentialKind, token: string): Promise<unknown> {
   try {
@@ -112,12 +116,10 @@ describe(`SDK drift pins (firebase-admin ${sdkVersion})`, () => {
   });
   it("the jwtName prefixes", () => {
     expect(tokenVerifierSrc).toContain(`jwtName: '${SDK_JWT_NAME.bearer}',`);
-    expect(tokenVerifierSrc).toContain(`jwtName: '${SDK_JWT_NAME.cookie}',`);
     expect(tokenVerifierSrc.match(/jwtName: '/g)).toHaveLength(3); // ID token, Auth Blocking token, session cookie
   });
   it("the issuers each verifier demands", () => {
     expect(tokenVerifierSrc).toMatch(new RegExp(`function createIdTokenVerifier\\(app\\) \\{\\s*return new FirebaseTokenVerifier\\(CLIENT_CERT_URL, '${EXPECTED_ISSUER_PREFIX.bearer}'`));
-    expect(tokenVerifierSrc).toMatch(new RegExp(`function createSessionCookieVerifier\\(app\\) \\{\\s*return new FirebaseTokenVerifier\\(SESSION_COOKIE_CERT_URL, '${EXPECTED_ISSUER_PREFIX.cookie}'`));
     expect(tokenVerifierSrc).toContain("else if (payload.iss !== this.issuer + projectId) {");
   });
   it("the two fixed credential messages that remain reachable after pre-validation (mapJwtErrorToAuthError)", () => {
@@ -185,12 +187,10 @@ describe("executable superset proof: every verifyContent rejection is pre-reject
     ["aud carrying the key-fetch text", "bearer", mint("bearer", { aud: "Error fetching public keys for Google certs: boom" }), "aud_mismatch"],
     ["aud array", "bearer", mint("bearer", { aud: [PROJECT_ID] }), "aud_mismatch"],
     ["iss carrying key-fetch-error", "bearer", mint("bearer", { iss: "key-fetch-error" }), "iss_mismatch"],
-    ["cookie issuer on an ID token", "bearer", mint("bearer", { iss: EXPECTED_ISSUER_PREFIX.cookie + PROJECT_ID }), "iss_mismatch"],
+    ["session-cookie issuer on an ID token", "bearer", mint("bearer", { iss: SESSION_ISSUER_PREFIX + PROJECT_ID }), "iss_mismatch"],
     ["sub missing", "bearer", mint("bearer", { sub: undefined }), "sub_invalid"],
     ["sub empty", "bearer", mint("bearer", { sub: "" }), "sub_invalid"],
     ["sub 129 chars", "bearer", mint("bearer", { sub: "x".repeat(129) }), "sub_invalid"],
-    ["cookie: aud carrying the key-fetch text", "cookie", mint("cookie", { aud: "Error fetching public keys for Google certs: boom" }), "aud_mismatch"],
-    ["cookie: ID-token issuer", "cookie", mint("cookie", { iss: EXPECTED_ISSUER_PREFIX.bearer + PROJECT_ID }), "iss_mismatch"],
     ["garbage", "bearer", "not-a-jwt", "not_compact_jws"],
     ["header not JSON", "bearer", `${Buffer.from("{nope").toString("base64url")}.${b64(claims("bearer"))}.c2ln`, "header_not_object"],
   ];
@@ -226,7 +226,7 @@ describe("executable superset proof: every verifyContent rejection is pre-reject
 });
 
 describe("the real outage object (real SDK, key endpoint unreachable)", () => {
-  it.each(["bearer", "cookie"] as CredentialKind[])(
+  it.each(["bearer"] as CredentialKind[])(
     "%s: a well-formed credential reaches the key fetch; the SDK throws auth/argument-error WITHOUT 'Error fetching' text; the adapter says unavailable",
     async (kind) => {
       const pre = prevalidateCredential(GOOD[kind], kind, PROJECT_ID, NOW);
@@ -251,11 +251,14 @@ describe("prevalidateCredential (pure)", () => {
     const r = prevalidateCredential(GOOD.bearer, "bearer", PROJECT_ID, NOW);
     expect(r).toEqual({ ok: true, value: { sub: "uid-alpha", exp: NOW + 3600, iat: NOW - 60, authTime: NOW - 60 } });
     if (r.ok) expect(Object.isFrozen(r.value)).toBe(true);
-    expect(prevalidateCredential(GOOD.cookie, "cookie", PROJECT_ID, NOW).ok).toBe(true);
   });
-  it("kinds are not interchangeable", () => {
-    expect(prevalidateCredential(GOOD.bearer, "cookie", PROJECT_ID, NOW)).toEqual({ ok: false, defect: "iss_mismatch" });
-    expect(prevalidateCredential(GOOD.cookie, "bearer", PROJECT_ID, NOW)).toEqual({ ok: false, defect: "iss_mismatch" });
+  it("ZCA P3 R2: the adapter has exactly ONE credential kind, and a session-cookie-issued credential is not an ID token", () => {
+    expect(Object.keys(EXPECTED_ISSUER_PREFIX)).toEqual(["bearer"]);
+    expect(Object.keys(SDK_JWT_NAME)).toEqual(["bearer"]);
+    expect([...SDK_CREDENTIAL_ERROR_CODES].filter((c) => c.includes("session-cookie"))).toEqual([]);
+    const sessionShaped = mint("bearer", { iss: SESSION_ISSUER_PREFIX + PROJECT_ID });
+    expect(prevalidateCredential(sessionShaped, "bearer", PROJECT_ID, NOW)).toEqual({ ok: false, defect: "iss_mismatch" });
+    expect(prevalidateCredential(GOOD.bearer, "cookie" as unknown as CredentialKind, PROJECT_ID, NOW)).toEqual({ ok: false, defect: "iss_mismatch" });
   });
   it("expiry is the SDK's rule: now >= exp is expired; now = exp - 1 is not", () => {
     const t = mint("bearer", { exp: NOW });
@@ -297,25 +300,21 @@ describe("classifyVerificationFailure (pure)", () => {
   it.each([...SDK_CREDENTIAL_ERROR_CODES])("%s is credential whatever the message", (code) => {
     expect(classifyVerificationFailure(proof, Object.assign(new Error("Error fetching public keys"), { code }), "bearer")).toBe("credential");
   });
-  it("argument-error: the two pinned texts are credential, per kind, by prefix", () => {
-    for (const kind of ["bearer", "cookie"] as CredentialKind[]) {
-      for (const suffix of SDK_CREDENTIAL_ARGUMENT_ERROR_SUFFIXES) {
-        expect(classifyVerificationFailure(proof, argErr(`${SDK_JWT_NAME[kind]}${suffix} See docs.`), kind)).toBe("credential");
-        const other: CredentialKind = kind === "bearer" ? "cookie" : "bearer";
-        expect(classifyVerificationFailure(proof, argErr(`${SDK_JWT_NAME[other]}${suffix} See docs.`), kind)).toBe("unavailable");
-        expect(classifyVerificationFailure(proof, argErr(`prefix ${SDK_JWT_NAME[kind]}${suffix}`), kind)).toBe("unavailable");
-      }
+  it("argument-error: the two pinned texts are credential, by prefix; the session-cookie wording is not", () => {
+    const kind: CredentialKind = "bearer";
+    for (const suffix of SDK_CREDENTIAL_ARGUMENT_ERROR_SUFFIXES) {
+      expect(classifyVerificationFailure(proof, argErr(`${SDK_JWT_NAME[kind]}${suffix} See docs.`), kind)).toBe("credential");
+      expect(classifyVerificationFailure(proof, argErr(`${SESSION_JWT_NAME}${suffix} See docs.`), kind)).toBe("unavailable");
+      expect(classifyVerificationFailure(proof, argErr(`prefix ${SDK_JWT_NAME[kind]}${suffix}`), kind)).toBe("unavailable");
     }
   });
-  it("argument-error: the safeDecode text is credential, per kind, by prefix", () => {
-    for (const kind of ["bearer", "cookie"] as CredentialKind[]) {
-      const other: CredentialKind = kind === "bearer" ? "cookie" : "bearer";
-      const text = (n: string) => `${SDK_CREDENTIAL_DECODE_FAILED.prefix}${n}${SDK_CREDENTIAL_DECODE_FAILED.suffix} Make sure you passed the entire string JWT. See docs.`;
-      expect(classifyVerificationFailure(proof, argErr(text(SDK_JWT_NAME[kind])), kind)).toBe("credential");
-      expect(classifyVerificationFailure(proof, argErr(text(SDK_JWT_NAME[other])), kind)).toBe("unavailable");
-      expect(classifyVerificationFailure(proof, argErr(`prefix ${text(SDK_JWT_NAME[kind])}`), kind)).toBe("unavailable");
-      expect(classifyVerificationFailure(proof, argErr(`Decoding ${SDK_JWT_NAME[kind]} succeeded.`), kind)).toBe("unavailable");
-    }
+  it("argument-error: the safeDecode text is credential, by prefix; the session-cookie wording is not", () => {
+    const kind: CredentialKind = "bearer";
+    const text = (n: string) => `${SDK_CREDENTIAL_DECODE_FAILED.prefix}${n}${SDK_CREDENTIAL_DECODE_FAILED.suffix} Make sure you passed the entire string JWT. See docs.`;
+    expect(classifyVerificationFailure(proof, argErr(text(SDK_JWT_NAME[kind])), kind)).toBe("credential");
+    expect(classifyVerificationFailure(proof, argErr(text(SESSION_JWT_NAME)), kind)).toBe("unavailable");
+    expect(classifyVerificationFailure(proof, argErr(`prefix ${text(SDK_JWT_NAME[kind])}`), kind)).toBe("unavailable");
+    expect(classifyVerificationFailure(proof, argErr(`Decoding ${SDK_JWT_NAME[kind]} succeeded.`), kind)).toBe("unavailable");
   });
   it("argument-error with any other text is unavailable (the key-fetch class)", () => {
     for (const m of ["Error fetching public keys for Google certs: x", "Error while making request: read ECONNRESET. Error code: ECONNRESET", "", undefined, "Firebase ID token has incorrect \"aud\" (audience) claim."]) {

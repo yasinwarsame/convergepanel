@@ -81,7 +81,7 @@ describe("identity and authorization", () => {
     let res = await GET(new NextRequest("http://localhost/x"), { params: { workspaceId: TEAM_W, verificationId: VID } });
     expect(await res.json()).toEqual({ ok: false, errorCode: "unauthorized", message: "Please sign in." });
     expect(mockedLogIdentityResolutionFailure).toHaveBeenCalledWith({ route: "GET /api/workspaces/[workspaceId]/verifications/[verificationId]", method: "GET", failureCategory: "missing_credentials" });
-    for (const reason of ["invalid_bearer_token", "revoked_session", "credential_mismatch"]) {
+    for (const reason of ["invalid_bearer_token", "revoked_session", "expired_session"]) {
       mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason });
       res = await GET(new NextRequest("http://localhost/x"), { params: { workspaceId: TEAM_W, verificationId: VID } });
       expect(res.status).toBe(401);

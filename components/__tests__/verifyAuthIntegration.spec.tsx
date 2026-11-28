@@ -29,19 +29,28 @@ const SENTINEL = "SYNTHETIC_SENTINEL_CLAIM";
 
 // ── firebase/auth: capture the real AuthProvider's onIdTokenChanged callback ──
 let tokenCallback: ((user: any) => Promise<void>) | undefined;
+const mockFirebaseAuth = { currentUser: null as unknown };
 jest.mock("firebase/auth", () => ({
   onIdTokenChanged: (_a: unknown, cb: any) => {
-    tokenCallback = cb;
+    // Firebase sets currentUser before notifying observers.
+    tokenCallback = (u: any) => {
+      mockFirebaseAuth.currentUser = u;
+      return cb(u);
+    };
     return () => undefined;
   },
   getIdTokenResult: async () => ({ claims: {} }),
   signOut: async () => undefined,
 }));
-jest.mock("@/lib/firebase/client", () => ({ auth: {} }));
+// R-S0-7: AuthProvider signs out only while Firebase still reports the failed User object, so the double exposes currentUser.
+jest.mock("@/lib/firebase/client", () => ({
+  get auth() {
+    return mockFirebaseAuth;
+  },
+}));
 jest.mock("@/lib/utils/performance", () => ({ perf: { mark: () => undefined, measure: () => undefined, logMetrics: () => undefined } }));
 jest.mock("@/lib/client/sessionSync", () => ({
   establishServerSession: async (user: any) => ({ ok: true, uid: user.uid }),
-  clearServerSession: async () => true,
 }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
 
@@ -101,6 +110,7 @@ beforeEach(() => {
   local = new FakeStorage();
   session = new FakeStorage();
   process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_synthetic";
+  process.env.NEXT_PUBLIC_VERCEL_ENV = "production"; // ZCA R2 Phase B: analytics runs only in Vercel Production
   g.window = {
     location: { origin: "https://convergepanel.com", pathname: "/", search: "", hash: "" },
     history: {
@@ -123,6 +133,7 @@ afterEach(() => {
 afterAll(() => {
   g.window = SAVED_WINDOW;
   process.env.NEXT_PUBLIC_POSTHOG_KEY = SAVED_KEY;
+  delete process.env.NEXT_PUBLIC_VERCEL_ENV;
 });
 
 /** Simulates a full page load of `path` (fresh React tree, fresh AuthProvider). */

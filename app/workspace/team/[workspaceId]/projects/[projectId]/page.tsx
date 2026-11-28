@@ -14,91 +14,19 @@
  * "Project not found" — never revealing that a Project with this id
  * exists in a different Workspace, mirroring the project-scoped runs
  * route's own concealment policy.
+ *
+ * ZCA L-5: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie,
+ * workspace or Project data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access), `TeamWorkspacePage`
+ * (the required capabilities), `GET /api/workspaces/[workspaceId]/projects/[projectId]` (the Project,
+ * looked up only after that gate; another Workspace's Project → the same 404) and, for creation pages,
+ * the active-status rule — every denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import { getProject } from "@/lib/firestore/projects";
-import TeamProjectDetailShell from "@/components/workspace/projects/TeamProjectDetailShell";
-import { projectAssignmentUiEnabledFor } from "@/lib/workspaces/projectAssignmentUiAdmission";
-import { normalizeStoredAssigneeUids } from "@/lib/workspaces/assignmentNormalization";
-import { resolveAssigneePresentations } from "@/lib/workspaces/assigneePresentation";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamProjectDetailPage({ params }: { params: { workspaceId: string; projectId: string } }) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    // Distinct from every concealed-denial case below — a transient
-    // Firestore/infra failure must never be indistinguishable from a
-    // genuine "doesn't exist / not yours". See
-    // `app/workspace/projects/[projectId]/page.tsx`'s own doc comment for
-    // the established precedent this mirrors. Caught by the app's
-    // existing global `app/error.tsx` boundary.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("projects.read")) {
-    notFound();
-  }
-
-  const result = await getProject(params.projectId);
-  if (result.status === "firestore_unavailable" || result.status === "read_failed") {
-    // Same transient-vs-genuine distinction as the Workspace access check
-    // above — a `.get()` failure is not evidence the Project doesn't exist.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (result.status !== "found") {
-    notFound();
-  }
-  // Cross-Workspace containment — concealed identically to "doesn't exist".
-  if (result.project.workspaceId !== params.workspaceId) {
-    notFound();
-  }
-
-  // Project/Research Assignment (D4/D9) — READ-ONLY presentation of the
-  // Project's assignees: normalized stored list (malformed ⇒ `[]`), one
-  // batched membership-evidenced resolve. No token, no editor here.
-  const assigneeUids = normalizeStoredAssigneeUids(result.project.assigneeUids).uids;
-  const presentations = assigneeUids.length > 0 ? await resolveAssigneePresentations(params.workspaceId, "project", assigneeUids) : new Map();
-  const assignees = assigneeUids.flatMap((uid) => {
-    const p = presentations.get(uid);
-    return p ? [{ uid: p.uid, displayName: p.displayName, state: p.state }] : [];
-  });
-
-  return (
-    <TeamProjectDetailShell
-      workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      canReadMembers={access.capabilities.includes("members.read")}
-      canReadAudit={access.capabilities.includes("audit.read")}
-      // R4-I2 — narrow presentation hint for the read-only Claims section. The
-      // page gate itself still requires only `projects.read`; the R3 Claim list
-      // endpoint re-authorizes `research.read` on every request.
-      canReadClaims={access.capabilities.includes("research.read")}
-      // R5-I2 — narrow presentation hint for the read-only Videos section. The
-      // R5-I1 list endpoint re-derives `research.read` per request; this only
-      // decides whether the section issues a request at all.
-      canReadVideos={access.capabilities.includes("research.read")}
-      // R4-I3 — filing a Claim INTO a Project needs `research.create` AND
-      // `research.organize`, exactly what the POST's gates require. Named
-      // independently of `canStartResearch` even though the formula matches
-      // today, so the two can diverge without silently coupling.
-      canCreateClaim={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
-      /* R5-I3-B — Project-filed Video creation needs BOTH capabilities, exactly like a Project-filed Claim: `research.create` to create at all, `research.organize` to file it into a Project. Presentation only; the POST re-authorizes. */
-      canCreateVideo={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
-      canStartResearch={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
-      canAssignResearch={access.capabilities.includes("research.organize")}
-      assignmentUiEnabled={projectAssignmentUiEnabledFor(identity.uid)}
-      project={{ id: result.project.id, name: result.project.name, status: result.project.status, assignees }}
-    />
-  );
+export default function TeamProjectDetailPage({ params }: { params: { workspaceId: string; projectId: string } }) {
+  return <TeamWorkspacePage kind="projectDetail" workspaceId={params.workspaceId} projectId={params.projectId} />;
 }

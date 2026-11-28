@@ -27,56 +27,17 @@
  * `ProjectV1` already supplies everything the header needs (`id`, `name`,
  * `status`); this was a deliberate Phase 6B decision this page simply
  * consumes, not a new capability.
+ *
+ * ZCA L-6: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie, rollout
+ * admission or workspace data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in the bearer-authorized endpoint named in
+ * `components/workspace/PersonalWorkspacePage.tsx` — every closed gate or denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveProjectsUiEligibility } from "@/lib/projects/projectsUiEligibility";
-import { resolvePersonalWorkspaceForOwner } from "@/lib/workspaces/resolvePersonalWorkspaceForOwner";
-import { resolveProjectForOwner } from "@/lib/projects/resolveProjectForOwner";
-import { PROJECTS_UI_ENABLED, PROJECTS_UI_CANARY_UIDS, PROJECTS_ENABLED, PROJECTS_CANARY_UIDS } from "@/lib/env";
-import ProjectDetailShell from "@/components/projects/ProjectDetailShell";
+import PersonalWorkspacePage from "@/components/workspace/PersonalWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectDetailPage({ params }: { params: { projectId: string } }) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const eligible = resolveProjectsUiEligibility({
-    uid: identity.uid,
-    uiGlobalEnabled: PROJECTS_UI_ENABLED,
-    uiCanaryUidsRaw: PROJECTS_UI_CANARY_UIDS,
-    backendGlobalEnabled: PROJECTS_ENABLED,
-    backendCanaryUidsRaw: PROJECTS_CANARY_UIDS,
-  });
-  if (!eligible) {
-    notFound();
-  }
-
-  const workspaceResult = await resolvePersonalWorkspaceForOwner(identity.uid);
-  if (workspaceResult.status !== "found") {
-    notFound();
-  }
-
-  // Phase 7E-B addition — the one new gate step. `params.projectId` is a
-  // client-supplied route segment, never trusted directly; resolution and
-  // ownership are fully re-verified server-side here, the same as every
-  // other Project route.
-  const projectResult = await resolveProjectForOwner(identity.uid, params.projectId);
-  if (projectResult.status === "lookup_failed") {
-    // Distinct from every concealment case below — see module doc comment.
-    throw new Error("Failed to load this Project. Please try again.");
-  }
-  if (projectResult.status !== "found") {
-    notFound();
-  }
-
-  return (
-    <ProjectDetailShell
-      project={{ id: projectResult.project.id, name: projectResult.project.name, status: projectResult.project.status }}
-    />
-  );
+export default function ProjectDetailPage({ params }: { params: { projectId: string } }) {
+  return <PersonalWorkspacePage kind="projectDetail" projectId={params.projectId} />;
 }

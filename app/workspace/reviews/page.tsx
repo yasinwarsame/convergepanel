@@ -50,16 +50,14 @@
  * This gate has zero effect on `GET /api/workspaces/{workspaceId}/review-queue`
  * or any other Phase 9 API — all are independent Route Handlers with
  * their own control flow, unaffected by this page's existence.
+ *
+ * ZCA L-6: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie, rollout
+ * admission or workspace data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in the bearer-authorized endpoint named in
+ * `components/workspace/PersonalWorkspacePage.tsx` — every closed gate or denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
-import { resolveViewerTeamWorkspaceSelection } from "@/lib/workspaces/resolveViewerTeamWorkspaceSelection";
-import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
-import { APPROVAL_WORKFLOW_ENABLED, APPROVAL_WORKFLOW_CANARY_UIDS } from "@/lib/env";
-import WorkspaceReviewQueueShell from "@/components/workspace/WorkspaceReviewQueueShell";
-import WorkspaceReviewsChooser from "@/components/workspace/WorkspaceReviewsChooser";
+import PersonalWorkspacePage from "@/components/workspace/PersonalWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
@@ -68,44 +66,6 @@ function firstStringParam(value: string | string[] | undefined): string | null {
   return typeof raw === "string" && raw.length > 0 ? raw : null;
 }
 
-export default async function WorkspaceReviewsPage({ searchParams }: { searchParams: { [key: string]: string | string[] | undefined } }) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const admission = resolveApprovalWorkflowAdmission({ uid: identity.uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
-  if (!admission.admitted) {
-    notFound();
-  }
-
-  const explicitWorkspaceId = firstStringParam(searchParams.workspace);
-
-  const selection = await resolveViewerTeamWorkspaceSelection(identity.uid);
-  if (selection.kind === "none" || selection.kind === "lookup_failed") {
-    notFound();
-  }
-
-  let targetWorkspaceId: string;
-  if (explicitWorkspaceId) {
-    // Independently revalidated below — an explicit id is never trusted
-    // merely because SOME active membership exists (§9/§46: no fallback
-    // to a different Workspace the caller happens to belong to).
-    targetWorkspaceId = explicitWorkspaceId;
-  } else if (selection.kind === "single") {
-    targetWorkspaceId = selection.workspaceId;
-  } else {
-    // "multiple", no explicit selection: never silently pick one.
-    return <WorkspaceReviewsChooser />;
-  }
-
-  const access = await resolveTeamRunWorkspaceAccess({ uid: identity.uid, workspaceId: targetWorkspaceId });
-  if (!access.granted) {
-    notFound();
-  }
-  if (!access.capabilities.includes("research.read") || !access.capabilities.includes("reviews.read")) {
-    notFound();
-  }
-
-  return <WorkspaceReviewQueueShell workspaceId={targetWorkspaceId} workspaceName={access.workspace.name} hasMultipleWorkspaces={selection.kind === "multiple"} />;
+export default function WorkspaceReviewsPage({ searchParams }: { searchParams: { [key: string]: string | string[] | undefined } }) {
+  return <PersonalWorkspacePage kind="reviews" workspace={firstStringParam(searchParams.workspace)} />;
 }

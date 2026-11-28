@@ -41,7 +41,6 @@ jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: {
     getUser: (...a: unknown[]) => getUser(...(a as [])),
     verifyIdToken: async () => decoded,
-    verifySessionCookie: async () => decoded,
   },
   adminDb: {
     collection: () => ({

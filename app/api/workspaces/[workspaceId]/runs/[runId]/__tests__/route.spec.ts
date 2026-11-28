@@ -146,7 +146,7 @@ describe("gates, in order", () => {
     runReads.mockRestore();
   });
 
-  it.each(["invalid_session_cookie", "credential_mismatch", "revoked_session", "expired_session"])(
+  it.each(["invalid_bearer_token", "revoked_session", "expired_session"])(
     "401 %s → auth_error (never unauthorized), no Workspace access",
     async (reason) => {
       mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason });

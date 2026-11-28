@@ -39,11 +39,7 @@ All API routes set `export const runtime = "nodejs"` (Firebase Admin SDK require
 
 ### Authentication
 
-Two paths accepted in every API route:
-1. Session cookie `__session` → `verifySessionCookie()` from `lib/firebase/auth-helpers.ts`
-2. `Authorization: Bearer <token>` fallback → `verifyIdToken()` from `lib/firebase/auth.ts`
-
-Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Administrator authority has THREE human tiers; the former secret bootstrap mechanism is retired — see
+Bearer only — the cookie path is REMOVED (ZCA L-8, then P3 R2 "verify, don't mint"): every API route authenticates with `Authorization: Bearer <idToken>` via `resolveRequestIdentity` (`lib/auth/resolveRequestIdentity.ts`, `verifyIdToken(token, true)`) or the privileged guard (`lib/admin/privilegedAccess.ts`, `checkRevoked=false` + its one live snapshot). No production code reads or verifies the `__session` cookie: it grants nothing and vetoes nothing. `POST /api/auth/session` is a verification handshake (bearer header and/or JSON body token, origin-checked, `verifyIdToken(token, true)`, answers `{ authenticated, uid }`) that MINTS NOTHING; every response of that route only expires a legacy `__session` cookie. There is no client DELETE and no server session to clear: logout is `beginLogout()` + local Firebase `signOut` (a throwing sign-out → `cancelLogout()` re-verifies). Server Component pages resolve no identity — sensitive pages are neutral shells whose client half calls a bearer-authorized endpoint (`hooks/useAuthorizedResource.ts`). `middleware.ts` reads no credential. Never reintroduce a cookie read, verifier or mint: `__tests__/authSurface/` runs a behavioural differential (every route × bearer arms × cookie arms) and an AST static oracle that fail on any. Rollback: `9d5c6938` is the earliest security-compatible baseline; anything older restores cookie authority and needs explicit owner authorization. Administrator authority has THREE human tiers; the former secret bootstrap mechanism is retired — see
 `docs/operations/admin-authority-tiers.md`. Human tiers: `ADMIN_PORTAL` (verified
 `ADMIN_EMAILS` member or the `admin` claim), `SYSTEM_ADMIN` (the `admin` custom claim
 ONLY — credentials, claim minting, purge, destructive user/billing mutation), and

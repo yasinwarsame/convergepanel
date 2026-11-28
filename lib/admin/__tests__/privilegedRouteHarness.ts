@@ -4,8 +4,10 @@
  *
  * Doubles live ONLY at the Firebase Admin SDK boundary:
  *
- *   - `adminAuth` (`verifyIdToken`, `verifySessionCookie`, `getUser`, and the
- *     account/claim mutations the handlers perform), backed by `authState`;
+ *   - `adminAuth` (`verifyIdToken`, `getUser`, and the account/claim mutations
+ *     the handlers perform), backed by `authState`. ZCA P3 R2: the double has NO
+ *     session-cookie verifier — production code never verifies the cookie, and a
+ *     call to one would throw (and change the decision a spec compares);
  *   - `adminDb`, an in-memory Firestore that RECORDS EVERY CALL made through
  *     it (`dbLog`), so a spec can assert that a refused request touched no
  *     protected data at all — not even a read.
@@ -77,6 +79,7 @@ export const authState: {
   available: boolean;
   projectId: string | undefined;
   tokens: Map<string, Decoded | Error>;
+  /** Session-cookie strings a persona would present. Never consulted by the code under test (ZCA P3 R2). */
   cookies: Map<string, Decoded | Error>;
   records: Map<string, AuthRecord | Error>;
 } = { available: true, projectId: PROJECT_ID, tokens: new Map(), cookies: new Map(), records: new Map() };
@@ -89,12 +92,6 @@ export const authCalls = {
   verifyIdToken: jest.fn(async (token: string, _checkRevoked?: boolean) => {
     const v = authState.tokens.get(token);
     if (v === undefined) throw invalidSignature("bearer");
-    if (v instanceof Error) throw v;
-    return v;
-  }),
-  verifySessionCookie: jest.fn(async (cookie: string, _checkRevoked?: boolean) => {
-    const v = authState.cookies.get(cookie);
-    if (v === undefined) throw invalidSignature("cookie");
     if (v instanceof Error) throw v;
     return v;
   }),
@@ -111,7 +108,6 @@ export const authCalls = {
 
 export const authDouble = {
   verifyIdToken: (t: string, c?: boolean) => authCalls.verifyIdToken(t, c),
-  verifySessionCookie: (t: string, c?: boolean) => authCalls.verifySessionCookie(t, c),
   getUser: (u: string) => authCalls.getUser(u),
   setCustomUserClaims: (u: string, c: unknown) => authCalls.setCustomUserClaims(u, c),
   updateUser: (u: string, p: unknown) => authCalls.updateUser(u, p),

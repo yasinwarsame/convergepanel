@@ -378,22 +378,28 @@ describe("STRUCTURED CONTAINMENT CONTRACT — steps identified by stable ID", ()
 describe("the session-mint claim matches the code", () => {
   /**
    * C10 asserted that POST /api/auth/session refuses to mint for a disabled or
-   * revoked identity. The route calls verifyIdToken WITHOUT checkRevoked, so
-   * that was false — and it contradicted §B.5 of the same document.
+   * revoked identity while the route called verifyIdToken WITHOUT checkRevoked,
+   * so that was false. SESSREV made the route pass checkRevoked = true; the doc
+   * now states the refusal, and this pin keeps code and doc in step.
    */
   const src = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
   const ROUTE = readFileSync("app/api/auth/session/route.ts", "utf8");
 
-  it("ANCHOR: the route still mints from verifyIdToken", () => {
+  it("ANCHOR (ZCA P3 R2): the route verifies with verifyIdToken and mints nothing — its only cookie write is the `__session` expiry", () => {
     expect(ROUTE).toContain("verifyIdToken");
-    expect(ROUTE).toContain("createSessionCookie");
+    expect(ROUTE.match(/\.cookies\.set\(/g)).toHaveLength(1);
+    expect(ROUTE).toMatch(/\.cookies\.set\("__session", "", \{[^}]*maxAge: 0 \}\)/);
   });
 
-  it("the route does NOT pass checkRevoked — so the doc must not claim it refuses", () => {
+  it("the route passes checkRevoked = true — and the doc states the refusal, not the old gap", () => {
     // If this ever changes, the documentation below should change with it.
-    expect(ROUTE).not.toMatch(/verifyIdToken\([^)]*,\s*true\s*\)/);
-    expect(src).toMatch(/without\s*\n?\s*`checkRevoked`/);
-    expect(src.replace(/\s+/g, " ")).toContain("Minting a NEW cookie is not blocked by this application");
+    expect(ROUTE).toMatch(/adminAuth\.verifyIdToken\(idToken,\s*true\s*\)/);
+    expect(ROUTE).not.toMatch(/adminAuth\.verifyIdToken\(idToken\s*\)/);
+    const flat = src.replace(/\s+/g, " ");
+    // ZCA P3 R2: the SESSREV "minting is refused" statements became "no session cookie is minted" (both places).
+    expect(flat.match(/No session cookie is minted \(ZCA P3 R2\)/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(flat).not.toContain("Minting a NEW cookie is refused");
+    expect(flat).not.toContain("Minting a NEW cookie is not blocked by this application");
   });
 
   it("does not assert an immediate bearer-path cutoff", () => {

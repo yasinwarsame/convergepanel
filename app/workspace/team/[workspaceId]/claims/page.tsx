@@ -14,44 +14,19 @@
  * Only the single `audit.read` presentation hint crosses to the client; the
  * capability set itself never does, and no authorization decision is delegated
  * to the browser.
+ *
+ * ZCA L-4: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie or
+ * workspace data; it names the page kind and passes only URL params (and identity-free values). The
+ * gate above now runs, unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access;
+ * every denial the same 404) and `TeamWorkspacePage` (the required capabilities → the same 404).
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import TeamWorkspaceClaimsShell from "@/components/workspace/claims/TeamWorkspaceClaimsShell";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamWorkspaceClaimsPage({ params }: { params: { workspaceId: string } }) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    // A transient infra failure must never be indistinguishable from a genuine
-    // "doesn't exist / not yours". Caught by the app's global `app/error.tsx`.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("research.read")) {
-    notFound();
-  }
-
+export default function TeamWorkspaceClaimsPage({ params }: { params: { workspaceId: string } }) {
   return (
-    <TeamWorkspaceClaimsShell
-      workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      showMembers={access.capabilities.includes("members.read")}
-      showAudit={access.capabilities.includes("audit.read")}
-      // R4-I3 — narrow presentation hint for the "Verify New Claim" entry point. The
-      // POST re-derives `research.create` at both gates; this only decides
-      // whether a link that would otherwise 404 is offered.
-      canCreateClaim={access.capabilities.includes("research.create")}
-    />
+    <TeamWorkspacePage kind="claims" workspaceId={params.workspaceId} />
   );
 }

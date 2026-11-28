@@ -26,12 +26,10 @@ afterAll(() => {
 let decoded: Record<string, unknown> = {};
 let authRecord: Record<string, unknown> = {};
 const verifyIdToken = jest.fn(async () => decoded);
-const verifySessionCookie = jest.fn(async () => decoded);
 
 jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: {
     verifyIdToken: (...a: unknown[]) => verifyIdToken(...(a as [])),
-    verifySessionCookie: (...a: unknown[]) => verifySessionCookie(...(a as [])),
     getUser: async () => authRecord,
   },
   adminDb: {},
@@ -42,7 +40,6 @@ import {
   checkIsAdminFromToken,
   requireSystemAdminAccess,
   verifyAdminToken,
-  verifySessionCookieValue,
 } from "@/lib/firebase/auth-helpers";
 
 /** Every non-`true` claim value that a truthy read would wrongly accept. */
@@ -74,7 +71,6 @@ beforeEach(() => {
   decoded = {};
   authRecord = {};
   verifyIdToken.mockClear();
-  verifySessionCookie.mockClear();
 });
 
 describe("requireSystemAdminBearer — keys + set-role", () => {
@@ -115,20 +111,5 @@ describe("checkIsAdminFromToken", () => {
   });
 });
 
-describe("verifySessionCookieValue — the isAdmin field must honour the same contract", () => {
-  /**
-   * No production route authorizes on this field today (every consumer reads
-   * only `.uid`), but it is named `isAdmin` and was computed with `!!`, so it
-   * returned true for `"false"`, `{}` and `[]`. C3 makes it strict so a future
-   * caller inherits the contract the rest of the tier model uses.
-   */
-  it("admin === true -> isAdmin true", async () => {
-    decoded = { uid: "u", admin: true };
-    await expect(verifySessionCookieValue("c")).resolves.toEqual({ uid: "u", isAdmin: true });
-  });
-
-  it.each(DENIED)("admin %s -> isAdmin false", async (_label, value) => {
-    decoded = value === undefined ? { uid: "u" } : { uid: "u", admin: value };
-    await expect(verifySessionCookieValue("c")).resolves.toEqual({ uid: "u", isAdmin: false });
-  });
-});
+// ZCA P3 R2: the session-cookie verifier's `isAdmin` cases were DELETED with the verifier (no production code
+// verifies the cookie any more).

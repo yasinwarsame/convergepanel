@@ -13,19 +13,28 @@ import { FakeStorage } from "@/lib/client/__tests__/helpers/fakeStorage";
 let tokenCallback: ((user: any) => Promise<void>) | undefined;
 let mockSyncOk = true;
 const mockSignOut = jest.fn(async () => undefined);
+const mockFirebaseAuth = { currentUser: null as unknown };
 jest.mock("firebase/auth", () => ({
   onIdTokenChanged: (_auth: unknown, cb: any) => {
-    tokenCallback = cb;
+    // Firebase sets currentUser before notifying observers.
+    tokenCallback = (u: any) => {
+      mockFirebaseAuth.currentUser = u;
+      return cb(u);
+    };
     return () => undefined;
   },
   getIdTokenResult: async () => ({ claims: {} }),
   signOut: (...args: any[]) => (mockSignOut as any)(...args),
 }));
-jest.mock("@/lib/firebase/client", () => ({ auth: {} }));
+// R-S0-7: AuthProvider signs out only while Firebase still reports the failed User object, so the double exposes currentUser.
+jest.mock("@/lib/firebase/client", () => ({
+  get auth() {
+    return mockFirebaseAuth;
+  },
+}));
 jest.mock("@/lib/utils/performance", () => ({ perf: { mark: () => undefined, measure: () => undefined, logMetrics: () => undefined } }));
 jest.mock("@/lib/client/sessionSync", () => ({
   establishServerSession: async (user: any) => (mockSyncOk ? { ok: true, uid: user.uid } : { ok: false, reason: "synthetic" }),
-  clearServerSession: async () => true,
 }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
 const mockReset = jest.fn();

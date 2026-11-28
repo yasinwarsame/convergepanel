@@ -89,18 +89,21 @@
 
 import "server-only";
 
-export type CredentialKind = "bearer" | "cookie";
+/**
+ * The only credential the guard accepts: the Firebase ID token in `Authorization: Bearer`. (ZCA P3 R2
+ * removed the session-cookie kind with the guard's cookie slot; its issuer, jwtName and error codes
+ * went with it.)
+ */
+export type CredentialKind = "bearer";
 
-/** token-verifier.js:292 and :314 — the issuer each verifier demands. */
+/** token-verifier.js:292 — the issuer the ID-token verifier demands. */
 export const EXPECTED_ISSUER_PREFIX: Readonly<Record<CredentialKind, string>> = Object.freeze({
   bearer: "https://securetoken.google.com/",
-  cookie: "https://session.firebase.google.com/",
 });
 
-/** token-verifier.js:40 and :64 — the `jwtName` that prefixes every message. */
+/** token-verifier.js:40 — the `jwtName` that prefixes every ID-token message. */
 export const SDK_JWT_NAME: Readonly<Record<CredentialKind, string>> = Object.freeze({
   bearer: "Firebase ID token",
-  cookie: "Firebase session cookie",
 });
 
 /** utils/jwt.js:24 */
@@ -140,9 +143,7 @@ export const SDK_CREDENTIAL_DECODE_FAILED = Object.freeze({ prefix: "Decoding ",
  */
 export const SDK_CREDENTIAL_ERROR_CODES: ReadonlySet<string> = new Set([
   "auth/id-token-expired",
-  "auth/session-cookie-expired",
   "auth/id-token-revoked",
-  "auth/session-cookie-revoked",
   "auth/invalid-id-token",
   "auth/user-disabled",
   "auth/user-not-found",
@@ -241,7 +242,7 @@ function errorMessageOf(err: unknown): string {
 export type VerificationFailureClass = "credential" | "unavailable";
 
 /**
- * Classifies an error thrown by `verifyIdToken` / `verifySessionCookie` for a
+ * Classifies an error thrown by `verifyIdToken` for a
  * credential that PASSED `prevalidateCredential`. The `proof` parameter is
  * the type-level requirement that pre-validation happened: without it the
  * default below would be reachable by caller-controlled bytes.

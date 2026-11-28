@@ -17,7 +17,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
 import { useAuth } from "@/components/AuthProvider";
-import { clearServerSession } from "@/lib/client/sessionSync";
 import posthog from "posthog-js";
 
 const LOGIN_VALUE_LINES = [
@@ -118,12 +117,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // Auth Lifecycle Hardening, Step 6.6 — if a DIFFERENT session is
-      // already active in this browser, invalidate it (server cookie +
-      // Firebase client) BEFORE starting the new sign-in, rather than
-      // relying solely on AuthProvider's reactive uid-change fallback.
+      // Auth Lifecycle Hardening, Step 6.6 — if a DIFFERENT identity is
+      // already active in this browser, sign the Firebase client out BEFORE
+      // starting the new sign-in, rather than relying solely on AuthProvider's
+      // reactive uid-change fallback. (There is no server session to clear.)
       if (auth.currentUser) {
-        await clearServerSession();
         await signOut(auth);
       }
 
@@ -155,10 +153,10 @@ export default function LoginPage() {
         lastLoginAt: serverTimestamp(),
       }, { merge: true });
 
-      // Session-cookie creation/verification is no longer done here — it now
-      // happens reactively in AuthProvider's onIdTokenChanged listener
-      // (lib/client/sessionSync.ts's establishServerSession), which is the
-      // single place that call is made from. This handler waits for that to
+      // Server verification of this identity is not done here — it happens
+      // reactively in AuthProvider's onIdTokenChanged listener
+      // (lib/client/sessionSync.ts's establishServerSession, the handshake),
+      // which is the single place that call is made from. This handler waits for that to
       // reach syncState === "authenticated" for THIS uid (see effect above)
       // before redirecting.
 
@@ -303,15 +301,17 @@ export default function LoginPage() {
               Sign in to ConvergePanel
             </h2>
 
-            {signedOut && (
+            {signedOut ? (
               <div
                 className="mt-4 rounded-xl border border-cp-border bg-cp-raised px-3 py-3 text-sm text-cp-muted"
                 role="status"
               >
                 <p className="font-medium text-cp-text">You&apos;ve been signed out.</p>
-                <p className="mt-1 text-cp-muted">Thanks for using ConvergePanel. Sign back in below.</p>
+                <p className="mt-1 text-cp-muted">
+                  Thanks for using ConvergePanel. Sign back in below.
+                </p>
               </div>
-            )}
+            ) : null}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               <div>

@@ -73,12 +73,14 @@ beforeEach(() => {
   for (const k of Object.keys(atInit)) delete atInit[k];
   process.env.NEXT_PUBLIC_SENTRY_DSN = "https://00000000000000000000000000000000@o0.ingest.example.invalid/0";
   process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_synthetic";
+  process.env.NEXT_PUBLIC_VERCEL_ENV = "production"; // ZCA R2 Phase B: analytics runs only in Vercel Production
 });
 afterAll(() => {
   g.window = SAVED_WINDOW;
   if (SAVED_DSN === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
   else process.env.NEXT_PUBLIC_SENTRY_DSN = SAVED_DSN;
   process.env.NEXT_PUBLIC_POSTHOG_KEY = SAVED_KEY;
+  delete process.env.NEXT_PUBLIC_VERCEL_ENV;
 });
 
 /** React + test renderer from the CURRENT module registry (beforeEach resets modules). */

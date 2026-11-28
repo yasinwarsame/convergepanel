@@ -20,73 +20,19 @@
  * "you don't have permission" state to design; the Project detail page's
  * own "Start Research" button is what conditionally links here in the
  * first place (Section H containment discipline, matched exactly).
+ *
+ * ZCA L-5: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie,
+ * workspace or Project data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access), `TeamWorkspacePage`
+ * (the required capabilities), `GET /api/workspaces/[workspaceId]/projects/[projectId]` (the Project,
+ * looked up only after that gate; another Workspace's Project → the same 404) and, for creation pages,
+ * the active-status rule — every denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import { getProject } from "@/lib/firestore/projects";
-import TeamResearchComposerShell from "@/components/workspace/projects/TeamResearchComposerShell";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamProjectResearchComposerPage({ params }: { params: { workspaceId: string; projectId: string } }) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    // Distinct from every concealed-denial case below — a transient
-    // Firestore/infra failure must never be indistinguishable from a
-    // genuine "doesn't exist / not yours". See
-    // `app/workspace/projects/[projectId]/page.tsx`'s own doc comment for
-    // the established precedent this mirrors. Caught by the app's
-    // existing global `app/error.tsx` boundary.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("projects.read")) {
-    notFound();
-  }
-  // The capabilities `createTeamWorkspaceRun()` itself requires for a
-  // Project-bound run — never rendering an actionable composer a caller's
-  // own submission would just be rejected for.
-  if (!access.capabilities.includes("research.create") || !access.capabilities.includes("research.organize")) {
-    notFound();
-  }
-
-  const result = await getProject(params.projectId);
-  if (result.status === "firestore_unavailable" || result.status === "read_failed") {
-    // Same transient-vs-genuine distinction as the Workspace access check
-    // above — a `.get()` failure is not evidence the Project doesn't exist.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (result.status !== "found") {
-    notFound();
-  }
-  // Cross-Workspace containment — concealed identically to "doesn't exist",
-  // matching the Project detail page's own established policy exactly.
-  if (result.project.workspaceId !== params.workspaceId) {
-    notFound();
-  }
-  // An archived Project can never accept a new run — the backend itself
-  // would reject this with `project_archived`; never render an enabled
-  // composer for a Project that can only fail on submit.
-  if (result.project.status !== "active") {
-    notFound();
-  }
-
-  return (
-    <TeamResearchComposerShell
-      workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      canReadMembers={access.capabilities.includes("members.read")}
-      canReadAudit={access.capabilities.includes("audit.read")}
-      project={{ id: result.project.id, name: result.project.name }}
-    />
-  );
+export default function TeamProjectResearchComposerPage({ params }: { params: { workspaceId: string; projectId: string } }) {
+  return <TeamWorkspacePage kind="projectResearchNew" workspaceId={params.workspaceId} projectId={params.projectId} />;
 }

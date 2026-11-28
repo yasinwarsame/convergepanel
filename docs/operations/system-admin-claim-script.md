@@ -496,8 +496,9 @@ message, the result file and the outcome audit row:
   guarded request is evaluated against the live `admin` claim, the live
   `disabled` state and the live `tokensValidAfterTime` cutoff (403 without the
   live claim; 401 for a disabled account, or for a credential whose `auth_time`
-  is earlier than the cutoff). Session-cookie paths outside the guard check
-  revocation too (`verifySessionCookie(raw, true)`). Claim removal and
+  is earlier than the cutoff). Routes outside the guard verify the bearer with
+  revocation checked too (`verifyIdToken(token, true)`); no route reads the
+  `__session` cookie (ZCA P3 R2). Claim removal and
   refresh-token revocation are separate operations; this tool does not observe
   request-time enforcement, and surfaces outside the S2-b guard coverage are not
   claimed to apply the same checks.
@@ -605,12 +606,13 @@ stored value; it does not keep the later of the two. The Auth API is
 overwrite-only (`accounts:update`, no precondition, no compare-and-set), so
 no caller's write is conditioned on the stored value. A later call from a
 slower clock LOWERS `tokensValidAfterTime`, and wherever revocation is checked
-(session cookies; the refresh-token exchange, assumed) the check stops
-rejecting any session whose `auth_time` lies between the new and the old value
-— including sessions an earlier revoke had excluded. A session cookie minted
+(the bearer's `auth_time` check; the refresh-token exchange, assumed) the check
+stops rejecting any session whose `auth_time` lies between the new and the old
+value — including sessions an earlier revoke had excluded. An ID token issued
 while the target still held `admin: true` carries that claim; if its
-`auth_time` falls in that interval it passes `verifySessionCookie(cookie,
-true)` again.
+`auth_time` falls in that interval it passes the revocation check again (the
+S2-b guard still denies SYSTEM_ADMIN on the live claim). The retired session
+cookie is no longer accepted anywhere (ZCA P3 R2).
 
 **Owner policy (amended, D-2a).** "Every revoke calls `revokeRefreshTokens`"
 now reads: every revoke calls `revokeRefreshTokens` unless a fresh read
@@ -756,7 +758,7 @@ command.
 | Credential | Checked by | Effect of the revoke |
 |---|---|---|
 | Firebase refresh tokens | Firebase Auth (on the token exchange, in Google's backend) | Only if Firebase applied the request (an acknowledged call; a thrown call's effect is unknown). ASSUMED, not observable from the Admin SDK or this tool: Firebase then refuses to mint new ID tokens from a refresh token whose session `auth_time` is earlier than the stored `validSince`, so the client loses that session on its next refresh. A session whose `auth_time` is at or after `validSince` (operator clock behind, or cross-service skew) keeps refreshing. The tool does not observe which sessions are affected. |
-| `__session` cookie (5-day Firebase session cookie, `app/api/auth/session/route.ts:37`, `:76`) | `verifySessionCookie(cookie, true)` — revocation CHECKED — at `lib/firebase/auth-helpers.ts:127` (`verifySessionCookieValue`, used by `resolveRequestIdentity` / `resolveServerComponentIdentity` / `/api/auth/session`), `lib/firebase/auth-helpers.ts:277` (`requireAdminPortalAccess` cookie fallback) and `app/api/admin/access/route.ts:41` | Only if Firebase applied the request (an acknowledged call; a thrown call's effect is unknown): on its next request, a cookie whose session `auth_time` is earlier than the stored `validSince` fails the revocation check and is rejected. This is judged on `auth_time`, not on when the cookie was minted, so a cookie for a session whose `auth_time` is at or after `validSince` still passes; whether every pre-removal cookie is covered is NOT established by the tool. There is no `verifySessionCookie(..., false)` call in `lib/` or `app/`. |
+| `__session` cookie (retired; ZCA P3 R2) | Nothing — no route reads or verifies it (pinned by `__tests__/authSurface/cookieRetirementStatic.spec.ts` and the behavioural differential in `__tests__/authSurface/`) | None needed: it authorizes nothing and cannot veto a bearer. Every `/api/auth/session` response expires it (one-way cleanup). Before ZCA L-8 it was revocation-checked authority; a deployment older than `9d5c6938` restores that. |
 | App-side session store | — | None exists: no `sessions` / `admin_sessions` collection grants access (searched `lib/`, `app/`, `middleware.ts`). `middleware.ts:26` only checks that a `__session` cookie is present for `/admin/*` routing; it grants no API access. Nothing else to invalidate. |
 | Already-issued ID tokens (bearer, up to about 1 hour) | On every S2-b-guarded route: `requirePrivilegedAccess` (`lib/admin/privilegedAccess.ts`) checks the token's signature, then decides from one live `getUser` read: the live `admin` claim, `disabled`, and the token's `auth_time` against the live `tokensValidAfterTime`. The retired helpers (`verifyAdminToken`, `requireAdminPortalAccess`, `getRequestUser` / `requireSystemAdminBearer`) have no route callers. | **NOT invalidated.** The token may still carry `admin: true` until it expires. On the S2-b-guarded routes a subsequent request with it is refused when the live claim is gone (403) or when its `auth_time` is earlier than the stored `validSince` (401). Surfaces outside the S2-b guard coverage are not claimed to apply the same checks. |
 

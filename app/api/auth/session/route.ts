@@ -1,132 +1,261 @@
 /**
- * Session Cookie API Endpoint — Auth Lifecycle Hardening, Step 6.4.
+ * Session verification handshake — ZCA P3 R2 "verify, don't mint".
  *
- * Creates, clears, and reads the server `__session` cookie that every
- * protected API route resolves identity from first (`getRequestUid()`,
- * `lib/teams/teamApiAuth.ts`; `verifySessionCookie()`,
- * `lib/firebase/auth-helpers.ts`). This is the single place a client ID
- * token is ever exchanged for that cookie, and the single place it is ever
- * cleared — `lib/client/sessionSync.ts` is the only client-side caller.
+ * `POST /api/auth/session` VERIFIES the caller's Firebase ID token (revocation-checked) and answers
+ * `{ authenticated: true, uid }`. That answer is the server confirmation behind the client's
+ * `syncState === "authenticated"` (components/AuthProvider.tsx, lib/client/sessionSync.ts). It mints
+ * NOTHING: there is no session cookie any more, and no route reads one. Every protected route
+ * authenticates each request from its own `Authorization: Bearer` (the shared request-identity resolver
+ * and the privileged-access guard).
  *
- * Route: POST/DELETE/GET /api/auth/session
+ * Every response of this route — success or failure, POST or DELETE — carries a `__session`
+ * EXPIRY (`Max-Age=0`, the attributes the retired cookie was set with) and `Cache-Control: no-store`.
+ * The expiry is one-way cleanup of a cookie earlier builds set; it can only delete.
+ *
+ * Route: POST / DELETE /api/auth/session. There is deliberately no GET (ZCA L-2): Next.js answers 405.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth } from "@/lib/firebase/admin";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
+import { adminAuth as firebaseAdminAuth } from "@/lib/firebase/admin";
 import { logAuthSessionEvent } from "@/lib/authTelemetry";
 import { logger } from "@/lib/logger";
+import { getVercelDeploymentHosts, isVercelPlatform } from "@/lib/auth/vercelDeploymentHosts";
+import { startVerificationDeadline, type VerificationOutcome } from "@/lib/auth/authVerificationDeadline";
+import { isVerifierUnavailableCode } from "@/lib/auth/resolveRequestIdentity";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
 
 /**
- * Cookie attributes shared by every Set-Cookie this route issues — the
- * creation (`POST`) and deletion (`DELETE`) responses MUST use IDENTICAL
- * `path`/`secure`/`sameSite` (and no `domain` override, so both default to
- * the exact request host) or the browser can end up treating them as two
- * different cookies, leaving the original still present after a "delete."
+ * The ONLY cookie write in the application (pinned by __tests__/authSurface/authSurfaceStatic.spec.ts):
+ * an expiry of the retired `__session` cookie, with the attributes it was created with (an expiry with
+ * different `path`/`secure`/`sameSite` can be treated as a different cookie and leave the original in
+ * place). No `domain` override, so it addresses the exact request host, as the creation did.
  */
-const SESSION_COOKIE_NAME = "__session";
-const SESSION_COOKIE_BASE_ATTRS = {
-  httpOnly: true,
-  secure: true,
-  sameSite: "lax" as const,
-  path: "/",
-};
-const SESSION_MAX_AGE_MS = 60 * 60 * 24 * 5 * 1000; // 5 days
-
-function noStore(response: NextResponse): NextResponse {
+function finish(response: NextResponse): NextResponse {
   response.headers.set("Cache-Control", "no-store");
+  response.cookies.set("__session", "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
   return response;
 }
 
-export async function POST(request: NextRequest) {
-  let body: unknown;
+function json(body: Record<string, unknown>, status = 200): NextResponse {
+  return finish(NextResponse.json(body, { status }));
+}
+
+function errorCodeOf(err: unknown): string {
+  if (typeof err === "object" && err !== null && "code" in err) {
+    const code = (err as { code?: unknown }).code;
+    return typeof code === "string" ? code : "";
+  }
+  return "";
+}
+
+/**
+ * R2 L-2 — the origins a handshake may come from, computed from SERVER CONFIGURATION ONLY:
+ *   - the pinned Production hosts (apex, www, the Production `vercel.app` alias);
+ *   - this deployment's own Vercel system hosts (`VERCEL_URL`, `VERCEL_BRANCH_URL`, set by the platform),
+ *     so an isolated Preview works on both its deployment URL and its branch alias;
+ *   - OFF the Vercel platform only (local `next dev` / `next start`, the browser harness):
+ *     `request.nextUrl.origin`. On Vercel that value is built from the `Host` header
+ *     (Next.js `trustHostHeader`), i.e. request-derived, so it is never part of the set there.
+ * `Host` / `X-Forwarded-Host` / `X-Forwarded-Proto` / `Forwarded` are never an authority source on Vercel.
+ */
+const PINNED_PRODUCTION_ORIGINS: readonly string[] = Object.freeze([
+  "https://convergepanel.com",
+  "https://www.convergepanel.com",
+  "https://convergepanel.vercel.app",
+]);
+
+const HOST_NAME = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/i;
+
+function allowedOrigins(request: NextRequest): ReadonlySet<string> {
+  const allowed = new Set<string>(PINNED_PRODUCTION_ORIGINS);
+  if (!isVercelPlatform()) {
+    const addressed = request.nextUrl;
+    allowed.add(addressed.origin);
+    // NextURL rewrites a loopback host (127.0.0.1, [::1]) to "localhost"; a page served on the loopback
+    // address sends its literal origin, so the loopback spellings of the same port are equivalent here.
+    if (addressed.hostname === "localhost") {
+      const port = addressed.port ? `:${addressed.port}` : "";
+      allowed.add(`${addressed.protocol}//127.0.0.1${port}`);
+      allowed.add(`${addressed.protocol}//[::1]${port}`);
+    }
+  }
+  for (const host of getVercelDeploymentHosts()) {
+    if (HOST_NAME.test(host)) allowed.add(new URL(`https://${host}`).origin);
+  }
+  return allowed;
+}
+
+/**
+ * CSRF / origin rule (R1 L1 + R2 L-2). Allowed only when BOTH hold:
+ *   - `Sec-Fetch-Site` is `same-origin`, or absent;
+ *   - `Origin` is absent, or exactly one of the allowed origins. `Origin: null` (an opaque origin:
+ *     sandboxed frame, `data:` page, some redirects) is never allowed.
+ * Missing `Origin` (defined behaviour): allowed when `Sec-Fetch-Site` is also same-origin or absent.
+ * Every browser in scope sends `Origin` on a `fetch` POST, so its absence means a non-browser caller,
+ * which holds its own token and has no ambient credential to abuse — and the handshake mints nothing.
+ */
+function originVerdict(request: NextRequest): "allowed" | "cross_origin" {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin") return "cross_origin";
+  const origin = request.headers.get("origin");
+  if (origin === null) return "allowed";
+  if (origin === "null") return "cross_origin";
+  return allowedOrigins(request).has(origin) ? "allowed" : "cross_origin";
+}
+
+function isJsonContentType(value: string | null): boolean {
+  if (value === null) return false;
+  return value.split(";")[0].trim().toLowerCase() === "application/json";
+}
+
+const BEARER = /^Bearer[ \t]+([^\s]+)[ \t]*$/i;
+
+/**
+ * R1 L2 — credential precedence. The header and the body are parsed independently:
+ *   - a present `Authorization` header that is not `Bearer <token>` is 401 and the body is NOT read
+ *     (no fallback);
+ *   - a header-only request is valid (no body needed);
+ *   - a body token requires `Content-Type: application/json`;
+ *   - when both are present they must be byte-equal, else 401 `credential_conflict`.
+ * New clients send both (R1 L3, rollback compatibility); old open tabs send the body only.
+ */
+async function presentedToken(request: NextRequest): Promise<{ ok: true; token: string } | { ok: false; response: NextResponse }> {
+  const header = request.headers.get("authorization");
+  let headerToken: string | null = null;
+  if (header !== null) {
+    const match = BEARER.exec(header);
+    if (!match) {
+      logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "malformed_authorization" });
+      return { ok: false, response: json({ error: "Invalid or expired token", code: "malformed_authorization" }, 401) };
+    }
+    headerToken = match[1];
+  }
+
+  let raw: string;
   try {
-    body = await request.json();
+    raw = await request.text();
   } catch {
-    return noStore(NextResponse.json({ error: "Invalid request body" }, { status: 400 }));
+    return { ok: false, response: json({ error: "Invalid request body" }, 400) };
+  }
+  let bodyToken: string | null = null;
+  if (raw.trim() !== "") {
+    if (!isJsonContentType(request.headers.get("content-type"))) {
+      return { ok: false, response: json({ error: "Content-Type must be application/json", code: "unsupported_media_type" }, 415) };
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return { ok: false, response: json({ error: "Invalid request body" }, 400) };
+    }
+    if (typeof body === "object" && body !== null && "idToken" in body) {
+      const t = (body as { idToken?: unknown }).idToken;
+      if (typeof t !== "string" || t === "") return { ok: false, response: json({ error: "ID token is required" }, 400) };
+      bodyToken = t;
+    }
   }
 
-  const idToken = (body as { idToken?: unknown } | null)?.idToken;
-  if (!idToken || typeof idToken !== "string") {
-    return noStore(NextResponse.json({ error: "ID token is required" }, { status: 400 }));
+  if (headerToken !== null && bodyToken !== null && headerToken !== bodyToken) {
+    logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "credential_conflict" });
+    return { ok: false, response: json({ error: "Invalid or expired token", code: "credential_conflict" }, 401) };
+  }
+  const token = headerToken ?? bodyToken;
+  if (token === null) return { ok: false, response: json({ error: "ID token is required" }, 400) };
+  return { ok: true, token };
+}
+
+export async function POST(request: NextRequest) {
+  if (originVerdict(request) !== "allowed") {
+    logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "cross_origin" });
+    return json({ error: "Cross-origin request refused", code: "cross_origin" }, 403);
   }
 
+  const presented = await presentedToken(request);
+  if (!presented.ok) return presented.response;
+  const idToken = presented.token;
+
+  // A local const: its null-check narrowing also holds inside the deadline closure below.
+  const adminAuth = firebaseAdminAuth;
   if (!adminAuth) {
     logger.error("[auth-session] POST failed: Firebase Admin Auth is not initialized");
-    return noStore(NextResponse.json({ error: "Authentication service unavailable" }, { status: 500 }));
+    return json({ error: "Authentication service unavailable" }, 500);
   }
 
-  // uid is derived EXCLUSIVELY from server-side verification of the token
-  // the client sent — the client never gets to assert its own uid, here or
-  // anywhere else in this route.
-  let decodedUid: string;
+  // uid is derived EXCLUSIVELY from server-side verification of the presented token — the client
+  // never asserts its own uid.
+  //
+  // checkRevoked = true (SESSREV): the SDK reads the live Auth record (`getUser`) and rejects a
+  // DISABLED account (`auth/user-disabled`) and a token whose `auth_time` predates
+  // `tokensValidAfterTime` (`auth/id-token-revoked`).
+  //
+  // R5 (deadline): the live read runs under the end-to-end deadline shared with
+  // resolveRequestIdentity (AUTH_VERIFICATION_DEADLINE_MS, including the per-instance cap on
+  // in-flight verifications). Pending at the deadline — or refused at the cap — answers the same
+  // 503 as a verifier outage; a result that arrives later is never read.
+  const deadline = startVerificationDeadline("session_mint");
   try {
-    const decoded = await adminAuth.verifyIdToken(idToken);
-    decodedUid = decoded.uid;
-  } catch {
-    logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "invalid_token" });
-    return noStore(NextResponse.json({ error: "Invalid or expired token" }, { status: 401 }));
+    const verified = await deadline.run(() => adminAuth.verifyIdToken(idToken, true));
+    if (verified.kind === "deadline" || verified.kind === "capped") {
+      return verificationUnavailable("identity verification unavailable", verified.kind);
+    }
+    let decodedUid: string;
+    try {
+      if (verified.kind === "rejected") throw verified.error;
+      const decoded = verified.value;
+      if (typeof decoded?.uid !== "string" || decoded.uid === "") {
+        throw Object.assign(new Error("decoded token has no uid"), { code: "auth/invalid-id-token" });
+      }
+      decodedUid = decoded.uid;
+    } catch (err) {
+      const code = errorCodeOf(err);
+      if (isVerifierUnavailableCode(code)) {
+        // The verifier could not run (Auth backend / network) — not a verdict on the credential.
+        logger.error("[auth-session] POST failed: identity verification unavailable", { errorCode: code });
+        logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
+        return authUnavailableResponse();
+      }
+      // Disabled and revoked are deliberately indistinguishable from an invalid token in the response
+      // body (no account-state disclosure); the category is recorded server-side only.
+      const failureCategory =
+        code === "auth/user-disabled" ? "account_disabled" : code.includes("revoked") ? "revoked_token" : "invalid_token";
+      logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory });
+      return json({ error: "Invalid or expired token" }, 401);
+    }
+    logAuthSessionEvent("session_sync_succeeded", { route: "POST /api/auth/session" });
+    return json({ authenticated: true, uid: decodedUid });
+  } finally {
+    deadline.dispose();
   }
-
-  let sessionCookie: string;
-  try {
-    sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
-  } catch (err) {
-    logger.error("[auth-session] POST failed: session cookie creation threw", { message: err instanceof Error ? err.message : String(err) });
-    logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "cookie_creation_failed" });
-    return noStore(NextResponse.json({ error: "Failed to create session" }, { status: 500 }));
-  }
-
-  const response = NextResponse.json({ authenticated: true, uid: decodedUid });
-  response.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
-    ...SESSION_COOKIE_BASE_ATTRS,
-    maxAge: SESSION_MAX_AGE_MS / 1000,
-  });
-  logAuthSessionEvent("session_sync_succeeded", { route: "POST /api/auth/session" });
-  return noStore(response);
 }
 
 /**
- * DELETE — clears the session cookie. Idempotent: always returns 200
- * whether or not a cookie was present, so a caller never needs to check
- * existence first, and a retried DELETE is always safe.
+ * The deadline / cap answer: the route's verifier-outage 503 (same body and telemetry category). The
+ * cut-off itself is logged by the deadline module.
+ */
+function verificationUnavailable(step: string, cause: Exclude<VerificationOutcome<unknown>["kind"], "fulfilled" | "rejected">): NextResponse {
+  logger.error(`[auth-session] POST failed: ${step}`, { cause });
+  logAuthSessionEvent("session_sync_failed", { route: "POST /api/auth/session", failureCategory: "auth_unavailable" });
+  return authUnavailableResponse();
+}
+
+/**
+ * Stage 0 (owner D-7): the single "verification could not run" answer: HTTP 503 plus
+ * `code: "auth_unavailable"` (the same code getRequestUid / reportReviewCaller answer). How the client
+ * handles it (lib/client/sessionSync.ts, components/AuthProvider.tsx, Stage 0 F3): a same-uid token
+ * refresh of an already-confirmed tab keeps its state; every other handshake ends as `server_error`
+ * and Firebase is signed out. The client never retries a 503 automatically.
+ */
+function authUnavailableResponse(): NextResponse {
+  return json({ error: "Authentication service unavailable", code: "auth_unavailable" }, 503);
+}
+
+/**
+ * DELETE — an idempotent expiry of the retired cookie, for tabs still running an older build. No
+ * current client calls it (pinned by the authSurface static oracle). Always 200.
  */
 export async function DELETE(_request: NextRequest) {
-  const response = NextResponse.json({ authenticated: false });
-  // `attributes` (not just the name) must match creation exactly — Next.js's
-  // `.delete(name)` shorthand omits `secure`/`sameSite`, which can leave the
-  // browser treating this as a different cookie and NOT actually clearing
-  // the one `POST` set. Setting an already-expired cookie with the SAME
-  // attributes is the only reliable way to delete it cross-browser.
-  response.cookies.set(SESSION_COOKIE_NAME, "", {
-    ...SESSION_COOKIE_BASE_ATTRS,
-    maxAge: 0,
-  });
   logAuthSessionEvent("session_cleared", { route: "DELETE /api/auth/session" });
-  return noStore(response);
-}
-
-/**
- * GET — reports whether the caller currently has a valid session, and if
- * so, its uid. Returns ONLY `{ authenticated, uid? }` — never email,
- * claims, the token/cookie itself, team data, or a raw verification error.
- * This is the read side of the Step 6.9 client/server identity check.
- */
-export async function GET(request: NextRequest) {
-  try {
-    const result = await verifySessionCookie(request);
-    if (!result) {
-      return noStore(NextResponse.json({ authenticated: false }));
-    }
-    return noStore(NextResponse.json({ authenticated: true, uid: result.uid }));
-  } catch {
-    // Expired/revoked/malformed cookie — never a raw error, never a 500;
-    // from the caller's point of view this is indistinguishable from "no
-    // session," which is the correct, fail-closed behavior.
-    logAuthSessionEvent("revoked_or_expired_session", { route: "GET /api/auth/session" });
-    return noStore(NextResponse.json({ authenticated: false }));
-  }
+  return json({ authenticated: false });
 }

@@ -39,7 +39,6 @@ const verify = async (raw: unknown) => {
 jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: {
     verifyIdToken: (raw: unknown) => verify(raw),
-    verifySessionCookie: (raw: unknown) => verify(raw),
     getUser: async () => authRecord,
   },
   adminDb: {
@@ -53,7 +52,7 @@ jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async (
 jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => [] }));
 
 import { middleware } from "@/middleware";
-import { requireAdminPortalAccess, requireSystemAdminAccess, verifySessionCookie } from "@/lib/firebase/auth-helpers";
+import { requireAdminPortalAccess, requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { requireSystemAdminBearer } from "@/lib/firebase/adminAuth";
 
 const req = (path: string, cookies: Record<string, string> = {}, bearer?: string) =>
@@ -72,18 +71,17 @@ beforeEach(() => {
   presented.length = 0;
 });
 
-describe("T3 — middleware gates /admin on the Firebase __session cookie only", () => {
-  it.each(["/admin", "/admin/login", "/admin/users"])("%s with only an admin_session cookie redirects to /login", (path) => {
+describe("T3 — middleware reads no credential for /admin (ZCA L-8 removed the __session presence gate)", () => {
+  it.each(["/admin", "/admin/login", "/admin/users"])("%s with only an admin_session cookie is neither authorized nor specially routed by middleware", (path) => {
     const res = middleware(req(path, { admin_session: LEGACY_SECRET }));
-    expect([307, 308]).toContain(res.status);
-    const loc = new URL(res.headers.get("location") as string);
-    expect(loc.pathname).toBe("/login");
-    expect(loc.searchParams.get("next")).toBe(path);
+    expect(res.headers.get("location")).toBeNull();
+    // The legacy value is never presented to Firebase by any path.
+    expect(presented).not.toContain(LEGACY_SECRET);
   });
-  it("POSITIVE CONTROL: a __session cookie passes the presence gate (unchanged)", () => {
+  it("a __session cookie is equally irrelevant to middleware (no presence gate any more)", () => {
     const res = middleware(req("/admin", { __session: FIREBASE_CRED }));
     expect(res.headers.get("location")).toBeNull();
-    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(presented).not.toContain(FIREBASE_CRED);
   });
 });
 
@@ -93,9 +91,10 @@ describe("T3 — ADMIN_PORTAL ignores admin_session and keeps its Firebase autho
     expect(await requireAdminPortalAccess(req("/api/admin/users", { admin_session: LEGACY_SECRET }))).toBeNull();
     expect(presented).not.toContain(LEGACY_SECRET);
   });
-  it("POSITIVE CONTROL: Firebase __session + admin claim → allowed (unchanged)", async () => {
+  it("ZCA L-8: Firebase __session + admin claim alone → DENIED (the legacy helper is bearer-only); the cookie is never presented", async () => {
     decoded = { uid: "u1", admin: true, email: "x@test.invalid" };
-    expect(await requireAdminPortalAccess(req("/api/admin/users", { __session: FIREBASE_CRED }))).toEqual({ uid: "u1", email: "x@test.invalid" });
+    expect(await requireAdminPortalAccess(req("/api/admin/users", { __session: FIREBASE_CRED }))).toBeNull();
+    expect(presented).not.toContain(FIREBASE_CRED);
   });
   it("POSITIVE CONTROL: verified ADMIN_EMAILS member via bearer → allowed (unchanged)", async () => {
     process.env.ADMIN_EMAILS = "member@test.invalid";
@@ -149,15 +148,6 @@ describe("T4 — requireSystemAdminBearer positive control (unchanged)", () => {
   });
 });
 
-describe("T3 — the plain Firebase session-cookie read ignores admin_session", () => {
-  it("verifySessionCookie: only admin_session → null; value never presented", async () => {
-    decoded = { uid: "u1", admin: true };
-    expect(await verifySessionCookie(req("/api/auth/session", { admin_session: LEGACY_SECRET }))).toBeNull();
-    expect(presented).not.toContain(LEGACY_SECRET);
-  });
-  it("POSITIVE CONTROL: __session → { uid, isAdmin } (unchanged)", async () => {
-    decoded = { uid: "u1", admin: true };
-    expect(await verifySessionCookie(req("/api/auth/session", { __session: FIREBASE_CRED }))).toMatchObject({ uid: "u1" });
-  });
-});
+// ZCA P3 R2: "T3 — the plain Firebase session-cookie read ignores admin_session" was DELETED with the
+// session-cookie verifier itself (no production code reads or verifies any cookie as a credential).
 

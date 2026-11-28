@@ -21,19 +21,28 @@ const A_CLAIM = "SENTINEL_ACCOUNT_A_CLAIM tides are caused by wind farms";
 const ANON_CLAIM = "SENTINEL_ANON_CLAIM the moon is hollow";
 
 let tokenCallback: ((user: any) => Promise<void>) | undefined;
+const mockFirebaseAuth = { currentUser: null as unknown };
 jest.mock("firebase/auth", () => ({
   onIdTokenChanged: (_a: unknown, cb: any) => {
-    tokenCallback = cb;
+    // Firebase sets currentUser before notifying observers.
+    tokenCallback = (u: any) => {
+      mockFirebaseAuth.currentUser = u;
+      return cb(u);
+    };
     return () => undefined;
   },
   getIdTokenResult: async () => ({ claims: {} }),
   signOut: async () => undefined,
 }));
-jest.mock("@/lib/firebase/client", () => ({ auth: {} }));
+// R-S0-7: AuthProvider signs out only while Firebase still reports the failed User object, so the double exposes currentUser.
+jest.mock("@/lib/firebase/client", () => ({
+  get auth() {
+    return mockFirebaseAuth;
+  },
+}));
 jest.mock("@/lib/utils/performance", () => ({ perf: { mark: () => undefined, measure: () => undefined, logMetrics: () => undefined } }));
 jest.mock("@/lib/client/sessionSync", () => ({
   establishServerSession: async (user: any) => ({ ok: true, uid: user.uid }),
-  clearServerSession: async () => true,
 }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
 jest.mock("posthog-js", () => ({ __esModule: true, default: { reset: () => undefined, capture: () => undefined, init: () => undefined } }));

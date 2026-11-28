@@ -342,13 +342,14 @@ describe("S6 the /ingest reverse proxy forwards no first-party credentials", () 
     expect(res.headers.get("x-middleware-request-authorization")).toBeNull();
   });
 
-  it("the matcher covers the proxy; /admin gating is unchanged (control)", () => {
-    expect(config.matcher).toContain("/admin/:path*");
-    const admin = middleware(new NextRequest(`${ORIGIN}/admin/users`));
-    expect(admin.status).toBe(307);
-    expect(admin.headers.get("location")).toContain("/login?next=%2Fadmin%2Fusers");
-    const pricing = middleware(request("/admin/keys"));
-    expect(pricing.headers.get("x-middleware-override-headers")).toBeNull();
+  it("the matcher covers the proxy; /admin is no longer cookie-gated (ZCA L-8) and its requests are untouched", () => {
+    expect(config.matcher).not.toContain("/admin/:path*");
+    for (const headers of [undefined, { cookie: "__session=anything" }]) {
+      const admin = middleware(new NextRequest(`${ORIGIN}/admin/users`, headers ? { headers } : undefined));
+      expect(admin.status).toBe(200);
+      expect(admin.headers.get("location")).toBeNull();
+      expect(admin.headers.get("x-middleware-override-headers")).toBeNull();
+    }
   });
 });
 

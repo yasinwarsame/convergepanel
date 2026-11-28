@@ -20,7 +20,7 @@ import { adminAuth } from "./admin";
  * Verify Firebase ID token from request and check admin claim
  * 
  * This function:
- * 1. Extracts the Firebase ID token from the request (Authorization header or cookie)
+ * 1. Extracts the Firebase ID token from the request (Authorization header only)
  * 2. Verifies the token using Firebase Admin SDK (ensures it's valid and not expired)
  * 3. Checks if the user has the admin custom claim
  * 4. Returns user info if valid, null if invalid
@@ -38,12 +38,11 @@ export async function verifyAdminToken(
       return null;
     }
 
-    // Try to get token from Authorization header first (Bearer token)
-    // Fallback to cookie if header is not present
+    // Bearer token from the Authorization header — the only credential accepted.
+    // ZCA L-8: bearer only (it used to fall back to the `__session` cookie). No route imports this legacy
+    // helper (pinned by the authSurface static oracle); it must not become a cookie path if one ever does.
     const authHeader = request.headers.get("authorization");
-    const token =
-      authHeader?.replace("Bearer ", "") ||
-      request.cookies.get("__session")?.value;
+    const token = authHeader?.replace(/^Bearer\s+/i, "").trim() || "";
 
     if (!token) {
       // No token provided
@@ -53,7 +52,7 @@ export async function verifyAdminToken(
 
     // Verify the token using Firebase Admin SDK
     // This ensures the token is valid, not expired, and issued by our Firebase project
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
     
     // Check if user has admin custom claim
     // IMPORTANT: Firebase Admin SDK returns custom claims as top-level properties on the decoded token,
@@ -95,75 +94,11 @@ export async function verifyAdminToken(
   }
 }
 
-/**
- * The actual verification core — takes the raw cookie VALUE, never a
- * request object. Extracted (Phase 5C) so a Server Component context,
- * which has no `NextRequest` to read `.cookies.get()` from, can reuse
- * this exact same Firebase Admin SDK verification call rather than a
- * second, independently-written one. `verifySessionCookie(request)`
- * below is now a thin wrapper: identical behavior, unchanged signature,
- * unchanged callers.
- *
- * @param sessionCookie - the raw `__session` cookie value, or undefined if absent
- * @returns User ID and admin status, or null if the cookie is absent
- * @throws Error if adminAuth is not initialized or if verification fails with a non-recoverable error
+/*
+ * ZCA P3 R2 ("verify, don't mint"): the session-cookie verifiers that used to live here were removed.
+ * No production code reads or verifies the `__session` cookie; the static oracle in
+ * __tests__/authSurface/ bans their names everywhere outside tests.
  */
-export async function verifySessionCookieValue(
-  sessionCookie: string | undefined
-): Promise<{ uid: string; isAdmin: boolean } | null> {
-  if (!sessionCookie) {
-    return null;
-  }
-
-  // Check if adminAuth is available
-  const { adminAuth } = await import("./admin");
-  if (!adminAuth) {
-    throw new Error("Firebase Admin Auth is not initialized. Check FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY environment variables.");
-  }
-
-  try {
-    // Verify the session cookie using Firebase Admin SDK
-    // This will throw if the cookie is invalid, expired, or from a different project
-    const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
-
-    return {
-      uid: decodedClaims.uid,
-      // Phase FIRST-ADMIN-C3: strict, like every other claim read in the tier
-      // model. `!!` returned true for `"false"`, `{}` and `[]`. No consumer
-      // reads this field today, so this is inert now and correct for the next
-      // caller.
-      isAdmin: decodedClaims.admin === true,
-    };
-  } catch (error: any) {
-    // Re-throw auth errors so they can be caught and handled as 401 in API routes
-    // Don't silently return null - let the caller decide how to handle auth failures
-    console.error("[auth-helpers] Error verifying session cookie:", {
-      message: error?.message,
-      code: error?.code,
-    });
-    throw error;
-  }
-}
-
-/**
- * Verify Firebase session cookie from request
- *
- * Extracts the raw cookie value from the request and delegates to
- * `verifySessionCookieValue()` above for the actual verification — this
- * function's own job is only the `NextRequest`-specific extraction step.
- * Used for protecting routes that require any authenticated user (not
- * just admin).
- *
- * @param request - Next.js request object
- * @returns User ID and admin status, or null if invalid/missing
- * @throws Error if adminAuth is not initialized or if verification fails with a non-recoverable error
- */
-export async function verifySessionCookie(
-  request: NextRequest
-): Promise<{ uid: string; isAdmin: boolean } | null> {
-  const sessionCookie = request.cookies.get("__session")?.value;
-  return verifySessionCookieValue(sessionCookie);
-}
 
 /**
  * SYSTEM_ADMIN — the stronger application-administration tier.
@@ -253,9 +188,10 @@ export async function requireAdminPortalAccess(
   request: NextRequest
 ): Promise<{ uid: string; email: string } | null> {
   if (!adminAuth) return null;
+  // ZCA L-8: bearer only, revocation-checked (it used to fall back to the `__session` cookie and to
+  // the session-cookie verifier). No route imports this legacy helper (pinned by the authSurface static oracle).
   const authHeader = request.headers.get("authorization");
-  const raw =
-    authHeader?.replace(/^Bearer\s+/i, "")?.trim() || request.cookies.get("__session")?.value;
+  const raw = authHeader?.replace(/^Bearer\s+/i, "")?.trim();
   if (!raw) return null;
 
   const allow = async (decoded: DecodedIdToken): Promise<{ uid: string; email: string } | null> => {
@@ -280,15 +216,10 @@ export async function requireAdminPortalAccess(
   };
 
   try {
-    const decoded = await adminAuth.verifyIdToken(raw);
+    const decoded = await adminAuth.verifyIdToken(raw, true);
     return await allow(decoded);
   } catch {
-    try {
-      const decoded = await adminAuth.verifySessionCookie(raw, true);
-      return await allow(decoded);
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 

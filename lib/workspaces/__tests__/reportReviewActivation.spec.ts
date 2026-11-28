@@ -274,8 +274,18 @@ describe("every surface is restricted to the activated Workspace", () => {
 describe("UI and API agree", () => {
   it("the research pages pass exactly the gate's verdict for the page's own Workspace", async () => {
     const fs = jest.requireActual("fs") as typeof import("fs");
+    // ZCA L-4/L-5: the pages are neutral shells; the verdict is computed for the access result's own (canonical)
+    // Workspace in GET /api/workspaces/[workspaceId] and handed to BOTH research detail kinds unchanged.
+    const read = (p: string) => fs.readFileSync(require("path").join(__dirname, "../../..", p), "utf8");
+    expect(read("app/api/workspaces/[workspaceId]/route.ts")).toContain("reportReviewEnabled: isReportReviewEnabledForWorkspace(access.workspace.id),");
+    const team = read("components/workspace/TeamWorkspacePage.tsx");
+    for (const kind of ["researchDetail", "projectResearchDetail"]) {
+      const start = team.indexOf(`case "${kind}":`);
+      expect(start).toBeGreaterThan(-1);
+      expect(team.slice(start, team.indexOf("case ", start + 6))).toContain("reportReviewEnabled={access.reportReviewEnabled}");
+    }
     for (const p of ["app/workspace/team/[workspaceId]/research/[runId]/page.tsx", "app/workspace/team/[workspaceId]/projects/[projectId]/research/[runId]/page.tsx"]) {
-      expect(fs.readFileSync(require("path").join(__dirname, "../../..", p), "utf8")).toContain("reportReviewEnabled={isReportReviewEnabledForWorkspace(access.workspace.id)}");
+      expect(read(p)).toMatch(/<TeamWorkspacePage\s+kind="(projectResearchDetail|researchDetail)"/);
     }
     // Where the page would show the panel, the panel's API answers; where it would not, the API conceals.
     for (const [ws, run] of [[T, "rT"], [O, "rO"]] as const) {

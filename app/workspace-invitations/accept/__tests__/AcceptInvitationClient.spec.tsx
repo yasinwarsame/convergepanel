@@ -6,7 +6,7 @@
  * `global` rather than provided by a real DOM, matching the module-boundary
  * mocking convention used throughout this repo's other route/component
  * tests. External boundaries (`useAuth`, router, fetch, sessionStorage,
- * Firebase verification/signOut, clearServerSession) are mocked; the real
+ * Firebase verification/signOut) are mocked; the real
  * component tree and state machine are exercised end-to-end.
  */
 
@@ -45,10 +45,11 @@ jest.mock("@/lib/firebase/client", () => ({ auth: { __fakeAuth: true } }));
 const mockTelemetryFree = jest.fn(() => true);
 jest.mock("@/lib/telemetry/telemetryFreeDocument", () => ({ isTelemetryFreeDocument: () => mockTelemetryFree() }));
 
-const mockedClearServerSession = jest.fn();
-jest.mock("@/lib/client/sessionSync", () => ({
-  clearServerSession: (...args: unknown[]) => mockedClearServerSession(...args),
-}));
+// ZCA P3 R2: the session-clearing client function no longer exists; a module mock of sessionSync that is ever
+// called fails the test (the component must not import it at all).
+jest.mock("@/lib/client/sessionSync", () => {
+  throw new Error("AcceptInvitationClient must not import lib/client/sessionSync");
+});
 
 import AcceptInvitationClient from "@/app/workspace-invitations/accept/AcceptInvitationClient";
 
@@ -69,6 +70,7 @@ function authState(overrides: Record<string, unknown> = {}) {
     syncState: "signed_out",
     canMutate: false,
     beginLogout: jest.fn(),
+    cancelLogout: jest.fn(),
     ...overrides,
   };
 }
@@ -426,15 +428,15 @@ describe("WRONG ACCOUNT", () => {
 
     expect(JSON.stringify(renderer.toJSON())).not.toMatch(/@/); // no invited email disclosed
 
-    mockedClearServerSession.mockResolvedValueOnce(true);
     mockedSignOut.mockResolvedValueOnce(undefined);
     const switchButton = findButton(renderer, "Switch account")!;
     await act(async () => {
       await switchButton.props.onClick();
     });
 
-    const order = [beginLogout.mock.invocationCallOrder[0], mockedClearServerSession.mock.invocationCallOrder[0], mockedSignOut.mock.invocationCallOrder[0]];
-    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // ZCA P3 R2: beginLogout → LOCAL signOut (no server clear in between).
+    expect(beginLogout.mock.invocationCallOrder[0]).toBeLessThan(mockedSignOut.mock.invocationCallOrder[0]);
+    expect(mockedSignOut).toHaveBeenCalledTimes(1);
     expect(decodeURIComponent(mockedRouterReplace.mock.calls[0][0])).toContain("/workspace-invitations/accept");
     expect(mockedRouterReplace.mock.calls[0][0]).not.toContain(SENTINEL);
   });
@@ -442,9 +444,10 @@ describe("WRONG ACCOUNT", () => {
   it("shows a generic error and keeps the credential available on account-switch failure", async () => {
     setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
     mockFetchOnce(403, { ok: false, errorCode: "invitation_email_mismatch" });
-    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    const cancelLogout = jest.fn();
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true, cancelLogout }));
 
-    mockedClearServerSession.mockRejectedValueOnce(new Error("network"));
+    mockedSignOut.mockRejectedValueOnce(new Error("storage unavailable"));
     const switchButton = findButton(renderer, "Switch account")!;
     await act(async () => {
       await switchButton.props.onClick();
@@ -452,6 +455,8 @@ describe("WRONG ACCOUNT", () => {
 
     expect(renderer.root.findAllByProps({ role: "alert" }).some((n) => String(n.children?.join?.("") ?? n.children).includes("Couldn't switch accounts"))).toBe(true);
     expect(mockedRouterReplace).not.toHaveBeenCalled();
+    // ZCA P3 R2 MB: the throwing local sign-out hands the tab back to the AuthProvider exactly once.
+    expect(cancelLogout).toHaveBeenCalledTimes(1);
   });
 });
 

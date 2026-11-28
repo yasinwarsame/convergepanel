@@ -21,70 +21,19 @@
  *
  * This page never interprets the research payload and never calls the Personal
  * run endpoint.
+ *
+ * ZCA L-5: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie,
+ * workspace or Project data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in `GET /api/workspaces/[workspaceId]` (access), `TeamWorkspacePage`
+ * (the required capabilities), `GET /api/workspaces/[workspaceId]/projects/[projectId]` (the Project,
+ * looked up only after that gate; another Workspace's Project → the same 404) and, for creation pages,
+ * the active-status rule — every denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import { getProject } from "@/lib/firestore/projects";
-import TeamResearchDetailShell from "@/components/workspace/projects/TeamResearchDetailShell";
-import { isReportReviewEnabledForWorkspace } from "@/lib/workspaces/reportReviewActivation";
+import TeamWorkspacePage from "@/components/workspace/TeamWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamResearchDetailPage({
-  params,
-}: {
-  params: { workspaceId: string; projectId: string; runId: string };
-}) {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
-  if (!access.granted && access.reason === "lookup_failed") {
-    // Distinct from every concealed-denial case below — a transient
-    // Firestore/infra failure must never be indistinguishable from a
-    // genuine "doesn't exist / not yours". Caught by the app's existing
-    // global `app/error.tsx` boundary.
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (!access.granted || access.workspaceType !== "team") {
-    notFound();
-  }
-  if (!access.capabilities.includes("research.read")) {
-    notFound();
-  }
-
-  const projectResult = await getProject(params.projectId);
-  if (projectResult.status === "firestore_unavailable" || projectResult.status === "read_failed") {
-    throw new Error("Something went wrong while loading this page. Please try again.");
-  }
-  if (projectResult.status !== "found") {
-    notFound();
-  }
-  // Cross-Workspace containment — concealed identically to "doesn't exist".
-  if (projectResult.project.workspaceId !== params.workspaceId) {
-    notFound();
-  }
-
-  return (
-    <TeamResearchDetailShell
-      workspaceId={params.workspaceId}
-      workspaceName={access.workspace.name}
-      runId={params.runId}
-      project={{ id: projectResult.project.id, name: projectResult.project.name }}
-      // Presentation hint from the same server-resolved capability set — not a
-      // second authorization decision.
-      showMembers={access.capabilities.includes("members.read")}
-      showAudit={access.capabilities.includes("audit.read")}
-      // R4-I4 — verifying a claim from a Project-filed run results in a
-      // Project-filed Claim, which the POST's gates require `research.organize`
-      // for. Presentation only; viewing still needs just `research.read`.
-      canVerifyClaim={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
-      canCreateExport={access.capabilities.includes("exports.create")}
-      reportReviewEnabled={isReportReviewEnabledForWorkspace(access.workspace.id)}
-    />
-  );
+export default function TeamResearchDetailPage({ params }: { params: { workspaceId: string; projectId: string; runId: string } }) {
+  return <TeamWorkspacePage kind="projectResearchDetail" workspaceId={params.workspaceId} projectId={params.projectId} runId={params.runId} />;
 }

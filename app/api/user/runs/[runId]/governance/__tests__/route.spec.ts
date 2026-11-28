@@ -171,7 +171,7 @@ describe("GET /api/user/runs/[runId]/governance — auth", () => {
   });
 
   it("401s with a generic message (not a credential-specific leak) for a non-missing-credentials auth failure (invalid/expired/mismatched token)", async () => {
-    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "credential_mismatch" });
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "invalid_bearer_token" });
     const { res, json } = await callRoute();
     expect(res.status).toBe(401);
     expect(json.message).toMatch(/authentication failed/i);

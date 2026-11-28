@@ -1,27 +1,20 @@
 /**
- * Auth Lifecycle Hardening, Step 6.3 — explicit session-synchronization
- * state machine.
+ * Auth Lifecycle Hardening, Step 6.3 — explicit session-verification state machine.
  *
- * Root cause this exists to prevent (see docs/operations/auth-session-sync-runbook.md
- * for the full writeup): `AuthProvider` previously derived the app's entire
- * "signed in" state from Firebase's client-side `onAuthStateChanged` alone,
- * with no representation of whether the server's `__session` cookie had
- * actually been established for that same identity yet. Because every
- * protected API route resolves identity via `getRequestUid()`
- * (`lib/teams/teamApiAuth.ts`), which checks the `__session` cookie FIRST
- * and only falls back to the request's `Authorization: Bearer` token if no
- * cookie is present, a stale cookie left over from a PREVIOUS user silently
- * wins over a fresh, correctly-addressed bearer token for as long as that
- * cookie remains valid (up to 5 days) — even though the UI already displays
- * the new user's name. This state machine exists so "authenticated" can
- * only ever mean "the client's Firebase uid and the server's session-cookie
- * uid are confirmed to match," never merely "Firebase has a user object."
+ * MEANING OF `authenticated` (ZCA P3 R2 "verify, don't mint"): the server VERIFIED, revocation-checked,
+ * a bearer (Firebase ID token) for EXACTLY this client uid, in THIS episode — the handshake
+ * (`POST /api/auth/session`) answered 200 `{ authenticated: true, uid }` with `uid === client uid`, for
+ * the current operation generation, and the episode was not aborted, superseded or expired. It is the
+ * gate for protected mutations (`canMutate`, invariant 7). It does NOT mean that any server session
+ * exists: there is none. Every API request authenticates with its own bearer.
  *
- * Pure reducer — zero I/O, zero Firebase/DOM dependency, so every
- * transition is directly unit-testable. `AuthProvider.tsx` is the only
- * caller; it dispatches events in response to `onIdTokenChanged` and the
- * outcomes of `lib/client/sessionSync.ts`'s async calls, and treats this
- * module as the single source of truth for `syncState`.
+ * History: `AuthProvider` once derived "signed in" from Firebase's client state alone, while the server
+ * authorized a `__session` cookie that could belong to a previous user. The cookie no longer authorizes
+ * or vetoes anything (ZCA L-8, P3 R2), but the machine still guarantees that the UI enables mutations
+ * only after the server agreed, for this uid, that the credential is valid right now.
+ *
+ * Pure reducer — zero I/O, zero Firebase/DOM dependency, so every transition is directly unit-testable.
+ * `AuthProvider.tsx` is the only caller. The event names keep their historical "session" wording.
  */
 
 export type SessionSyncState =
@@ -39,26 +32,31 @@ export type SessionSyncEvent =
   | { type: "client_signed_in"; uid: string }
   /** Firebase reports no user (explicit sign-out, revoked session, or expired token the SDK could not refresh). */
   | { type: "client_signed_out" }
-  /** The server session-cookie sync call for the CURRENT client uid has started. */
+  /** The verification handshake for the CURRENT client uid has started. */
   | { type: "session_sync_started" }
-  /** The server confirmed a session cookie exists for the CURRENT client uid — the only condition that reaches `authenticated`. */
+  /** The server verified (revocation-checked) a bearer for the CURRENT client uid, in this episode — the only event that reaches `authenticated`, and only from `syncing_session`. */
   | { type: "session_sync_succeeded" }
-  /** The server sync call failed outright (network/5xx) or returned a DIFFERENT uid than the client's — always treated identically: fail closed. */
+  /** The handshake failed (network, 401, 403, 5xx, malformed answer, deadline) or returned a DIFFERENT uid than the client's — fail closed. */
   | { type: "session_sync_failed" }
-  /** A same-uid token refresh is being pushed to the server to keep the cookie's expiry current. Does not leave `authenticated` — a refresh is not a new identity. */
+  /** A same-uid token refresh is being re-verified by the server. Does not leave `authenticated` — a refresh is not a new identity — and never upgrades any other state. */
   | { type: "token_refresh_started" }
   | { type: "token_refresh_succeeded" }
   | { type: "token_refresh_failed" }
-  /** Explicit, user-initiated logout has begun (before Firebase sign-out or the DELETE call has resolved). */
+  /**
+   * Stage 0 F3: a same-uid refresh's handshake answered 503 `auth_unavailable` (the server could not run verification
+   * and made no verdict). Keeps `authenticated` ONLY if already `authenticated`; from any other state it is `session_error`.
+   */
+  | { type: "token_refresh_deferred" }
+  /** Explicit, user-initiated logout has begun (before the local Firebase sign-out has resolved). */
   | { type: "logout_started" }
-  /** Both the server session was cleared and the Firebase client was signed out. */
+  /** The Firebase client was signed out (there is no server session to clear). Unused by AuthProvider, which relies on `client_signed_out`. */
   | { type: "logout_completed" }
   /** Returns the machine to `signed_out` after an operator/UI has acknowledged a `session_error` (e.g. before offering the user a fresh login). */
   | { type: "error_acknowledged" };
 
 /**
  * `syncState` values in which protected mutation UI MUST be disabled.
- * Only `authenticated` guarantees client uid === server session uid.
+ * Only `authenticated` guarantees the server verified a bearer for exactly the client uid.
  */
 export const NON_MUTABLE_SYNC_STATES: ReadonlySet<SessionSyncState> = new Set<SessionSyncState>([
   "signed_out",
@@ -119,8 +117,14 @@ export function nextSessionSyncState(current: SessionSyncState, event: SessionSy
 
     case "token_refresh_failed":
       // A failed refresh does NOT retain the previous authenticated state —
-      // the server session may now be stale relative to the client's token.
+      // the server refused (or could not be shown) the current token.
       return "session_error";
+
+    case "token_refresh_deferred":
+      // Not a verdict on the credential: the existing confirmed state stands (the
+      // server re-verifies the bearer, revocation-checked, on every request). Never
+      // upgrades any other state.
+      return current === "authenticated" ? "authenticated" : "session_error";
 
     case "logout_started":
       return "signing_out";

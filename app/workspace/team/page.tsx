@@ -10,26 +10,17 @@
  * the only path to creating a first one. Matches `/workspace`'s own
  * simple gating pattern (identity -> pure admission check -> render),
  * never a client-side flash-then-hide.
+ *
+ * ZCA L-6: this server render is a NEUTRAL shell. It resolves no identity and reads no cookie, rollout
+ * admission or workspace data; it names the page kind and passes only URL params. The gate above runs,
+ * unchanged in order and outcome, in the bearer-authorized endpoint named in
+ * `components/workspace/PersonalWorkspacePage.tsx` — every closed gate or denial the same 404.
  */
 
-import { notFound } from "next/navigation";
-import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
-import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import TeamWorkspacesLanding from "@/components/workspace/TeamWorkspacesLanding";
+import PersonalWorkspacePage from "@/components/workspace/PersonalWorkspacePage";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamWorkspacesPage() {
-  const identity = await resolveServerComponentIdentity();
-  if (!identity) {
-    notFound();
-  }
-
-  const mode = resolveTeamWorkspacesMode({ uid: identity.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!mode.enabled) {
-    notFound();
-  }
-
-  return <TeamWorkspacesLanding />;
+export default function TeamWorkspacesPage() {
+  return <PersonalWorkspacePage kind="teamLanding" />;
 }
