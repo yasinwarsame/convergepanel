@@ -62,6 +62,8 @@ export async function buildEntryBundle(): Promise<string> {
       define: {
         "process.env.NODE_ENV": '"production"',
         "process.env.NEXT_PUBLIC_POSTHOG_KEY": '"phc_synthetic_r4_harness"',
+        // ZCA R2 Phase B: the bundle is a Production build (analytics is Production-only).
+        "process.env.NEXT_PUBLIC_VERCEL_ENV": '"production"',
         "process.env.NEXT_PUBLIC_POSTHOG_HOST": '"https://us.i.posthog.com"',
         "process.env.NEXT_PUBLIC_SENTRY_DSN": '"https://0123456789abcdef0123456789abcdef@o1.ingest.sentry.io/1"',
         "process.env": "{}",

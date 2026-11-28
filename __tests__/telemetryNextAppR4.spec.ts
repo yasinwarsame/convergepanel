@@ -8,7 +8,7 @@
  * Opt-in: needs a production build of THIS tree in a directory WITHOUT any
  * `.env*` file (e.g. a `git archive` copy with node_modules linked), built with
  * synthetic public values only, e.g.
- *   NEXT_PUBLIC_POSTHOG_KEY=phc_synthetic NEXT_PUBLIC_SENTRY_DSN=https://<32 hex>@o1.ingest.sentry.io/1 next build
+ *   NEXT_PUBLIC_VERCEL_ENV=production NEXT_PUBLIC_POSTHOG_KEY=phc_synthetic NEXT_PUBLIC_SENTRY_DSN=https://<32 hex>@o1.ingest.sentry.io/1 next build
  * then
  *   CP_NEXT_HARNESS_APP_DIR=<that dir> npx jest __tests__/telemetryNextAppR4.spec.ts
  *
