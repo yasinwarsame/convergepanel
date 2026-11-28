@@ -34,11 +34,13 @@ What the guard changes, stated precisely:
 - **Disablement and revocation are immediate on guarded routes.** Every tier
   requires `disabled === false` on the live record, and a credential whose
   `auth_time` predates the live `tokensValidAfterTime` is refused (401). This
-  applies to bearer tokens and session cookies alike, so on the guarded routes
-  the "residual window" described in § B below no longer exists. It still exists
-  on non-guarded surfaces (e.g. minting a session cookie at `POST /api/auth/session`).
-- **Transport.** SYSTEM_ADMIN is bearer-only (a session cookie alone is 401).
-  ADMIN_PORTAL and GOVERNANCE_ADMIN accept a bearer or the `__session` cookie.
+  applies to every presented credential — since ZCA P3 R2 that is the bearer
+  only (the `__session` cookie is never read) — so on the guarded routes the
+  "residual window" described in § B below no longer exists. No session cookie
+  is minted anywhere (ZCA P3 R2): `POST /api/auth/session` only verifies.
+- **Transport.** Every tier is bearer-only (ZCA L-8; since ZCA P3 R2 the cookie is
+  not even read, so it can neither grant nor veto). Historical text follows:
+  ADMIN_PORTAL and GOVERNANCE_ADMIN once accepted a bearer or the `__session` cookie.
   If BOTH are presented, both must verify and name the same uid, or the request
   is 401 (SP-5) — a stale cookie for a different account no longer loses
   silently to a fresh bearer.
@@ -83,7 +85,7 @@ Both are **bearer-only in practice**. `requireSystemAdminBearer` reads the
 `Authorization` header and nothing else. `requireSystemAdminAccess` *appears* to
 accept the `__session` cookie — `verifyAdminToken` falls back to it — but it then
 passes that value to `verifyIdToken`, and `__session` holds a Firebase *session
-cookie* minted by `createSessionCookie`, which `verifyIdToken` always rejects. So
+cookie* (minted, before ZCA P3 R2, by the session route), which `verifyIdToken` always rejects. So
 no SYSTEM_ADMIN route is reachable by cookie. This fails closed, and the earlier
 "(cookie or bearer)" wording here overstated the accepted credential.
 **Grants:** `/api/admin/keys` (provider credentials), `/api/admin/set-role`
@@ -617,29 +619,22 @@ table is the contract.
    in progress is not interrupted. The outstanding ID token itself is not
    invalidated and may still carry `admin: true` until it expires (Firebase
    default one hour); do not record that as a cut-off of the token.
-4. Session cookies are a separate artifact and are verified with
-   `verifySessionCookie(cookie, true)`, so disablement takes effect there on
-   the next request, and so does an applied revocation — but only for a cookie
-   whose session `auth_time` is earlier than the stored `validSince`. But no
-   SYSTEM_ADMIN route accepts a cookie, so this helps only the ADMIN_PORTAL
-   surface.
-5. **Minting a fresh session cookie is refused for a revoked or disabled
-   identity (SESSREV).** `POST /api/auth/session` verifies the ID token with
-   `verifyIdToken(idToken, true)` before `createSessionCookie`, so the SDK's
-   live `getUser` read rejects a disabled account (`auth/user-disabled`) and a
-   token whose `auth_time` is earlier than the stored `validSince`
-   (`auth/id-token-revoked`) — both 401, no cookie. A failure of that live read
-   itself is 503, also no cookie. On a deployment built BEFORE SESSREV the
-   route verified without `checkRevoked`, and the SDK's `createSessionCookie`
-   performs no live-record check of its own, so such a deployment mints a
-   cookie for a still-unexpired ID token of a revoked or disabled identity.
-   That cookie carries the ID token's `auth_time` (Firebase: the session cookie
-   has the same claims as the ID token — documented behaviour, not locally
-   observed against the live backend), so the revocation-checked verifiers in
-   4. reject it on every request while the revocation stands or the account is
-   disabled; if a disabled-but-not-revoked account is later re-enabled, such a
-   cookie becomes usable for the rest of its five-day life. Pair a disablement
-   with a revocation when containing an identity.
+4. The `__session` cookie authorizes nothing (ZCA P3 R2): no route reads or
+   verifies it, so there is nothing to invalidate there. Every route authenticates
+   the bearer on every request — the S2-b guard against its one live snapshot,
+   every other route with `verifyIdToken(token, true)` — so disablement and an
+   applied revocation take effect on the next request.
+5. **No session cookie is minted (ZCA P3 R2).** `POST /api/auth/session` is a
+   verification handshake: it verifies the ID token with
+   `verifyIdToken(idToken, true)` — a disabled account (`auth/user-disabled`)
+   or a token whose `auth_time` is earlier than the stored `validSince`
+   (`auth/id-token-revoked`) gets 401; an outage of the live read 503 — and it
+   answers `{ authenticated, uid }`. Every response only EXPIRES a legacy
+   `__session` cookie. History: before P3 R2 this route minted a five-day cookie
+   (since SESSREV only for a revocation-checked token); before ZCA L-8 routes
+   honoured that cookie. A deployment older than `9d5c6938` restores cookie
+   authority: rolling back past it needs explicit owner authorization. Pair a
+   disablement with a revocation when containing an identity.
 6. `[CONTAINMENT_HISTORICAL_BOOTSTRAP][REQUIRED]` **Treat historical deployments as in scope.** Current code has no
    secret bootstrap route (§ "Secret bootstrap route — RETIRED (S1)"), so on a
    current deployment nothing re-creates the claim you removed in step 1 without
@@ -653,17 +648,15 @@ table is the contract.
    compromised (as opposed to a credential leak on an otherwise trusted
    account). Be precise about what this buys, per §B.3-B.5:
 
-   - **Existing session cookies of the disabled account stop working on their
-     next request.** Routes accepting a cookie call
-     `verifySessionCookie(cookie, true)`, and that second argument performs the
-     disabled check (as well as the revocation check). That is the whole of what
-     "invalidate the session" means here — there is no separate
+   - **There is no session to invalidate.** No route reads the `__session`
+     cookie (ZCA P3 R2); every request is authenticated by its own bearer, and
+     the disabled state is checked on every request (the S2-b guard's live
+     snapshot; `verifyIdToken(token, true)` elsewhere). There is no separate
      session-invalidation endpoint.
-   - **Minting a NEW cookie is refused for the disabled account (SESSREV).**
+   - **No session cookie is minted (ZCA P3 R2).**
      `POST /api/auth/session` calls `adminAuth.verifyIdToken(idToken, true)`
-     **with `checkRevoked`** before `createSessionCookie`, so a disabled
-     account (or a revoked token) gets 401 and no cookie; an outage of the
-     live read is 503 and no cookie. History: before SESSREV the route verified
+     **with `checkRevoked`** and mints nothing, so a disabled account (or a
+     revoked token) gets 401; an outage of the live read is 503. History: before SESSREV the route verified
      WITHOUT `checkRevoked`, and a C10 revision of this runbook wrongly claimed
      it already refused; on a deployment that predates SESSREV, assume a holder
      of a still-unexpired ID token can obtain a cookie (rejected by the

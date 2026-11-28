@@ -385,9 +385,10 @@ describe("the session-mint claim matches the code", () => {
   const src = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
   const ROUTE = readFileSync("app/api/auth/session/route.ts", "utf8");
 
-  it("ANCHOR: the route still mints from verifyIdToken", () => {
+  it("ANCHOR (ZCA P3 R2): the route verifies with verifyIdToken and mints nothing — its only cookie write is the `__session` expiry", () => {
     expect(ROUTE).toContain("verifyIdToken");
-    expect(ROUTE).toContain("createSessionCookie");
+    expect(ROUTE.match(/\.cookies\.set\(/g)).toHaveLength(1);
+    expect(ROUTE).toMatch(/\.cookies\.set\("__session", "", \{[^}]*maxAge: 0 \}\)/);
   });
 
   it("the route passes checkRevoked = true — and the doc states the refusal, not the old gap", () => {
@@ -395,8 +396,9 @@ describe("the session-mint claim matches the code", () => {
     expect(ROUTE).toMatch(/adminAuth\.verifyIdToken\(idToken,\s*true\s*\)/);
     expect(ROUTE).not.toMatch(/adminAuth\.verifyIdToken\(idToken\s*\)/);
     const flat = src.replace(/\s+/g, " ");
-    expect(flat).toContain("Minting a NEW cookie is refused for the disabled account (SESSREV)");
-    expect(flat).toContain("Minting a fresh session cookie is refused for a revoked or disabled identity (SESSREV)");
+    // ZCA P3 R2: the SESSREV "minting is refused" statements became "no session cookie is minted" (both places).
+    expect(flat.match(/No session cookie is minted \(ZCA P3 R2\)/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(flat).not.toContain("Minting a NEW cookie is refused");
     expect(flat).not.toContain("Minting a NEW cookie is not blocked by this application");
   });
 
