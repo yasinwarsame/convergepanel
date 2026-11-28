@@ -68,7 +68,7 @@ describe("identity", () => {
     expect(mockState.docGets).toEqual([]);
   });
 
-  it.each(["invalid_bearer_token", "revoked_session", "credential_mismatch", "expired_session"])("auth resolver failure %s -> 401 auth_error", async (reason) => {
+  it.each(["invalid_bearer_token", "revoked_session", "expired_session", "auth_unavailable"])("auth resolver failure %s -> 401 auth_error", async (reason) => {
     mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason });
     const res = await GET(new NextRequest(`http://localhost/api/workspaces/${TEAM_W}/video-verifications/${VID}`), { params: { workspaceId: TEAM_W, verificationId: VID } });
     expect(res.status).toBe(401);

@@ -89,12 +89,11 @@ const verifyIdToken = jest.fn(async (token: string, _checkRevoked?: boolean) => 
   if (v instanceof Error) throw v;
   return v;
 });
-const verifySessionCookie = jest.fn(async (cookie: string, _checkRevoked?: boolean) => {
-  const v = mockState.cookies[cookie];
-  if (v === undefined) throw sdkInvalidSignature("cookie");
-  if (v instanceof Error) throw v;
-  return v;
-});
+/*
+ * ZCA P3 R2: FAKE_AUTH has NO session-cookie verifier. `mockState.cookies` still records what each cookie
+ * WOULD verify as, so a guard that consulted the cookie at all would have to call a method that does not
+ * exist (a throw → 503) — every cookie case below asserts the decision is the no-cookie decision.
+ */
 let getUserCall = 0;
 const getUser = jest.fn(async (_uid: string) => {
   const list = mockState.records;
@@ -105,7 +104,6 @@ const getUser = jest.fn(async (_uid: string) => {
 });
 const FAKE_AUTH = {
   verifyIdToken: (t: string, c?: boolean) => verifyIdToken(t, c),
-  verifySessionCookie: (t: string, c?: boolean) => verifySessionCookie(t, c),
   getUser: (u: string) => getUser(u),
 };
 
@@ -192,7 +190,6 @@ beforeEach(() => {
   mockState.records = [record()];
   getUserCall = 0;
   verifyIdToken.mockClear();
-  verifySessionCookie.mockClear();
   getUser.mockClear();
   logged.length = 0;
 });
@@ -201,32 +198,30 @@ describe("call contract", () => {
   it("verifies the bearer with checkRevoked=false and reads the live record exactly once, for the token's uid", async () => {
     expectGranted(await check(bearer(), "SYSTEM_ADMIN"));
     expect(verifyIdToken.mock.calls).toEqual([[TOK_A, false]]);
-    expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(getUser.mock.calls).toEqual([[UID]]);
   });
 
   it.each(TIERS)("ZCA L-8: a cookie ALONE is the anonymous answer on %s — nothing is verified and no record is read", async (tier) => {
     expectDenied(await check(req({ cookie: COOKIE_A }), tier), 401, "missing_credentials");
     expectDenied(await check(req(), tier), 401, "missing_credentials"); // byte-identical reason to no credential at all
-    expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(verifyIdToken).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });
-  it("a cookie beside a bearer is still verified with checkRevoked=false (the snapshot decides revocation)", async () => {
-    const d = await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL");
-    expectGranted(d);
-    expect(d.actor.credential).toBe("bearer");
-    expect(verifySessionCookie.mock.calls).toEqual([[COOKIE_A, false]]);
-    expect(getUser.mock.calls).toEqual([[UID]]);
-  });
-
-  it("when both credentials are present, verifies BOTH and still reads the record once", async () => {
+  it("ZCA P3 R2 (inverted): a cookie beside a bearer is NOT verified — the bearer alone is verified (checkRevoked=false) and the record read once", async () => {
     const d = await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL");
     expectGranted(d);
     expect(d.actor.credential).toBe("bearer");
     expect(verifyIdToken.mock.calls).toEqual([[TOK_A, false]]);
-    expect(verifySessionCookie.mock.calls).toEqual([[COOKIE_A, false]]);
-    expect(getUser).toHaveBeenCalledTimes(1);
+    expect(getUser.mock.calls).toEqual([[UID]]);
+  });
+
+  it("ZCA P3 R2: the guard never touches request.cookies — a request whose cookie jar THROWS is decided as without it", async () => {
+    const r = bearer();
+    Object.defineProperty(r, "cookies", { get: () => { throw new Error("cookie jar read"); } });
+    expectGranted(await check(r, "ADMIN_PORTAL"));
+    const anon = req();
+    Object.defineProperty(anon, "cookies", { get: () => { throw new Error("cookie jar read"); } });
+    expectDenied(await check(anon, "ADMIN_PORTAL"), 401, "missing_credentials");
   });
 
   it("the granted actor carries the snapshot-derived fields", async () => {
@@ -349,16 +344,16 @@ describe("revocation against the live tokensValidAfterTime", () => {
       expectDenied(await check(bearer(), "SYSTEM_ADMIN"), 401, "credential_revoked");
     }
   );
-  it("applies to a cookie credential on PORTAL (presented beside a bearer since ZCA L-8)", async () => {
+  it("a revoked bearer on PORTAL is denied whatever cookie is beside it", async () => {
     mockState.records = [record({ tokensValidAfterTime: at((AUTH_TIME + 60) * 1000) })];
     expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "credential_revoked");
+    expectDenied(await check(bearer(), "ADMIN_PORTAL"), 401, "credential_revoked");
   });
-  it("applies to EVERY presented credential: a fresh bearer does not launder a revoked same-uid cookie", async () => {
+  it("ZCA P3 R2 (inverted): a fresh bearer is granted although the same-uid cookie beside it predates the revocation — the cookie is not a credential", async () => {
     mockState.tokens[TOK_A] = token({ auth_time: AUTH_TIME + 120 });
     mockState.cookies[COOKIE_A] = token({ auth_time: AUTH_TIME });
     mockState.records = [record({ tokensValidAfterTime: at((AUTH_TIME + 60) * 1000) })];
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "credential_revoked");
-    // control: the bearer alone is fresh
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"));
     expectGranted(await check(bearer(), "ADMIN_PORTAL"));
   });
   it.each([
@@ -433,35 +428,38 @@ describe("credentials: one principal, no fallback (SP-4, SP-5, D5)", () => {
   });
   it.each(TIERS)("ZCA L-8: cookie-only to %s is 401 missing_credentials, before any verification (D5 now applies to every tier)", async (tier) => {
     expectDenied(await check(req({ cookie: COOKIE_A }), tier), 401, "missing_credentials");
-    expect(verifySessionCookie).not.toHaveBeenCalled();
+    expect(verifyIdToken).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
     // control: the same holder's bearer is granted
     expectGranted(await check(bearer(), tier === "GOVERNANCE_ADMIN" ? "ADMIN_PORTAL" : tier));
   });
-  it.each(TIERS)("mixed uids (bearer A, cookie B) is 401 credential_mismatch on %s, with no record read", async (tier) => {
+  it.each(TIERS)("ZCA P3 R2 (inverted from the mismatch veto): bearer A with cookie B on %s is decided by bearer A alone — A's record is the only one read", async (tier) => {
     mockState.cookies[COOKIE_B] = token({ uid: OTHER_UID, sub: OTHER_UID });
-    mockState.records = [record({ email: BOTH_EMAIL })];
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_B }), tier), 401, "credential_mismatch");
-    expect(getUser).not.toHaveBeenCalled();
+    mockState.records = [record({ email: BOTH_EMAIL, customClaims: { admin: true } })];
+    const d = await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_B }), tier);
+    expectGranted(d);
+    expect(d.actor.uid).toBe(UID);
+    expect(getUser.mock.calls).toEqual([[UID]]);
   });
-  it("same uid on both credentials is granted (control for the mismatch case)", async () => {
+  it("same uid on both is granted exactly as the bearer alone", async () => {
     expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "SYSTEM_ADMIN"));
   });
   it.each([["Bearer "], ["Bearer"], ["Bearer    "], ["Basic dXNlcjpwYXNz"], [TOK_A], [`Token ${TOK_A}`]])(
-    "Authorization %p with a valid cookie is 401 invalid_credential — no cookie fallback",
+    "Authorization %p with a valid cookie is 401 invalid_credential — the cookie is never a fallback",
     async (h) => {
       expectDenied(await check(req({ authorization: h, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
       expect(getUser).not.toHaveBeenCalled();
     }
   );
-  it("an expired bearer with a valid cookie is 401 — no cookie fallback", async () => {
+  it("an expired bearer with a valid cookie is 401 — the cookie is never a fallback", async () => {
     mockState.tokens[TOK_X] = Object.assign(new Error("expired"), { code: "auth/id-token-expired" });
     expectDenied(await check(req({ authorization: `Bearer ${TOK_X}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
     expect(getUser).not.toHaveBeenCalled();
   });
-  it("a valid bearer with an invalid cookie is 401 — no bearer fallback", async () => {
-    mockState.cookies[COOKIE_X] = Object.assign(new Error("revoked"), { code: "auth/session-cookie-revoked" });
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_X }), "SYSTEM_ADMIN"), 401, "invalid_credential");
+  it("ZCA P3 R2 (inverted): a valid bearer with an invalid cookie is granted — the cookie cannot veto", async () => {
+    mockState.cookies[COOKIE_X] = Object.assign(new Error("revoked"), { code: "auth/id-token-revoked" });
+    mockState.records = [record({ customClaims: { admin: true } })];
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_X }), "SYSTEM_ADMIN"));
   });
   it("the Bearer prefix is case-insensitive", async () => {
     expectGranted(await check(req({ authorization: `bearer ${TOK_A}` }), "SYSTEM_ADMIN"));
@@ -517,14 +515,14 @@ describe("failures are 503 and never ok (SP-2)", () => {
     for (const tier of TIERS) expectDenied(await check(bearer(), tier), 503, "auth_unavailable");
     expect(getUser).not.toHaveBeenCalled();
   });
-  it("verifySessionCookie non-auth error is 503", async () => {
+  it("ZCA P3 R2 (inverted): a cookie whose verification WOULD be an outage changes nothing — the bearer decides (granted)", async () => {
     mockState.cookies[COOKIE_A] = networkError();
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"));
   });
-  it("an availability failure on either slot outranks a credential failure on the other", async () => {
+  it("ZCA P3 R2 (inverted): an expired bearer stays 401 even beside a cookie that WOULD be an outage (no cookie slot to outrank it)", async () => {
     mockState.tokens[TOK_X] = Object.assign(new Error("expired"), { code: "auth/id-token-expired" });
     mockState.cookies[COOKIE_A] = networkError();
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_X}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
+    expectDenied(await check(req({ authorization: `Bearer ${TOK_X}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
   });
   it.each([
     ["auth/id-token-expired"],
@@ -545,7 +543,7 @@ describe("failures are 503 and never ok (SP-2)", () => {
   });
   it("an unexpected throw inside the guard is 503, not ok, and the guard does not throw", async () => {
     const r = bearer();
-    Object.defineProperty(r, "cookies", { get: () => { throw new Error("unexpected"); } });
+    Object.defineProperty(r, "headers", { get: () => { throw new Error("unexpected"); } });
     expectDenied(await check(r, "ADMIN_PORTAL"), 503, "auth_unavailable");
   });
   it("no error path returns ok, even for a principal whose token claims admin", async () => {
@@ -801,19 +799,19 @@ describe("structural pre-validation: a crafted credential never reaches the SDK"
     ["typ JWT with a non-JSON payload", () => `${b64(GOOD_HEADER)}.${Buffer.from("not json").toString("base64url")}.c2ln`],
     ["expired", () => mint("cookie", { exp: NOW_SECONDS - 1 })],
     ["kid missing", () => mint("cookie", {}, { alg: "RS256" })],
-  ])("cookie with %s is 401 invalid_credential on PORTAL and GOV; verifySessionCookie is NEVER called", async (_n, mk) => {
+  ])("ZCA P3 R2 (inverted): a cookie with %s beside a valid bearer is ignored on PORTAL and GOV — decided by the bearer (granted)", async (_n, mk) => {
     const crafted = mk();
     mockState.cookies[crafted] = token();
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: crafted }), "ADMIN_PORTAL"), 401, "invalid_credential");
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: crafted }), "GOVERNANCE_ADMIN"), 401, "invalid_credential");
-    expect(verifySessionCookie).not.toHaveBeenCalled();
-    expect(getUser).not.toHaveBeenCalled();
+    mockState.records = [record({ email: BOTH_EMAIL })];
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: crafted }), "ADMIN_PORTAL"));
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: crafted }), "GOVERNANCE_ADMIN"));
+    expect(verifyIdToken.mock.calls).toEqual([[TOK_A, false], [TOK_A, false]]);
   });
 
-  it("a crafted cookie beside a valid bearer is still 401 — and the bearer does not launder it", async () => {
+  it("ZCA P3 R2 (inverted): a crafted cookie alone is the anonymous answer — nothing verified, nothing read", async () => {
     const crafted = mint("cookie", { aud: "Error fetching public keys for Google certs: boom" });
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: crafted }), "ADMIN_PORTAL"), 401, "invalid_credential");
-    expect(verifySessionCookie).not.toHaveBeenCalled();
+    expectDenied(await check(req({ cookie: crafted }), "ADMIN_PORTAL"), 401, "missing_credentials");
+    expect(verifyIdToken).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });
 
@@ -845,17 +843,8 @@ describe("after pre-validation: the SDK's verdicts, classified by structure", ()
     );
     expectDenied(await check(bearer(), "SYSTEM_ADMIN"), 401, "invalid_credential");
   });
-  it.each([
-    ["invalid signature", `Firebase session cookie has invalid signature.${SDK_DOCS.cookie}`],
-    ["unknown kid", 'Firebase session cookie has "kid" claim which does not correspond to a known public key. Most likely the session cookie is expired, so get a fresh token from your client app and try again.'],
-  ])("cookie: SDK fixed text for %s is 401", async (_n, message) => {
-    mockState.cookies[COOKIE_A] = argErr(message);
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
-  });
-  it("the pinned texts are matched per credential kind: an ID-token-worded message thrown for a COOKIE is not a credential verdict (503)", async () => {
-    mockState.cookies[COOKIE_A] = argErr(`Firebase ID token has invalid signature.${SDK_DOCS.bearer}`);
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
-  });
+  // ZCA P3 R2: the two session-cookie fixed-text cases and the per-kind cookie case were DELETED with the guard's
+  // cookie slot (the adapter has one credential kind; the cookie is never verified).
   it("the pinned text must be a PREFIX: the same words embedded later in a message are not a verdict", async () => {
     mockState.tokens[TOK_A] = argErr(`Error while making request: Firebase ID token has invalid signature.`);
     expectDenied(await check(bearer(), "SYSTEM_ADMIN"), 503, "auth_unavailable");
@@ -881,9 +870,9 @@ describe("after pre-validation: the SDK's verdicts, classified by structure", ()
     expect(getUser).not.toHaveBeenCalled();
     expect(events("privileged_auth_unavailable")).toHaveLength(TIERS.length);
   });
-  it.each(OUTAGES.slice(0, 4))("%s on the cookie is 503 on PORTAL", async (_n, mk) => {
+  it.each(OUTAGES.slice(0, 4))("ZCA P3 R2 (inverted): %s that a cookie WOULD raise changes nothing on PORTAL (granted; never verified)", async (_n, mk) => {
     mockState.cookies[COOKIE_A] = mk() as Error;
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 503, "auth_unavailable");
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"));
   });
   it("KEY DEMONSTRATION: the network-shaped key-fetch failure contains no 'Error fetching' text — a message matcher mislabels this outage as 401", () => {
     const err = OUTAGES[1][1]() as Error & { code: string };
@@ -893,12 +882,13 @@ describe("after pre-validation: the SDK's verdicts, classified by structure", ()
   it("the SDK's own expiry verdict on a token that passed pre-validation (clock skew) is 401", async () => {
     mockState.tokens[TOK_A] = new SdkAuthError(AuthClientErrorCode.ID_TOKEN_EXPIRED, "Firebase ID token has expired. Get a fresh ID token from your client app and try again (auth/id-token-expired).");
     expectDenied(await check(bearer(), "SYSTEM_ADMIN"), 401, "invalid_credential");
+    // ZCA P3 R2 (inverted): an expired cookie beside an expired bearer changes nothing either.
     mockState.cookies[COOKIE_A] = new SdkAuthError(AuthClientErrorCode.SESSION_COOKIE_EXPIRED);
     expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
   });
 });
 
-describe("SP-5 slots: an existing-but-empty header or cookie is a presented credential", () => {
+describe("SP-5: an existing-but-empty Authorization header is a presented credential (the cookie is no slot at all)", () => {
   it.each([[""], ["   "]])("Authorization %p beside a valid cookie is 401 invalid_credential — the cookie never substitutes", async (h) => {
     expectDenied(await check(req({ authorization: h, cookie: COOKIE_A }), "ADMIN_PORTAL"), 401, "invalid_credential");
     expect(getUser).not.toHaveBeenCalled();
@@ -907,23 +897,21 @@ describe("SP-5 slots: an existing-but-empty header or cookie is a presented cred
     for (const tier of TIERS) expectDenied(await check(req({ authorization: "" }), tier), 401, "invalid_credential");
     expect(verifyIdToken).not.toHaveBeenCalled();
   });
-  it("an empty __session cookie beside a valid bearer is 401 invalid_credential, no record read", async () => {
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: "" }), "SYSTEM_ADMIN"), 401, "invalid_credential");
-    expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: "" }), "ADMIN_PORTAL"), 401, "invalid_credential");
-    expect(verifySessionCookie).not.toHaveBeenCalled();
-    expect(getUser).not.toHaveBeenCalled();
+  it("ZCA P3 R2 (inverted): an empty __session cookie beside a valid bearer is not a credential — granted exactly as the bearer alone", async () => {
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: "" }), "SYSTEM_ADMIN"));
+    expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: "" }), "ADMIN_PORTAL"));
+    expect(getUser).toHaveBeenCalledTimes(2);
   });
   it("ZCA L-8: an empty __session cookie alone is the anonymous answer on every tier, with no Auth call", async () => {
     for (const tier of TIERS) expectDenied(await check(req({ cookie: "" }), tier), 401, "missing_credentials");
-    expect(verifySessionCookie).not.toHaveBeenCalled();
     expect(verifyIdToken).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });
-  it("beside a valid bearer, an empty __session cookie is still a PRESENTED, invalid credential (SP-5): 401, the empty value never reaches the SDK, no record read", async () => {
-    for (const tier of TIERS) expectDenied(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: "" }), tier), 401, "invalid_credential");
-    expect(verifySessionCookie).not.toHaveBeenCalled();
-    expect(verifyIdToken).toHaveBeenCalledTimes(TIERS.length); // the bearer itself was verified each time
-    expect(getUser).not.toHaveBeenCalled();
+  it("ZCA P3 R2 (inverted from SP-5's cookie slot): beside a valid bearer, an empty __session cookie changes nothing on any tier — one verification and one record read each", async () => {
+    mockState.records = [record({ email: BOTH_EMAIL })];
+    for (const tier of TIERS) expectGranted(await check(req({ authorization: `Bearer ${TOK_A}`, cookie: "" }), tier));
+    expect(verifyIdToken).toHaveBeenCalledTimes(TIERS.length);
+    expect(getUser).toHaveBeenCalledTimes(TIERS.length);
   });
   it("control: an unrelated cookie is not a __session slot — the bearer alone is granted", async () => {
     const r = new NextRequest("http://localhost/api/admin/example", { headers: { authorization: `Bearer ${TOK_A}`, cookie: "other=1" } });
@@ -972,7 +960,7 @@ describe("static boundaries", () => {
     expect(ADAPTER_SRC).toMatch(/^import "server-only";$/m);
     expect(adapterCode).not.toMatch(/process\.env/);
     expect(ADAPTER_SRC).not.toMatch(/ADMIN_SECRET/);
-    expect(adapterCode).not.toMatch(/verifyIdToken|verifySessionCookie|\.getUser\s*\(|firebase-admin/);
+    expect(adapterCode).not.toMatch(/verifyIdToken|verifySession\w*|\.getUser\s*\(|firebase-admin/);
   });
 
   it("the guard reads no error message at all; the adapter compares messages only by startsWith against its pinned constants", () => {

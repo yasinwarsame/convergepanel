@@ -100,7 +100,7 @@ describe("auth", () => {
   });
 
   it("401 auth_error on any other identity failure", async () => {
-    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "credential_mismatch" });
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "invalid_bearer_token" });
     const { res, json } = await callPost(goodBody());
     expect(res.status).toBe(401);
     expect(json.errorCode).toBe("auth_error");

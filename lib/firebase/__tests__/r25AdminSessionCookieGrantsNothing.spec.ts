@@ -39,7 +39,6 @@ const verify = async (raw: unknown) => {
 jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: {
     verifyIdToken: (raw: unknown) => verify(raw),
-    verifySessionCookie: (raw: unknown) => verify(raw),
     getUser: async () => authRecord,
   },
   adminDb: {
@@ -53,7 +52,7 @@ jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async (
 jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => [] }));
 
 import { middleware } from "@/middleware";
-import { requireAdminPortalAccess, requireSystemAdminAccess, verifySessionCookie } from "@/lib/firebase/auth-helpers";
+import { requireAdminPortalAccess, requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { requireSystemAdminBearer } from "@/lib/firebase/adminAuth";
 
 const req = (path: string, cookies: Record<string, string> = {}, bearer?: string) =>
@@ -149,15 +148,6 @@ describe("T4 — requireSystemAdminBearer positive control (unchanged)", () => {
   });
 });
 
-describe("T3 — the plain Firebase session-cookie read ignores admin_session", () => {
-  it("verifySessionCookie: only admin_session → null; value never presented", async () => {
-    decoded = { uid: "u1", admin: true };
-    expect(await verifySessionCookie(req("/api/auth/session", { admin_session: LEGACY_SECRET }))).toBeNull();
-    expect(presented).not.toContain(LEGACY_SECRET);
-  });
-  it("POSITIVE CONTROL: __session → { uid, isAdmin } (unchanged)", async () => {
-    decoded = { uid: "u1", admin: true };
-    expect(await verifySessionCookie(req("/api/auth/session", { __session: FIREBASE_CRED }))).toMatchObject({ uid: "u1" });
-  });
-});
+// ZCA P3 R2: "T3 — the plain Firebase session-cookie read ignores admin_session" was DELETED with the
+// session-cookie verifier itself (no production code reads or verifies any cookie as a credential).
 

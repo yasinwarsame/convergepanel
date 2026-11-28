@@ -124,7 +124,6 @@ jest.mock("@/lib/firebase/admin", () => ({
   // live record carries the uid it was read for.
   adminAuth: {
     verifyIdToken: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
-    verifySessionCookie: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
     getUser: async (uid: string) => ({ uid, ...liveRecord }),
   },
   getInitializedFirebaseProjectId: () => require("@/lib/admin/__tests__/privilegedRouteHarness").PROJECT_ID,

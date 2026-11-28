@@ -7,21 +7,18 @@
  * `run-panel`/`synthesize-panel` are covered by their own large
  * pre-existing suites, which passed unchanged after migration).
  *
- * One shared mock of `@/lib/firebase/auth-helpers`/`@/lib/firebase/auth`
- * is reused across every route import in this file — proving each route
- * independently reaches the SAME shared `resolveRequestIdentity()`
- * decision, not a per-route reimplementation. Each route is exercised on
- * its two most security-critical cases: no credentials (401, generic
- * "please sign in"), and a confirmed cookie/bearer uid MISMATCH (401,
- * fail closed) — the exact root-cause regression this whole step exists
- * to close, verified independently at every migrated route.
+ * One shared mock of `@/lib/firebase/auth` is reused across every route
+ * import in this file — proving each route independently reaches the SAME
+ * shared `resolveRequestIdentity()` decision, not a per-route
+ * reimplementation. Each route is exercised on its two most
+ * security-critical cases: no credentials (401, generic "please sign in"),
+ * and a stale `__session` cookie beside a bearer the verifier REJECTS (401).
+ * ZCA P3 R2 (converted from the cookie/bearer MISMATCH case, which no longer
+ * exists: the cookie is never read): the stale cookie can never authenticate
+ * a request whose bearer failed.
  */
 
-const mockVerifySessionCookie = jest.fn();
 const mockVerifyIdToken = jest.fn();
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: (...args: unknown[]) => mockVerifySessionCookie(...args),
-}));
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
 }));
@@ -48,7 +45,7 @@ import { NextRequest } from "next/server";
 function cookieOnlyReq(url: string, init: RequestInit = {}) {
   return new NextRequest(url, { headers: { Cookie: "__session=stale" }, ...init });
 }
-function mismatchReq(url: string, init: RequestInit = {}) {
+function staleCookieRejectedBearerReq(url: string, init: RequestInit = {}) {
   return new NextRequest(url, {
     headers: { Cookie: "__session=stale", Authorization: "Bearer fresh-token" },
     ...init,
@@ -59,16 +56,14 @@ function noCredsReq(url: string, init: RequestInit = {}) {
 }
 
 beforeEach(() => {
-  mockVerifySessionCookie.mockReset();
   mockVerifyIdToken.mockReset();
 });
 
-function setupMismatch() {
-  mockVerifySessionCookie.mockResolvedValue({ uid: "stale-previous-user", isAdmin: false });
-  mockVerifyIdToken.mockResolvedValue({ uid: "fresh-current-user" });
+function setupRejectedBearer() {
+  mockVerifyIdToken.mockRejectedValue(Object.assign(new Error("INVALID_ID_TOKEN"), { code: "auth/argument-error" }));
 }
 function setupNoCreds() {
-  mockVerifySessionCookie.mockResolvedValue(null);
+  mockVerifyIdToken.mockReset();
 }
 
 describe("GET /api/user/usage", () => {
@@ -78,10 +73,10 @@ describe("GET /api/user/usage", () => {
     const res = await GET(noCredsReq("http://localhost/api/user/usage"));
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { GET } = await import("@/app/api/user/usage/route");
-    const res = await GET(mismatchReq("http://localhost/api/user/usage"));
+    const res = await GET(staleCookieRejectedBearerReq("http://localhost/api/user/usage"));
     expect(res.status).toBe(401);
   });
 });
@@ -93,10 +88,10 @@ describe("GET /api/user/panel-history", () => {
     const res = await GET(noCredsReq("http://localhost/api/user/panel-history"));
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { GET } = await import("@/app/api/user/panel-history/route");
-    const res = await GET(mismatchReq("http://localhost/api/user/panel-history"));
+    const res = await GET(staleCookieRejectedBearerReq("http://localhost/api/user/panel-history"));
     expect(res.status).toBe(401);
   });
 });
@@ -108,10 +103,10 @@ describe("GET /api/user/run-governance", () => {
     const res = await GET(noCredsReq("http://localhost/api/user/run-governance?runId=x&collection=runs"));
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { GET } = await import("@/app/api/user/run-governance/route");
-    const res = await GET(mismatchReq("http://localhost/api/user/run-governance?runId=x&collection=runs"));
+    const res = await GET(staleCookieRejectedBearerReq("http://localhost/api/user/run-governance?runId=x&collection=runs"));
     expect(res.status).toBe(401);
   });
 });
@@ -124,10 +119,10 @@ describe("GET /api/user/runs/[runId]", () => {
     const res = await GET(noCredsReq("http://localhost/api/user/runs/run-1"), context);
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { GET } = await import("@/app/api/user/runs/[runId]/route");
-    const res = await GET(mismatchReq("http://localhost/api/user/runs/run-1"), context);
+    const res = await GET(staleCookieRejectedBearerReq("http://localhost/api/user/runs/run-1"), context);
     expect(res.status).toBe(401);
   });
 });
@@ -140,10 +135,10 @@ describe("GET /api/user/verifications/[verificationId]", () => {
     const res = await GET(noCredsReq("http://localhost/api/user/verifications/verification-1"), context);
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { GET } = await import("@/app/api/user/verifications/[verificationId]/route");
-    const res = await GET(mismatchReq("http://localhost/api/user/verifications/verification-1"), context);
+    const res = await GET(staleCookieRejectedBearerReq("http://localhost/api/user/verifications/verification-1"), context);
     expect(res.status).toBe(401);
   });
 });
@@ -155,10 +150,10 @@ describe("POST /api/billing/create-checkout-session", () => {
     const res = await POST(noCredsReq("http://localhost/api/billing/create-checkout-session", { method: "POST", body: "{}" }));
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { POST } = await import("@/app/api/billing/create-checkout-session/route");
-    const res = await POST(mismatchReq("http://localhost/api/billing/create-checkout-session", { method: "POST", body: "{}" }));
+    const res = await POST(staleCookieRejectedBearerReq("http://localhost/api/billing/create-checkout-session", { method: "POST", body: "{}" }));
     expect(res.status).toBe(401);
   });
 });
@@ -170,10 +165,10 @@ describe("POST /api/billing/create-portal-session", () => {
     const res = await POST(noCredsReq("http://localhost/api/billing/create-portal-session", { method: "POST" }));
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { POST } = await import("@/app/api/billing/create-portal-session/route");
-    const res = await POST(mismatchReq("http://localhost/api/billing/create-portal-session", { method: "POST" }));
+    const res = await POST(staleCookieRejectedBearerReq("http://localhost/api/billing/create-portal-session", { method: "POST" }));
     expect(res.status).toBe(401);
   });
 });
@@ -185,10 +180,10 @@ describe("POST /api/billing/sync-plan", () => {
     const res = await POST(noCredsReq("http://localhost/api/billing/sync-plan", { method: "POST", body: "{}" }));
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { POST } = await import("@/app/api/billing/sync-plan/route");
-    const res = await POST(mismatchReq("http://localhost/api/billing/sync-plan", { method: "POST", body: "{}" }));
+    const res = await POST(staleCookieRejectedBearerReq("http://localhost/api/billing/sync-plan", { method: "POST", body: "{}" }));
     expect(res.status).toBe(401);
   });
 });
@@ -200,10 +195,10 @@ describe("POST /api/billing/validate-subscription", () => {
     const res = await POST(noCredsReq("http://localhost/api/billing/validate-subscription", { method: "POST" }));
     expect(res.status).toBe(401);
   });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
+  it("stale cookie + rejected bearer -> 401 (the cookie never authenticates)", async () => {
+    setupRejectedBearer();
     const { POST } = await import("@/app/api/billing/validate-subscription/route");
-    const res = await POST(mismatchReq("http://localhost/api/billing/validate-subscription", { method: "POST" }));
+    const res = await POST(staleCookieRejectedBearerReq("http://localhost/api/billing/validate-subscription", { method: "POST" }));
     expect(res.status).toBe(401);
   });
 });

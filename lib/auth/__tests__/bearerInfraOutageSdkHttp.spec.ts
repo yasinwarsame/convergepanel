@@ -119,13 +119,13 @@ describe("ANCHORS: the local network edge is what the real SDK talks to", () => 
     await expect(resolveRequestIdentity(req({ bearer: idToken("valid") }))).resolves.toEqual({ status: "authenticated", uid: "valid", source: "bearer_token" });
     expect(mockState.lookups).toBe(1);
   });
-  it("cookie + bearer for the same uid → authenticated with TWO lookups (one per presented credential)", async () => {
+  it("ZCA P3 R2 (converted): cookie + bearer for the same uid → authenticated via the bearer with ONE lookup (the cookie is never verified)", async () => {
     await expect(resolveRequestIdentity(req({ bearer: idToken("valid"), cookie: sessionCookie("valid") }))).resolves.toEqual({
       status: "authenticated",
       uid: "valid",
-      source: "matching_cookie_and_bearer",
+      source: "bearer_token",
     });
-    expect(mockState.lookups).toBe(2);
+    expect(mockState.lookups).toBe(1);
   });
 });
 
@@ -154,7 +154,7 @@ describe("infrastructure failures of the live lookup → auth_unavailable (fail 
     await expect(resolveRequestIdentity(req({ cookie: sessionCookie("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "missing_credentials" });
   });
 
-  it("quota exceeded while a matching cookie is ALSO presented → still unauthenticated (no fallback to either credential)", async () => {
+  it("quota exceeded while a matching cookie is ALSO presented → still unauthenticated (the cookie is never a fallback)", async () => {
     mockState.reply = cases[0][1];
     await expect(resolveRequestIdentity(req({ bearer: idToken("valid"), cookie: sessionCookie("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
   });

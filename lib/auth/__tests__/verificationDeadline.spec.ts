@@ -4,28 +4,24 @@
  * 5 attempts × 25 s when Identity Toolkit accepts the connection and never
  * answers — is excessive).
  *
- * Contract pinned here (fake timers; the two verifiers are controllable
- * promises):
+ * Contract pinned here (fake timers; the bearer verifier is a controllable
+ * promise):
  *   - one deadline of AUTH_VERIFICATION_DEADLINE_MS (10 s) per request,
- *     covering BOTH presented credentials (they are verified concurrently);
+ *     covering the bearer verification (ZCA P3 R2: the cookie is never
+ *     verified, so it adds no slot and cannot hang a request);
  *   - a slot still pending at the deadline is `auth_unavailable` (503 at the
  *     wrappers that already answer 503, 401 elsewhere) — never an allow;
  *   - the decision is FINAL at the deadline: a verifier that resolves "valid"
  *     afterwards changes nothing;
- *   - a verifier that answers before the deadline is unaffected (strict
- *     dual-credential truth table unchanged);
+ *   - a verifier that answers before the deadline is unaffected;
  *   - no timer survives a request, and concurrent requests do not share a
  *     deadline.
  */
 
 import { NextRequest } from "next/server";
 
-const mockVerifySessionCookie = jest.fn();
 const mockVerifyIdToken = jest.fn();
 
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: (...args: unknown[]) => mockVerifySessionCookie(...args),
-}));
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
 }));
@@ -74,11 +70,8 @@ function track(p: Promise<RequestIdentityResult>) {
 
 beforeEach(() => {
   jest.useFakeTimers();
-  mockVerifySessionCookie.mockReset();
   mockVerifyIdToken.mockReset();
   mockWarn.mockReset();
-  // Default: no cookie presented.
-  mockVerifySessionCookie.mockResolvedValue(null);
 });
 afterEach(async () => {
   for (const r of hungRejecters.splice(0)) r(Object.assign(new Error("released"), { code: "app/network-timeout" }));
@@ -102,29 +95,27 @@ describe("a hanging verifier is cut off at the deadline → auth_unavailable", (
     expect(t.value).toEqual(UNAVAILABLE);
   });
 
-  it("cookie hangs beside a valid bearer (cookie verification shares the path and the deadline)", async () => {
-    mockVerifySessionCookie.mockImplementation(never);
+  it("ZCA P3 R2 (inverted): a cookie beside a valid bearer adds no verification — authenticated at once, no deadline wait", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
+    const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(t.value).toEqual({ status: "authenticated", uid: "u1", source: "bearer_token" });
+    expect(mockVerifyIdToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("ZCA L-8: a cookie-ONLY request is the anonymous answer at once, unverified", async () => {
+    const t = track(resolveRequestIdentity(req({ cookie: "c" })));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(t.value).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
+  });
+
+  it("a hanging bearer beside a cookie: the same ONE 10 s deadline as the bearer alone", async () => {
+    mockVerifyIdToken.mockImplementation(never);
     const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
     await jest.advanceTimersByTimeAsync(DEADLINE - 1);
     expect(t.settled).toBe(false);
     await jest.advanceTimersByTimeAsync(1);
-    expect(t.value).toEqual(UNAVAILABLE);
-  });
-
-  it("ZCA L-8: a hanging cookie verifier cannot delay a cookie-ONLY request — it is the anonymous answer at once, unverified", async () => {
-    mockVerifySessionCookie.mockImplementation(never);
-    const t = track(resolveRequestIdentity(req({ cookie: "c" })));
-    await jest.advanceTimersByTimeAsync(0);
-    expect(t.value).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
-    expect(mockVerifySessionCookie).not.toHaveBeenCalled();
-  });
-
-  it("both hang: ONE end-to-end deadline (10 s), not one per credential (20 s)", async () => {
-    mockVerifySessionCookie.mockImplementation(never);
-    mockVerifyIdToken.mockImplementation(never);
-    const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
-    await jest.advanceTimersByTimeAsync(DEADLINE);
     expect(t.value).toEqual(UNAVAILABLE);
   });
 
@@ -151,38 +142,11 @@ describe("the decision is FINAL at the deadline: a late 'valid' never authorizes
     expect(t.value).toBe(decided); // same object: nothing re-decided
   });
 
-  it("cookie resolves VALID after the deadline while the bearer was valid in time → still auth_unavailable (no partial allow)", async () => {
-    mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
-    mockVerifySessionCookie.mockImplementation(() => after(DEADLINE + 50, { uid: "u1", isAdmin: false }));
-    const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
-    await jest.advanceTimersByTimeAsync(DEADLINE);
-    expect(t.value).toEqual(UNAVAILABLE);
-    await jest.advanceTimersByTimeAsync(1_000);
-    expect(t.value).toEqual(UNAVAILABLE);
-  });
-
-  it("valid cookie in time + hanging bearer → auth_unavailable (no fallback to the cookie)", async () => {
-    mockVerifySessionCookie.mockResolvedValue({ uid: "u1", isAdmin: false });
+  it("ZCA P3 R2 (converted from the cookie-slot cases): a hanging bearer is auth_unavailable whatever cookie is beside it — the cookie is never a fallback", async () => {
     mockVerifyIdToken.mockImplementation(never);
     const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
     await jest.advanceTimersByTimeAsync(DEADLINE);
     expect(t.value).toEqual(UNAVAILABLE);
-  });
-
-  it("valid bearer in time + hanging cookie → auth_unavailable (no fallback to the bearer)", async () => {
-    mockVerifySessionCookie.mockImplementation(never);
-    mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
-    const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
-    await jest.advanceTimersByTimeAsync(DEADLINE);
-    expect(t.value).toEqual(UNAVAILABLE);
-  });
-
-  it("a REVOKED cookie decided in time + hanging bearer → the cookie's own credential verdict (401), not an allow", async () => {
-    mockVerifySessionCookie.mockRejectedValue(fbError("auth/session-cookie-revoked"));
-    mockVerifyIdToken.mockImplementation(never);
-    const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
-    await jest.advanceTimersByTimeAsync(DEADLINE);
-    expect(t.value).toEqual({ status: "unauthenticated", reason: "revoked_session" });
   });
 });
 
@@ -194,11 +158,10 @@ describe("verifications that answer before the deadline are unaffected", () => {
     expect(t.value).toEqual({ status: "authenticated", uid: "u1", source: "bearer_token" });
   });
 
-  it("a fast valid cookie + bearer (same uid) authenticates immediately and leaves NO timer behind", async () => {
-    mockVerifySessionCookie.mockResolvedValue({ uid: "u1", isAdmin: false });
+  it("a fast valid bearer (a cookie beside it) authenticates immediately and leaves NO timer behind", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
     const r = await resolveRequestIdentity(req({ cookie: "c", bearer: "tok" }));
-    expect(r).toEqual({ status: "authenticated", uid: "u1", source: "matching_cookie_and_bearer" });
+    expect(r).toEqual({ status: "authenticated", uid: "u1", source: "bearer_token" });
     expect(jest.getTimerCount()).toBe(0);
   });
 
@@ -281,16 +244,8 @@ describe("R5 NITs: no result caching, a frozen deadline verdict, a distinct dead
     expect(mockVerifyIdToken).toHaveBeenNthCalledWith(2, "same-T");
   });
 
-  it("the same for a session cookie value (verified beside a bearer since ZCA L-8)", async () => {
-    mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
-    mockVerifySessionCookie.mockResolvedValueOnce({ uid: "u1", isAdmin: false });
-    expect(await resolveRequestIdentity(req({ cookie: "same-C", bearer: "tok" }))).toEqual({ status: "authenticated", uid: "u1", source: "matching_cookie_and_bearer" });
-    mockVerifySessionCookie.mockImplementationOnce(never);
-    const t = track(resolveRequestIdentity(req({ cookie: "same-C", bearer: "tok" })));
-    await jest.advanceTimersByTimeAsync(DEADLINE);
-    expect(t.value).toEqual(UNAVAILABLE);
-    expect(mockVerifySessionCookie).toHaveBeenCalledTimes(2);
-  });
+  // ZCA P3 R2: "the same for a session cookie value" was DELETED — no cookie value is ever verified, so there is
+  // nothing to cache or re-verify.
 
   it("DEADLINE_EXCEEDED (the verdict a slot becomes at the deadline) is exported frozen", () => {
     const v = (identityModule as Record<string, unknown>).DEADLINE_EXCEEDED;
@@ -304,13 +259,13 @@ describe("R5 NITs: no result caching, a frozen deadline verdict, a distinct dead
     await jest.advanceTimersByTimeAsync(DEADLINE);
     expect(mockWarn).not.toHaveBeenCalled();
 
-    mockVerifySessionCookie.mockImplementation(never);
     mockVerifyIdToken.mockImplementation(never);
     const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
     await jest.advanceTimersByTimeAsync(DEADLINE);
     expect(t.value).toEqual(UNAVAILABLE);
     expect(mockWarn).toHaveBeenCalledTimes(1);
-    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] deadline_exceeded", expect.objectContaining({ site: "request_identity", deadlineMs: DEADLINE, abandoned: 2 }));
+    // ZCA P3 R2: ONE abandoned verification (the bearer); the cookie never takes a slot.
+    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] deadline_exceeded", expect.objectContaining({ site: "request_identity", deadlineMs: DEADLINE, abandoned: 1 }));
     // no credential material in the log line
     expect(JSON.stringify(mockWarn.mock.calls)).not.toMatch(/tok|"c"|__session/);
   });

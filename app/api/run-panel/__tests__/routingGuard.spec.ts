@@ -23,10 +23,7 @@ jest.mock("@/lib/env", () => ({
   ADAPTIVE_SCHEMAS_ENABLED: true,
 }));
 
-// ZCA L-8: identity is bearer-only; these wiring tests authenticate like a real browser (bearer + the same user's cookie).
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: jest.fn().mockResolvedValue({ uid: "test-uid" }),
-}));
+// ZCA L-8 / P3 R2: identity is bearer-only; the cookie is never read, so these wiring tests authenticate with the bearer alone.
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: jest.fn().mockResolvedValue({ uid: "test-uid" }),
 }));

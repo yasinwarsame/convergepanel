@@ -39,7 +39,6 @@ jest.mock("@/lib/env", () => ({
   WORKSPACES_ENABLED: true,
   ADMIN_EMAILS: "",
 }));
-jest.mock("@/lib/firebase/auth-helpers", () => ({ verifySessionCookie: jest.fn().mockResolvedValue({ uid: "uid-1", isAdmin: false }) }));
 jest.mock("@/lib/firebase/auth", () => ({ verifyIdToken: jest.fn() }));
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: jest.fn().mockResolvedValue({ status: "authenticated", uid: "uid-1", source: "session_cookie" }) }));
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));

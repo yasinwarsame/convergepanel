@@ -38,7 +38,6 @@ jest.mock("@/lib/firebase/admin", () => {
     adminAuth: {
       getUser: async (uid: string) => ({ uid, ...authRecord }),
       verifyIdToken: (t: string, c?: boolean) => h.authDouble.verifyIdToken(t, c),
-      verifySessionCookie: (t: string, c?: boolean) => h.authDouble.verifySessionCookie(t, c),
     },
     getInitializedFirebaseProjectId: () => h.PROJECT_ID,
   };

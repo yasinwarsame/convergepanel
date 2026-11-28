@@ -25,9 +25,6 @@ jest.mock("@/lib/env", () => ({
 }));
 
 let authUid = "uid-legacy";
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: jest.fn().mockImplementation(() => Promise.resolve({ uid: authUid })),
-}));
 // ZCA L-8: identity is bearer-only; the bearer resolves to the same (per-test) uid as the cookie.
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: jest.fn().mockImplementation(() => Promise.resolve({ uid: authUid })),

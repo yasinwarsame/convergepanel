@@ -108,10 +108,7 @@ const CLAIM_READ_ALLOW: Record<string, { count: number; category: Category; reas
     count: 1, category: "retired",
     reason: "legacy SYSTEM_ADMIN bearer helper; zero importers (asserted)",
   },
-  "lib/firebase/auth-helpers.ts::verifySessionCookieValue::member": {
-    count: 1, category: "inert-field",
-    reason: "sets the derived `isAdmin` field on a widely used session verifier; no server-side code reads `isAdmin` (asserted)",
-  },
+  // ZCA P3 R2: the session-cookie verifier row (an inert `isAdmin` field) was DELETED with the verifier itself.
   "app/api/admin/set-role/route.ts::POST::member": {
     count: 1, category: "write-log",
     reason: "logs the claim value this guarded SYSTEM_ADMIN route has just WRITTEN; authorizes nothing",

@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 describe("identity", () => {
-  it.each(["missing_credentials", "invalid_session_cookie", "invalid_bearer_token", "credential_mismatch", "revoked_session", "expired_session"])(
+  it.each(["missing_credentials", "invalid_bearer_token", "revoked_session", "expired_session"])(
     "%s → 401 and no access lookup",
     async (reason) => {
       mockResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason });

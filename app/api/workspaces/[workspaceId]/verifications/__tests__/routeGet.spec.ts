@@ -83,7 +83,7 @@ describe("identity", () => {
     expect(mockedAccess).not.toHaveBeenCalled();
   });
 
-  it.each(["invalid_bearer_token", "revoked_session", "credential_mismatch", "expired_session"])("%s -> 401 auth_error, no access lookup", async (reason) => {
+  it.each(["invalid_bearer_token", "revoked_session", "expired_session"])("%s -> 401 auth_error, no access lookup", async (reason) => {
     mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason });
     const res = await GET(new NextRequest(`http://localhost/api/workspaces/${TEAM_W}/verifications`), { params: { workspaceId: TEAM_W } });
     expect(res.status).toBe(401);

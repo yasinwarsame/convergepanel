@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 describe("identity", () => {
-  it.each(["missing_credentials", "invalid_session_cookie", "invalid_bearer_token", "credential_mismatch", "revoked_session", "expired_session"])("%s → 401, and the run is never read", async (reason) => {
+  it.each(["missing_credentials", "invalid_bearer_token", "revoked_session", "expired_session", "auth_unavailable"])("%s → 401, and the run is never read", async (reason) => {
     mockResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason });
     const res = await call();
     expect(res.status).toBe(401);

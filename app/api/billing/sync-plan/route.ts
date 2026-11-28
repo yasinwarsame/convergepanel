@@ -53,8 +53,8 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     // Auth Identity Consistency Remediation, Step 7 — resolves via the
-    // shared, hardened resolver (considers cookie AND bearer, fails
-    // closed on a confirmed identity mismatch) rather than this route's
+    // shared, hardened resolver (bearer only — the cookie is never an
+    // input, ZCA P3 R2) rather than this route's
     // own duplicated cookie-first logic. Also removes this route's
     // pre-existing direct `console.log`/`console.error` of raw uid
     // values, which violated this step's "no uid is ever logged"
@@ -64,7 +64,6 @@ export async function POST(req: NextRequest) {
       logIdentityResolutionFailure({ route: "POST /api/billing/sync-plan", method: "POST", failureCategory: identity.reason });
       const isTokenError =
         identity.reason === "invalid_bearer_token" ||
-        identity.reason === "invalid_session_cookie" ||
         identity.reason === "expired_session" ||
         identity.reason === "revoked_session";
       return NextResponse.json(

@@ -19,13 +19,10 @@
 // ============================================================
 // Auth (mirrors verifyVideoAuthRegression.spec.ts's own proven pattern —
 // the Personal route calls resolveRequestIdentity(), which itself calls
-// verifySessionCookie()/verifyIdToken() under the hood).
+// verifyIdToken() under the hood; bearer only).
 // ============================================================
 const mockVerifySessionCookie = jest.fn();
 const mockVerifyIdToken = jest.fn();
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: (...args: unknown[]) => mockVerifySessionCookie(...args),
-}));
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
 }));

@@ -44,13 +44,11 @@ const getUser = jest.fn(async () => {
 });
 let decoded: Record<string, unknown> = {};
 const verifyIdToken = jest.fn(async () => decoded);
-const verifySessionCookie = jest.fn(async () => decoded);
 
 jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: {
     getUser: (...a: unknown[]) => getUser(...(a as [])),
     verifyIdToken: (...a: unknown[]) => verifyIdToken(...(a as [])),
-    verifySessionCookie: (...a: unknown[]) => verifySessionCookie(...(a as [])),
   },
   adminDb: {},
 }));

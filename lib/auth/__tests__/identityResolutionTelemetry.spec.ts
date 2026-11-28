@@ -9,10 +9,10 @@ describe("logIdentityResolutionFailure", () => {
   beforeEach(() => jest.clearAllMocks());
 
   it("logs via the shared logger with only safe metadata", () => {
-    logIdentityResolutionFailure({ route: "GET /api/user/usage", method: "GET", failureCategory: "credential_mismatch" });
+    logIdentityResolutionFailure({ route: "GET /api/user/usage", method: "GET", failureCategory: "revoked_session" });
     expect(mockLoggerWarn).toHaveBeenCalledWith(
       "[auth-identity] resolution_failed",
-      { operation: "identity_resolution_failed", route: "GET /api/user/usage", method: "GET", failureCategory: "credential_mismatch" }
+      { operation: "identity_resolution_failed", route: "GET /api/user/usage", method: "GET", failureCategory: "revoked_session" }
     );
   });
 

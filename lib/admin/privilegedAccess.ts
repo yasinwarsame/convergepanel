@@ -17,12 +17,11 @@
  *   SP-3  NO CROSS-REQUEST CACHE. Nothing about a decision survives the
  *         request. Every call performs its own verification and its own read.
  *   SP-4  ONE PRINCIPAL PER REQUEST. The actor has exactly one uid.
- *   SP-5  CONFLICTING CREDENTIALS ARE REJECTED. When a bearer token and a
- *         session cookie are both present, both must verify and name the same
- *         uid, or the request is 401. No slot falls back to the other; a
- *         present-but-empty or malformed `Authorization` header is a presented
- *         credential that failed, never "no bearer", and a present-but-empty
- *         `__session` cookie is likewise a presented credential that failed.
+ *   SP-5  ONE CREDENTIAL: THE BEARER. A present-but-empty or malformed
+ *         `Authorization` header is a presented credential that failed, never
+ *         "no bearer". The `__session` cookie is not a credential and is never
+ *         read (ZCA P3 R2): it can neither grant nor veto — the request is
+ *         decided exactly as the same request without it.
  *   A-2   A Google public-key fetch failure during verification is an
  *         AVAILABILITY event (503), never a credential outcome. How that is
  *         told apart from a bad credential without reading caller-controlled
@@ -61,7 +60,6 @@ import { logger } from "@/lib/logger";
 import {
   errorCodeOf,
   verifyPrevalidatedCredential,
-  type CredentialKind,
   type PrevalidatedCredential,
 } from "./privilegedCredentialAdapter";
 import { deriveVerifiedAdminScopes, readLiveAuthSnapshot, type LiveAuthSnapshot } from "./verifiedAdminIdentity";
@@ -71,7 +69,6 @@ export type PrivilegedTier = "SYSTEM_ADMIN" | "ADMIN_PORTAL" | "GOVERNANCE_ADMIN
 export type PrivilegedUnauthenticatedReason =
   | "missing_credentials"
   | "invalid_credential"
-  | "credential_mismatch"
   | "credential_revoked"
   | "account_disabled"
   | "account_not_found";
@@ -86,7 +83,8 @@ export type PrivilegedActor = Readonly<{
   /** From the SAME live snapshot; descriptive / audit only. */
   email: string;
   emailVerified: boolean;
-  credential: "bearer" | "cookie";
+  /** Always "bearer" (ZCA P3 R2 removed the cookie slot); kept in the actor and logs for continuity. */
+  credential: "bearer";
   /** Seconds, from the verified credential. */
   authTime: number;
   snapshotTokensValidAfter: string | null;
@@ -101,8 +99,6 @@ export type PrivilegedDenial =
 
 export type PrivilegedDecision = { ok: true; actor: PrivilegedActor } | PrivilegedDenial;
 
-const SESSION_COOKIE = "__session";
-
 type Verified = { uid: string; authTime: unknown; tokenClaimAdmin: boolean };
 type CredentialOutcome =
   | { present: false }
@@ -112,9 +108,9 @@ type CredentialOutcome =
 /**
  * SP-5: an `Authorization` header that EXISTS is a presented credential. An
  * empty or whitespace-only value, or one without the `Bearer` scheme, is a
- * presented credential that failed — it is never "no bearer", so it can never
- * hand the request over to the cookie slot. (Correction round: the previous
- * form returned `present: false` for an empty header, contradicting SP-5.)
+ * presented credential that failed — it is never "no bearer". (Correction
+ * round: the previous form returned `present: false` for an empty header,
+ * contradicting SP-5.)
  */
 function extractBearer(request: NextRequest): { present: false } | { present: true; token: string | null } {
   const header = request.headers.get("authorization");
@@ -138,17 +134,15 @@ function verifiedFrom(decoded: unknown, proof: PrevalidatedCredential): Verified
   return { uid, authTime: d.auth_time, tokenClaimAdmin: d.admin === true };
 }
 
-async function verifyCredential(
-  kind: CredentialKind,
+async function verifyBearer(
   raw: string,
   auth: NonNullable<typeof adminAuth>,
   projectId: string
 ): Promise<CredentialOutcome> {
   // checkRevoked is ALWAYS false: revocation is evaluated against the one
   // live snapshot below, so the SDK must not perform a second user lookup.
-  const verify = (credential: string): Promise<unknown> =>
-    kind === "bearer" ? auth.verifyIdToken(credential, false) : auth.verifySessionCookie(credential, false);
-  const adapted = await verifyPrevalidatedCredential(kind, raw, projectId, Math.floor(Date.now() / 1000), verify);
+  const verify = (credential: string): Promise<unknown> => auth.verifyIdToken(credential, false);
+  const adapted = await verifyPrevalidatedCredential("bearer", raw, projectId, Math.floor(Date.now() / 1000), verify);
   switch (adapted.kind) {
     case "rejected_shape":
       // Structural failure: a credential outcome, decided before the SDK saw the bytes.
@@ -203,7 +197,7 @@ function logDenial(route: string, tier: PrivilegedTier | "AUTHENTICATED", d: Pri
 
 type Authenticated = {
   uid: string;
-  credential: "bearer" | "cookie";
+  credential: "bearer";
   primary: Verified;
   snapshot: LiveAuthSnapshot;
   heldTiers: Readonly<{ systemAdmin: boolean; adminPortal: boolean; governanceAdmin: boolean }>;
@@ -213,11 +207,11 @@ type Authenticated = {
 
 /**
  * Steps 1–6 of the decision, shared by the tier guard and by
- * `authenticatePrivilegedPrincipal`: credential extraction (SP-5), verification
- * of EVERY presented credential (A-2), one principal (SP-4), ONE live read
- * (SP-1), account state, revocation of every presented credential against the
- * snapshot, and the held tiers derived from that same snapshot.
- * Bearer-only for every tier since ZCA L-8 (it was SYSTEM_ADMIN only — D5).
+ * `authenticatePrivilegedPrincipal`: bearer extraction (SP-5), verification
+ * (A-2), one principal (SP-4), ONE live read (SP-1), account state, revocation
+ * of the bearer against the snapshot, and the held tiers derived from that same
+ * snapshot. Bearer-only for every tier since ZCA L-8 (it was SYSTEM_ADMIN only —
+ * D5); since ZCA P3 R2 the cookie is not even read, so it cannot veto either.
  */
 async function authenticate(
   request: NextRequest
@@ -233,49 +227,27 @@ async function authenticate(
     return { ok: false, decision: deny503("auth_unavailable"), errorCode: "project_id_unavailable" };
   }
 
-  // Step 2. Credential extraction. Presence is decided per slot, before any
-  // verification, so a failing slot can never be silently skipped. A cookie
-  // that EXISTS (even with an empty value) is a presented credential, by the
-  // same SP-5 rule as the header.
+  // Step 2. Credential extraction: the bearer only. With no Authorization header the answer is the
+  // anonymous one — nothing is verified and no live read happens.
   const bearerSlot = extractBearer(request);
-  const cookieRaw = request.cookies.get(SESSION_COOKIE)?.value;
-  const cookiePresent = cookieRaw !== undefined;
-
-  // ZCA L-8: EVERY tier (and authenticatePrivilegedPrincipal, i.e. governance) is bearer-only. With no
-  // bearer the answer is the anonymous one — the cookie is not verified and no live read happens. A
-  // cookie sent WITH a bearer is still verified below, so a mismatched or invalid cookie refuses.
-  // (Before L-8 only SYSTEM_ADMIN was bearer-only — D5, `cookie_not_accepted_for_tier`.)
   if (!bearerSlot.present) return { ok: false, decision: deny401("missing_credentials") };
 
-  // Step 3. Verify EVERY presented credential (structure, then signature /
-  // expiry via the SDK — see privilegedCredentialAdapter.ts).
-  const bearer: CredentialOutcome = !bearerSlot.present
-    ? { present: false }
-    : bearerSlot.token === null
+  // Step 3. Verify the bearer (structure, then signature / expiry via the SDK — see
+  // privilegedCredentialAdapter.ts).
+  const bearer: CredentialOutcome =
+    bearerSlot.token === null
       ? { present: true, ok: false, unavailable: false, errorCode: "malformed_authorization_header" }
-      : await verifyCredential("bearer", bearerSlot.token, auth, projectId);
-  const cookie: CredentialOutcome = !cookiePresent
-    ? { present: false }
-    : cookieRaw === ""
-      ? { present: true, ok: false, unavailable: false, errorCode: "empty_session_cookie" }
-      : await verifyCredential("cookie", cookieRaw, auth, projectId);
-
-  const presented = [bearer, cookie].filter((c): c is Exclude<CredentialOutcome, { present: false }> => c.present);
-  const failed = presented.filter((c): c is Extract<CredentialOutcome, { ok: false }> => !c.ok);
-  if (failed.length > 0) {
-    const unavailable = failed.find((f) => f.unavailable);
-    if (unavailable) return { ok: false, decision: deny503("auth_unavailable"), errorCode: unavailable.errorCode };
+      : await verifyBearer(bearerSlot.token, auth, projectId);
+  if (!bearer.present) return { ok: false, decision: deny401("missing_credentials") }; // unreachable; fail closed
+  if (!bearer.ok) {
+    if (bearer.unavailable) return { ok: false, decision: deny503("auth_unavailable"), errorCode: bearer.errorCode };
     return { ok: false, decision: deny401("invalid_credential") };
   }
-  const verified = presented.map((c) => (c as Extract<CredentialOutcome, { ok: true }>).value);
-  // SP-4 / SP-5: one principal. Two valid credentials for different uids fail.
-  const uid = verified[0].uid;
-  if (verified.some((v) => v.uid !== uid)) return { ok: false, decision: deny401("credential_mismatch") };
-  for (const v of verified) {
-    if (!validAuthTime(v.authTime)) return { ok: false, decision: deny401("invalid_credential") };
-  }
-  const primary = bearer.present ? (bearer as Extract<CredentialOutcome, { ok: true }>).value : verified[0];
-  const credential: "bearer" | "cookie" = bearer.present ? "bearer" : "cookie";
+  // SP-4: one principal — the bearer's.
+  const primary = bearer.value;
+  const uid = primary.uid;
+  if (!validAuthTime(primary.authTime)) return { ok: false, decision: deny401("invalid_credential") };
+  const credential = "bearer" as const;
 
   // Step 4. EXACTLY ONE live read.
   const live = await readLiveAuthSnapshot(uid);
@@ -297,11 +269,9 @@ async function authenticate(
   // is proof that the account is usable.
   if (snapshot.disabled !== false) return { ok: false, decision: deny401("account_disabled") };
 
-  // Step 6. Revocation, from the snapshot, for every presented credential.
-  for (const v of verified) {
-    if (revokedBySnapshot(v.authTime as number, snapshot.tokensValidAfterTime)) {
-      return { ok: false, decision: deny401("credential_revoked") };
-    }
+  // Step 6. Revocation of the bearer, from the snapshot.
+  if (revokedBySnapshot(primary.authTime as number, snapshot.tokensValidAfterTime)) {
+    return { ok: false, decision: deny401("credential_revoked") };
   }
 
   // Step 7a. Tiers held, from the snapshot. The token claim is NOT read here.
@@ -383,14 +353,12 @@ export async function requirePrivilegedAccess(
  *
  * For the mixed-audience governance handlers, whose audience is not one tier
  * (Governance Admin OR assigned reviewer OR full plan OR self-service). Runs
- * exactly the guard's steps 1–6 — SP-5 credential handling (no slot ever falls
- * back to the other), A-2 classification (verifier / lookup outage is 503,
- * never a grant), one principal, ONE live read, `disabled === false`, and
- * revocation of every presented credential against the live
+ * exactly the guard's steps 1–6 — SP-5 bearer handling, A-2 classification
+ * (verifier / lookup outage is 503, never a grant), one principal, ONE live
+ * read, `disabled === false`, and revocation of the bearer against the live
  * `tokensValidAfterTime` — and reports the tiers held in that same snapshot.
  * It makes no tier decision: the caller decides scope from `heldTiers`.
- * Cookie and bearer are both accepted (the SYSTEM_ADMIN bearer-only rule does
- * not apply: no SYSTEM_ADMIN capability is reachable through this result).
+ * Bearer only, like every tier (ZCA L-8; the cookie is never read, P3 R2).
  * Never throws; any unexpected failure is 503.
  */
 export type AuthenticatedPrincipal = Readonly<{
@@ -398,7 +366,8 @@ export type AuthenticatedPrincipal = Readonly<{
   heldTiers: Readonly<{ systemAdmin: boolean; adminPortal: boolean; governanceAdmin: boolean }>;
   email: string;
   emailVerified: boolean;
-  credential: "bearer" | "cookie";
+  /** Always "bearer" (ZCA P3 R2). */
+  credential: "bearer";
   authTime: number;
 }>;
 export type PrincipalDenial = Extract<PrivilegedDenial, { status: 401 } | { status: 503 }>;

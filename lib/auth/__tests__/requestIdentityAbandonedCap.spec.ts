@@ -12,12 +12,8 @@
 
 import { NextRequest } from "next/server";
 
-const mockVerifySessionCookie = jest.fn();
 const mockVerifyIdToken = jest.fn();
 const mockWarn = jest.fn();
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: (...args: unknown[]) => mockVerifySessionCookie(...args),
-}));
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
 }));
@@ -50,16 +46,13 @@ async function fillCapWithHungRequests(): Promise<void> {
   expect(abandonedAuthVerificationsInFlight()).toBe(MAX_INFLIGHT_AUTH_VERIFICATIONS);
   expect(authVerificationsInFlight()).toBe(MAX_INFLIGHT_AUTH_VERIFICATIONS);
   mockVerifyIdToken.mockReset();
-  mockVerifySessionCookie.mockReset();
   mockWarn.mockReset();
 }
 
 beforeEach(() => {
   jest.useFakeTimers();
-  mockVerifySessionCookie.mockReset();
   mockVerifyIdToken.mockReset();
   mockWarn.mockReset();
-  mockVerifySessionCookie.mockResolvedValue(null);
 });
 afterEach(async () => {
   for (const r of releasers.splice(0)) r({ uid: "late" });
@@ -83,19 +76,16 @@ it("at the cap, a bearer request fails fast (no deadline wait) and the verifier 
   expect(JSON.stringify(mockWarn.mock.calls)).not.toContain("fresh");
 });
 
-it("ZCA L-8: at the cap, a cookie-only request is the anonymous answer — it takes no slot and the cookie verifier is NEVER called", async () => {
+it("ZCA L-8: at the cap, a cookie-only request is the anonymous answer — it takes no slot and nothing is verified", async () => {
   await fillCapWithHungRequests();
-  mockVerifySessionCookie.mockResolvedValue({ uid: "would-be-valid", isAdmin: false });
   expect(await resolveRequestIdentity(req({ cookie: "c" }))).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
-  expect(mockVerifySessionCookie).not.toHaveBeenCalled();
+  expect(mockVerifyIdToken).not.toHaveBeenCalled();
 });
 
-it("at the cap, cookie + bearer fails fast with no verifier call and no fallback to either credential", async () => {
+it("at the cap, cookie + bearer fails fast exactly as the bearer alone: no verifier call, the cookie is never a fallback", async () => {
   await fillCapWithHungRequests();
-  mockVerifySessionCookie.mockResolvedValue({ uid: "u1", isAdmin: false });
   mockVerifyIdToken.mockResolvedValue({ uid: "u1" });
   expect(await resolveRequestIdentity(req({ cookie: "c", bearer: "t" }))).toEqual(UNAVAILABLE);
-  expect(mockVerifySessionCookie).not.toHaveBeenCalled();
   expect(mockVerifyIdToken).not.toHaveBeenCalled();
 });
 

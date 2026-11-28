@@ -37,7 +37,7 @@ const found = (over: Record<string, unknown> = {}) => ({ status: "found", projec
 beforeEach(() => jest.clearAllMocks());
 
 describe("identity", () => {
-  it.each(["missing_credentials", "invalid_bearer_token", "credential_mismatch", "revoked_session"])("%s → 401, nothing looked up", async (reason) => {
+  it.each(["missing_credentials", "invalid_bearer_token", "revoked_session", "expired_session"])("%s → 401, nothing looked up", async (reason) => {
     mockResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason });
     expect((await call()).status).toBe(401);
     expect(mockResolveWorkspaceAccess).not.toHaveBeenCalled();

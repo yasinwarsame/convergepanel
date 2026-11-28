@@ -13,11 +13,7 @@
  * this migration (confirmed separately via `git diff`).
  */
 
-const mockVerifySessionCookie = jest.fn();
 const mockVerifyIdToken = jest.fn();
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  verifySessionCookie: (...args: unknown[]) => mockVerifySessionCookie(...args),
-}));
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
 }));
@@ -47,7 +43,6 @@ function buildRequest(opts: { cookie?: string; authHeader?: string; body?: unkno
 }
 
 beforeEach(() => {
-  mockVerifySessionCookie.mockReset();
   mockVerifyIdToken.mockReset();
   mockCheckRateLimit.mockReset();
   mockLoggerWarn.mockReset();
@@ -59,53 +54,46 @@ beforeEach(() => {
 
 describe("POST /api/verify-claim — auth boundary", () => {
   it("no credentials -> 401, business logic never reached", async () => {
-    mockVerifySessionCookie.mockResolvedValue(null);
     const res = await POST(buildRequest());
     expect(res.status).toBe(401);
     expect(mockCheckRateLimit).not.toHaveBeenCalled();
   });
 
   it("ZCA L-8: valid cookie only -> 401 (the anonymous answer); the cookie is never verified and business logic is never reached", async () => {
-    mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
     const res = await POST(buildRequest({ cookie: "__session=valid" }));
     expect(res.status).toBe(401);
-    expect(mockVerifySessionCookie).not.toHaveBeenCalled();
     expect(mockCheckRateLimit).not.toHaveBeenCalled();
   });
 
   it("valid bearer only -> passes auth gate, business logic reached with correct uid", async () => {
-    mockVerifySessionCookie.mockResolvedValue(null);
     mockVerifyIdToken.mockResolvedValue({ uid: "user-b" });
     const res = await POST(buildRequest({ authHeader: "Bearer valid-token" }));
     expect(res.status).toBe(429);
     expect(mockCheckRateLimit).toHaveBeenCalledWith(expect.objectContaining({ identifier: "verify-claim:user-b" }));
   });
 
-  it("matching valid cookie + bearer -> passes auth gate", async () => {
-    mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+  it("a same-uid cookie beside the bearer -> passes the auth gate as the bearer alone", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "user-a" });
     const res = await POST(buildRequest({ cookie: "__session=valid", authHeader: "Bearer valid-token" }));
     expect(res.status).toBe(429);
     expect(mockCheckRateLimit).toHaveBeenCalledWith(expect.objectContaining({ identifier: "verify-claim:user-a" }));
   });
 
-  it("REGRESSION (root cause): mismatched valid cookie + bearer -> 401, business logic never reached, neither identity is silently used", async () => {
-    mockVerifySessionCookie.mockResolvedValue({ uid: "stale-previous-user", isAdmin: false });
+  it("REGRESSION (root cause), ZCA P3 R2 form: a stale cookie for a PREVIOUS user beside a fresh bearer -> the gate passes as the BEARER's uid; the cookie identity is never used", async () => {
     mockVerifyIdToken.mockResolvedValue({ uid: "fresh-current-user" });
     const res = await POST(buildRequest({ cookie: "__session=stale", authHeader: "Bearer fresh-token" }));
-    expect(res.status).toBe(401);
-    expect(mockCheckRateLimit).not.toHaveBeenCalled();
+    expect(res.status).toBe(429);
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(expect.objectContaining({ identifier: "verify-claim:fresh-current-user" }));
+    expect(JSON.stringify(mockCheckRateLimit.mock.calls)).not.toContain("stale-previous-user");
   });
 
   it("invalid cookie only -> 401, business logic never reached (does not silently fall through)", async () => {
-    mockVerifySessionCookie.mockRejectedValue(new Error("malformed cookie"));
     const res = await POST(buildRequest({ cookie: "__session=garbage" }));
     expect(res.status).toBe(401);
     expect(mockCheckRateLimit).not.toHaveBeenCalled();
   });
 
   it("invalid bearer only -> 401, business logic never reached (does not silently fall through)", async () => {
-    mockVerifySessionCookie.mockResolvedValue(null);
     mockVerifyIdToken.mockRejectedValue(new Error("malformed token"));
     const res = await POST(buildRequest({ authHeader: "Bearer garbage" }));
     expect(res.status).toBe(401);
@@ -113,8 +101,8 @@ describe("POST /api/verify-claim — auth boundary", () => {
   });
 
   it("auth failure response never leaks a raw verification error", async () => {
-    mockVerifySessionCookie.mockRejectedValue(new Error("internal Firebase Admin SDK detail that must never reach the client"));
-    const res = await POST(buildRequest({ cookie: "__session=garbage" }));
+    mockVerifyIdToken.mockRejectedValue(new Error("internal Firebase Admin SDK detail that must never reach the client"));
+    const res = await POST(buildRequest({ cookie: "__session=garbage", authHeader: "Bearer garbage" }));
     const body = await res.json();
     expect(JSON.stringify(body)).not.toMatch(/internal Firebase Admin SDK detail/);
     expect(body).toEqual({ ok: false, errorCode: "unauthorized", message: "Please sign in to verify a claim." });

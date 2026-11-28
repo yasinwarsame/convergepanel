@@ -3,11 +3,12 @@
  * per-instance HARD cap on upstream verification calls IN FLIGHT (started and
  * not yet settled, including those abandoned at the deadline). Shared by
  * `resolveRequestIdentity()` (every request-identity route) and the session
- * mint (`POST /api/auth/session`).
+ * verification handshake (`POST /api/auth/session`; the site keeps its
+ * historical name `session_mint` for telemetry continuity — nothing is minted).
  *
  * Why a deadline: with `checkRevoked`, firebase-admin 12.7.0 makes a live
- * Identity Toolkit `getUser` read (and the session mint then makes a second
- * call, `createSessionCookie`). If that service accepts the connection and
+ * Identity Toolkit `getUser` read (the retired session-cookie mint used to make
+ * a second call). If that service accepts the connection and
  * never answers, the SDK makes 5 attempts (defaultRetryConfig: 4 retries on
  * ETIMEDOUT/ECONNRESET/503) at its fixed 25 s request timeout — about 132 s —
  * and a 503 carrying `Retry-After` can stretch each wait to 60 s. The SDK
@@ -82,11 +83,11 @@
  * time). Measured against a local hanging HTTP server with firebase-admin
  * 12.7.0's own HttpClient (PR #332 R6 notes), two upstream behaviours never let
  * a call settle on their own:
- *   - an Identity Toolkit call (getUser / createSessionCookie) whose server
+ *   - an Identity Toolkit call (getUser) whose server
  *     drips bytes: the SDK's 25 s timeout is an IDLE timeout, re-armed by every
  *     byte, so the request never times out;
- *   - the Google public-key fetch (verifyIdToken / verifySessionCookie
- *     signature check, UrlKeyFetcher): the SDK sets NO timeout on it at all, so
+ *   - the Google public-key fetch (verifyIdToken signature check,
+ *     UrlKeyFetcher): the SDK sets NO timeout on it at all, so
  *     even a silent server holds it until the OS drops the connection (by
  *     code reading, the service-account access-token fetch likewise sets none).
  * Calls answered with errors, or a server that goes silent on an Identity

@@ -75,7 +75,7 @@ describe("POST /api/user/workspace — auth", () => {
   });
 
   it("401s on any other auth failure reason too", async () => {
-    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "credential_mismatch" });
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "invalid_bearer_token" });
     const { res } = await callRoute();
     expect(res.status).toBe(401);
   });

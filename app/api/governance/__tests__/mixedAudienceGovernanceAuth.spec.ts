@@ -145,7 +145,7 @@ describe.each(ROUTES)("$name — authentication matrix", ({ call }) => {
     expectNothingReached();
   });
 
-  it("revoked bearer + FRESH same-uid cookie -> 401 (no silent fallback to the cookie)", async () => {
+  it("revoked bearer + FRESH same-uid cookie -> 401 (the cookie is never read, so it cannot rescue the bearer)", async () => {
     const me = signInAs("ordinary", { record: revokedRecord });
     const fresh = mintCredential("cookie", REVIEWER_UID);
     authState.cookies.set(fresh, { uid: REVIEWER_UID, sub: REVIEWER_UID, auth_time: AUTH_TIME + 120 });
@@ -175,18 +175,19 @@ describe.each(ROUTES)("$name — authentication matrix", ({ call }) => {
     }
   );
 
-  it("malformed bearer beside a valid cookie -> 401 (no fallback)", async () => {
+  it("malformed bearer beside a valid cookie -> 401 (the cookie is never a fallback)", async () => {
     const me = signInAs("ordinary");
     await expectAuthDenied(await call({ authorization: "Bearer not-a-jws", cookie: me.cookie }), 401);
     expectNothingReached();
   });
 
-  it("conflicting bearer / cookie uids -> 401, neither account read", async () => {
+  it("ZCA P3 R2 (inverted from the conflict veto): a cookie for ANOTHER uid beside the bearer is ignored — the bearer's own answer, only the bearer's account read", async () => {
     const me = signInAs("ordinary");
     const other = signInAs("governance");
-    await expectAuthDenied(await call({ bearer: me.bearer, cookie: other.cookie }), 401);
-    expect(authCalls.getUser).not.toHaveBeenCalled();
-    expectNothingReached();
+    const res = await call({ bearer: me.bearer, cookie: other.cookie });
+    expect(res.status).toBe(200);
+    expect(authCalls.getUser.mock.calls[0]).toEqual([REVIEWER_UID]);
+    expect(authCalls.getUser.mock.calls.some((c) => c[0] === other.uid)).toBe(false);
   });
 
   it("verifier outage -> 503, never a grant", async () => {
@@ -562,7 +563,7 @@ describe("F-3 — scope is evaluated for the authenticated uid, never a request-
   it.each([
     ["absent credentials", () => ({})],
     ["malformed bearer", () => ({ authorization: "Bearer not-a-jws" })],
-    ["mismatched bearer (A) / cookie (B)", () => ({ bearer: signInAs("ordinary", A).bearer, cookie: signInAs("governance").cookie })],
+    ["the governance admin's cookie alone (ZCA L-8)", () => ({ cookie: signInAs("governance").cookie })],
   ] as Array<[string, () => Credentials]>)("%s: 401 on every handler and NO scope evaluation for any uid", async (_n, creds) => {
     const c = creds();
     for (const r of ROUTES) expect([r.name, (await r.call(c)).status]).toEqual([r.name, 401]);

@@ -118,7 +118,6 @@ beforeAll(async () => {
   };
   mockState.auth = {
     verifyIdToken: (t: string, c?: boolean) => record(real.verifyIdToken(t, c)),
-    verifySessionCookie: (t: string, c?: boolean) => record(real.verifySessionCookie(t, c)),
   };
 });
 
@@ -184,7 +183,10 @@ it("Identity Toolkit HANGS: bearer and cookie+bearer — each auth_unavailable a
   expect(cookieOnly.value).toEqual({ status: "unauthenticated", reason: "missing_credentials" });
   expect(cookieOnly.ms).toBeLessThan(DEADLINE / 2);
   expect(lookupsOf("h2")).toBe(0);
-  expect(lookupsOf("h1", "h2", "h3")).toBe(3); // the SDK really was waiting on the stub: one hung lookup per verified credential
+  // The SDK really was waiting on the stub: one hung lookup per verified credential. ZCA P3 R2: the cookie beside
+  // the h3 bearer is never verified, so h3 makes ONE lookup (it made two while the cookie was a slot).
+  expect(lookupsOf("h3")).toBe(1);
+  expect(lookupsOf("h1", "h2", "h3")).toBe(2);
   process.stdout.write(`\nBENCH deadline-hang: ${[bearerOnly, cookieOnly, both].map((r) => r.ms).join(",")}ms lookups=${lookupsOf("h1", "h2", "h3")}\n`);
 }, 30_000);
 

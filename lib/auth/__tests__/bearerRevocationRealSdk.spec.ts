@@ -1,6 +1,6 @@
 /**
  * BEARERREV — resolveRequestIdentity through the REAL lib/firebase/auth.ts,
- * lib/firebase/auth-helpers.ts and the REAL firebase-admin 12.x BaseAuth
+ * and the REAL firebase-admin 12.x BaseAuth
  * prototype. Only the network edges are stubbed: the JWT verifiers
  * (signature / expiry — they decode the synthetic token's own payload) and
  * `getUser` (the live Auth record). If the bearer path dropped checkRevoked,
@@ -125,26 +125,25 @@ describe("bearer only", () => {
   });
 });
 
-describe("dual-credential rules are unchanged (parity matrix)", () => {
+describe("ZCA P3 R2: the cookie is not an input — every row is decided as the bearer alone (converted from the dual-credential parity matrix)", () => {
   const cases: Array<[string, { bearer?: string; cookie?: string; rawAuth?: string }, unknown]> = [
     ["no credentials", {}, { status: "unauthenticated", reason: "missing_credentials" }],
-    // ZCA L-8: a cookie ALONE is the anonymous answer, whatever its state (it is not verified at all).
-    ["cookie valid only → missing_credentials (ZCA L-8)", { cookie: token("valid") }, { status: "unauthenticated", reason: "missing_credentials" }],
-    ["cookie revoked only → missing_credentials (ZCA L-8)", { cookie: token("revoked") }, { status: "unauthenticated", reason: "missing_credentials" }],
-    ["cookie A + bearer A (both valid)", { cookie: token("valid"), bearer: token("valid") }, { status: "authenticated", uid: "valid", source: "matching_cookie_and_bearer" }],
-    ["cookie A + bearer B (both valid) → mismatch", { cookie: token("valid"), bearer: token("valid2") }, { status: "unauthenticated", reason: "credential_mismatch" }],
-    ["cookie valid + bearer revoked (same uid space) → bearer reason, no cookie fallback", { cookie: token("valid"), bearer: token("revoked") }, { status: "unauthenticated", reason: "revoked_session" }],
-    ["cookie revoked + bearer valid → cookie reason, no bearer fallback", { cookie: token("revoked"), bearer: token("valid") }, { status: "unauthenticated", reason: "revoked_session" }],
+    ["cookie valid only → missing_credentials", { cookie: token("valid") }, { status: "unauthenticated", reason: "missing_credentials" }],
+    ["cookie revoked only → missing_credentials", { cookie: token("revoked") }, { status: "unauthenticated", reason: "missing_credentials" }],
+    ["cookie A + bearer A → authenticated via the bearer", { cookie: token("valid"), bearer: token("valid") }, { status: "authenticated", uid: "valid", source: "bearer_token" }],
+    ["cookie A + bearer B → authenticated as B (no veto)", { cookie: token("valid"), bearer: token("valid2") }, { status: "authenticated", uid: "valid2", source: "bearer_token" }],
+    ["cookie valid + bearer revoked → the bearer's reason (no cookie rescue)", { cookie: token("valid"), bearer: token("revoked") }, { status: "unauthenticated", reason: "revoked_session" }],
+    ["cookie revoked + bearer valid → authenticated via the bearer (no veto)", { cookie: token("revoked"), bearer: token("valid") }, { status: "authenticated", uid: "valid", source: "bearer_token" }],
     ["cookie valid + bearer disabled → unauthenticated", { cookie: token("valid"), bearer: token("disabled") }, { status: "unauthenticated", reason: "invalid_bearer_token" }],
     ["cookie valid + malformed Authorization header → unauthenticated", { cookie: token("valid"), rawAuth: "Basic abc" }, { status: "unauthenticated", reason: "invalid_bearer_token" }],
-    ["cookie disabled + bearer disabled → cookie reason", { cookie: token("disabled"), bearer: token("disabled") }, { status: "unauthenticated", reason: "invalid_session_cookie" }],
+    ["cookie disabled + bearer disabled → the bearer's reason", { cookie: token("disabled"), bearer: token("disabled") }, { status: "unauthenticated", reason: "invalid_bearer_token" }],
   ];
   it.each(cases)("%s", async (_n, opts, expected) => {
     await expect(resolveRequestIdentity(req(opts))).resolves.toEqual(expected);
   });
 });
 
-describe("dual-credential rules under a verifier OUTAGE (fail closed; no fallback to the other credential)", () => {
+describe("under a verifier OUTAGE (fail closed; the cookie is never a fallback and never verified)", () => {
   const OUT = "app/network-error";
   it("ANCHOR: the outage hook still delegates to the real SDK check when no outage is set", async () => {
     await expect(resolveRequestIdentity(req({ bearer: token("revoked") }))).resolves.toEqual({ status: "unauthenticated", reason: "revoked_session" });
@@ -153,9 +152,9 @@ describe("dual-credential rules under a verifier OUTAGE (fail closed; no fallbac
     mockOutage.bearer = OUT;
     await expect(resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
   });
-  it("cookie outage + bearer valid → unauthenticated auth_unavailable (never authenticated via the bearer)", async () => {
+  it("ZCA P3 R2 (inverted): a cookie whose verification WOULD be an outage + bearer valid → authenticated via the bearer (the cookie is never verified)", async () => {
     mockOutage.cookie = OUT;
-    await expect(resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: "auth_unavailable" });
+    await expect(resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }))).resolves.toEqual({ status: "authenticated", uid: "valid", source: "bearer_token" });
   });
   it("both outage → unauthenticated auth_unavailable", async () => {
     mockOutage.cookie = OUT;
@@ -190,17 +189,18 @@ describe("transient classification is EXACT-match (near-miss codes are credentia
   });
 });
 
-describe("cookie and bearer live reads run concurrently (latency: one Auth round trip, not two)", () => {
-  it("both getUser calls are issued before either resolves", async () => {
+describe("ZCA P3 R2 (converted from the concurrent dual live read): a cookie + bearer request makes exactly ONE live read", () => {
+  it("only the bearer's getUser is issued", async () => {
     const pending: Array<() => void> = [];
     mockGetUser.mockImplementation(
       (uid: string) => new Promise((resolve) => pending.push(() => resolve(mockUsers.get(uid))))
     );
     const p = resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }));
-    for (let i = 0; i < 50 && pending.length < 2; i++) await new Promise((r) => setImmediate(r));
-    expect(pending.length).toBe(2); // sequential evaluation would have issued only the cookie's read here
+    for (let i = 0; i < 50 && pending.length < 1; i++) await new Promise((r) => setImmediate(r));
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+    expect(pending.length).toBe(1);
     pending.forEach((release) => release());
-    await expect(p).resolves.toEqual({ status: "authenticated", uid: "valid", source: "matching_cookie_and_bearer" });
+    await expect(p).resolves.toEqual({ status: "authenticated", uid: "valid", source: "bearer_token" });
   });
 });
 
@@ -216,10 +216,11 @@ describe("R4 — Auth getUser lookups per request type (availability / quota cos
     ["no credentials", {}, 0],
     ["bearer only", { bearer: token("valid") }, 1],
     ["cookie only (ZCA L-8: never verified, no live read)", { cookie: token("valid") }, 0],
-    ["cookie + bearer, same uid", { cookie: token("valid"), bearer: token("valid") }, 2],
-    ["cookie A + bearer B (mismatch)", { cookie: token("valid"), bearer: token("valid2") }, 2],
-    ["cookie + EXPIRED bearer (expiry fails before the live read)", { cookie: token("valid"), bearer: token("valid", { exp: NOW - 10 }) }, 1],
-    ["cookie + malformed Authorization header (never reaches the SDK)", { cookie: token("valid"), rawAuth: "Basic abc" }, 1],
+    // ZCA P3 R2: the cookie adds no lookup (it is never verified).
+    ["cookie + bearer, same uid", { cookie: token("valid"), bearer: token("valid") }, 1],
+    ["cookie A + bearer B", { cookie: token("valid"), bearer: token("valid2") }, 1],
+    ["cookie + EXPIRED bearer (expiry fails before the live read)", { cookie: token("valid"), bearer: token("valid", { exp: NOW - 10 }) }, 0],
+    ["cookie + malformed Authorization header (never reaches the SDK)", { cookie: token("valid"), rawAuth: "Basic abc" }, 0],
     ["undecodable bearer only", { bearer: "not-a-jwt" }, 0],
   ];
   it.each(cases)("%s → %p lookup(s)", async (_n, opts, expected) => {

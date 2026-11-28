@@ -9,7 +9,8 @@
  * privileged-access guard's own authentication without a tier decision, so the
  * same truth table holds, PLUS revocation of every presented credential against
  * the live record and 503 (never 401, never a grant) on a verifier or lookup
- * outage.
+ * outage. ZCA P3 R2: the cookie is never read — every cookie-bearing case
+ * below is decided exactly as the same request without the cookie.
  *
  * Doubles live only at the Admin SDK boundary (shared privileged harness).
  */
@@ -76,10 +77,10 @@ describe("resolveGovernanceRequestUser — credential truth table (SP-5)", () =>
     expect(r).toMatchObject({ ok: true, uid: A });
   });
 
-  it("REGRESSION (Step 7.15 root cause): mismatched valid cookie + bearer -> 401, neither identity used", async () => {
+  it("ZCA P3 R2 (inverted from the Step 7.15 veto): a valid cookie for A beside a valid bearer for B -> ok as B; the cookie identity is never used", async () => {
     const r = await resolveGovernanceRequestUser(req({ cookie: cred("cookie", A), bearer: cred("bearer", B) }));
-    expect(r).toEqual({ ok: false, status: 401 });
-    expect(authCalls.getUser).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ ok: true, uid: B });
+    expect(authCalls.getUser.mock.calls).toEqual([[B]]);
   });
 
   it("invalid cookie only -> 401", async () => {
@@ -103,9 +104,9 @@ describe("resolveGovernanceRequestUser — credential truth table (SP-5)", () =>
     expect(r).toEqual({ ok: false, status: 401 });
   });
 
-  it("an empty __session cookie beside a valid bearer is a presented credential that failed -> 401", async () => {
+  it("ZCA P3 R2 (inverted): an empty __session cookie beside a valid bearer is not a credential -> ok, as without it", async () => {
     const r = await resolveGovernanceRequestUser(req({ cookie: "", bearer: cred("bearer", A) }));
-    expect(r).toEqual({ ok: false, status: 401 });
+    expect(r).toMatchObject({ ok: true, uid: A });
   });
 });
 
@@ -121,12 +122,12 @@ describe("live record: deletion, disablement, revocation", () => {
 
   const cutoff = (secondsAfterAuth: number) => new Date((AUTH_TIME + secondsAfterAuth) * 1000).toUTCString();
 
-  it.each(["bearer", "cookie"] as const)("%s issued BEFORE tokensValidAfterTime -> 401", async (kind) => {
+  it("a bearer issued BEFORE tokensValidAfterTime -> 401", async () => {
     record(A, { tokensValidAfterTime: cutoff(60) });
-    await expect(resolveGovernanceRequestUser(req({ [kind]: cred(kind, A) }))).resolves.toEqual({ ok: false, status: 401 });
+    await expect(resolveGovernanceRequestUser(req({ bearer: cred("bearer", A) }))).resolves.toEqual({ ok: false, status: 401 });
   });
 
-  it("revoked bearer + fresh same-uid cookie -> 401 (every presented credential is checked)", async () => {
+  it("revoked bearer + fresh same-uid cookie -> 401 (the cookie cannot rescue a revoked bearer)", async () => {
     record(A, { tokensValidAfterTime: cutoff(60) });
     const freshCookie = cred("cookie", A, { auth_time: AUTH_TIME + 120 });
     await expect(resolveGovernanceRequestUser(req({ bearer: cred("bearer", A), cookie: freshCookie }))).resolves.toEqual({ ok: false, status: 401 });
@@ -143,7 +144,6 @@ describe("live record: deletion, disablement, revocation", () => {
     record(A);
     await resolveGovernanceRequestUser(req({ bearer: cred("bearer", A), cookie: cred("cookie", A) }));
     expect(authCalls.verifyIdToken.mock.calls.map((c) => c[1])).toEqual([false]);
-    expect(authCalls.verifySessionCookie.mock.calls.map((c) => c[1])).toEqual([false]);
     expect(authCalls.getUser.mock.calls).toEqual([[A]]);
   });
 });
@@ -155,9 +155,9 @@ describe("outage is 503, never a grant and never a silent 401 (A-2 / SP-2)", () 
     expect(authCalls.getUser).not.toHaveBeenCalled();
   });
 
-  it("verifier outage on the cookie (presented beside a valid bearer) -> 503", async () => {
+  it("ZCA P3 R2 (inverted): a cookie whose verification WOULD be an outage, beside a valid bearer -> ok (the cookie is never verified)", async () => {
     record(A);
-    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A, outage()), bearer: cred("bearer", A) }))).resolves.toEqual({ ok: false, status: 503 });
+    await expect(resolveGovernanceRequestUser(req({ cookie: cred("cookie", A, outage()), bearer: cred("bearer", A) }))).resolves.toMatchObject({ ok: true, uid: A });
   });
 
   it("getUser outage -> 503", async () => {
