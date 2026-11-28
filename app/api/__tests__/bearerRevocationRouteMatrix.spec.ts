@@ -341,10 +341,10 @@ describe.each(ROUTES)("$name", ({ kind, call, reached, body, lookups }) => {
     await run(call, req(token("valid"), body));
     expect(mockGetUser).toHaveBeenCalledTimes(lookups);
   });
-  it("LOOKUP COUNT: cookie + bearer for the same uid → the same success, one more getUser read on resolveRequestIdentity routes", async () => {
+  it("LOOKUP COUNT (ZCA P3 R2, converted): cookie + bearer for the same uid → the same success and EXACTLY the bearer-only lookups on every route (the cookie is never verified)", async () => {
     const r = await run(call, req(token("valid"), body, cookieToken("valid")));
     reached(r);
-    expect(mockGetUser).toHaveBeenCalledTimes(kind === "s2b" ? lookups : lookups + 1);
+    expect(mockGetUser).toHaveBeenCalledTimes(lookups);
   });
   it.each(["revoked", "disabled"])("%s bearer (same seeded authority) → 401, no data touched, no write, no action, no further lookup", async (id) => {
     const r = await run(call, req(token(id), body));

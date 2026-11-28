@@ -690,16 +690,3 @@ export const TRANSACTIONAL_EMAIL_FROM = process.env.TRANSACTIONAL_EMAIL_FROM;
  */
 export const APP_BASE_URL = process.env.APP_BASE_URL;
 
-
-/**
- * ZCA P3 R2 L-2 — the Vercel system environment variables that name THIS deployment's own hosts
- * (host names, no scheme): `VERCEL_URL` (the unique deployment URL) and `VERCEL_BRANCH_URL` (the
- * git-branch alias). Both are set by the platform, never by a request. Read at call time, not at
- * import time. Sole consumer: the session verification handshake's allowed-origin set
- * (app/api/auth/session/route.ts).
- */
-export function getVercelDeploymentHosts(): readonly string[] {
-  return [process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL]
-    .filter((h): h is string => typeof h === "string" && h.trim() !== "")
-    .map((h) => h.trim());
-}

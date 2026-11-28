@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminAuth as firebaseAdminAuth } from "@/lib/firebase/admin";
 import { logAuthSessionEvent } from "@/lib/authTelemetry";
 import { logger } from "@/lib/logger";
-import { getVercelDeploymentHosts } from "@/lib/env";
+import { getVercelDeploymentHosts } from "@/lib/auth/vercelDeploymentHosts";
 import { startVerificationDeadline, type VerificationOutcome } from "@/lib/auth/authVerificationDeadline";
 import { isVerifierUnavailableCode } from "@/lib/auth/resolveRequestIdentity";
 
